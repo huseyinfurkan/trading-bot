@@ -28,7 +28,7 @@ try:
         log_dir.mkdir(parents=True, exist_ok=True)
         
         # Console logger
-    if console_output:
+        if console_output:
             logger.add(
                 sys.stdout,
                 level=level,
