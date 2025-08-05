@@ -103,6 +103,54 @@ class MarketAnalyzer:
             logger.error(f"❌ Piyasa analizi hatası: {e}")
             return self._fallback_analysis()
     
+    async def analyze_market_condition(self, symbol: str) -> Dict[str, Any]:
+        """Belirli bir sembol için market koşulunu analiz et"""
+        try:
+            # Get general market analysis
+            general_analysis = await self.analyze_current_market()
+            
+            # Get specific symbol data
+            market_data = await self._fetch_market_data()
+            symbol_data = market_data.get(symbol) if market_data else None
+            
+            if symbol_data is not None:
+                # Specific symbol analysis
+                symbol_analysis = await self._analyze_symbol_condition(symbol, symbol_data)
+                
+                # Combine with general market
+                return {
+                    'symbol': symbol,
+                    'condition': symbol_analysis.get('trend', general_analysis.get('condition', 'unknown')),
+                    'strength': symbol_analysis.get('strength', general_analysis.get('strength', 0.5)),
+                    'volatility': symbol_analysis.get('volatility', general_analysis.get('volatility', 'normal')),
+                    'recommended_strategies': symbol_analysis.get('strategies', general_analysis.get('recommended_strategies', [])),
+                    'timestamp': datetime.now(),
+                    'confidence': symbol_analysis.get('confidence', general_analysis.get('confidence', 0.5))
+                }
+            else:
+                # Use general market analysis
+                return {
+                    'symbol': symbol,
+                    'condition': general_analysis.get('condition', 'unknown'),
+                    'strength': general_analysis.get('strength', 0.5),
+                    'volatility': general_analysis.get('volatility', 'normal'),
+                    'recommended_strategies': general_analysis.get('recommended_strategies', []),
+                    'timestamp': datetime.now(),
+                    'confidence': general_analysis.get('confidence', 0.5)
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ {symbol} market condition analiz hatası: {e}")
+            return {
+                'symbol': symbol,
+                'condition': 'unknown',
+                'strength': 0.5,
+                'volatility': 'normal',
+                'recommended_strategies': ['swing_trading'],
+                'timestamp': datetime.now(),
+                'confidence': 0.3
+            }
+    
     async def _fetch_market_data(self) -> Dict[str, pd.DataFrame]:
         """Gerçek piyasa verilerini çek"""
         try:

@@ -29,6 +29,7 @@ from src.core.database_manager import DatabaseManager
 from src.core.bot_coordinator import BotCoordinator
 from src.core.risk_manager import RiskManager
 from src.core.monitoring import MonitoringSystem
+from src.core.live_data_engine import LiveDataEngine
 
 # Trading modules
 from src.trading.exchange_manager import ExchangeManager
@@ -139,12 +140,22 @@ class AdvancedTradingBot:
                 self.db_manager
             )
             
+            # Live data engine
+            self.live_data_engine = LiveDataEngine(
+                exchange_manager=self.exchange_manager,
+                market_analyzer=self.market_analyzer,
+                ai_signal_filter=self.signal_filter,
+                strategy_engine=self.strategy_engine,
+                position_manager=self.position_manager,
+                risk_manager=self.risk_manager
+            )
+            
             # Bot coordinator
             self.bot_coordinator = BotCoordinator(
-                self.strategy_engine,
-                self.position_manager,
-                self.market_analyzer,
-                self.notification_manager
+                strategy_engine=self.strategy_engine,
+                position_manager=self.position_manager,
+                market_analyzer=self.market_analyzer,
+                notification_manager=self.notification_manager
             )
             
             # Monitoring sistemi
@@ -189,21 +200,32 @@ class AdvancedTradingBot:
                 f"⚡ Multi-strateji çalışıyor"
             )
             
-            # Ana döngü
+            # Start live data engine alongside traditional trading
+            live_data_task = asyncio.create_task(self.live_data_engine.start_live_analysis())
+            
+            # Ana döngü - Traditional trading + monitoring
             while self.running:
                 try:
-                    # Market durumunu analiz et
-                    market_condition = await self.market_analyzer.analyze_current_market()
+                    # Live engine status kontrolü
+                    live_status = self.live_data_engine.get_live_status()
                     
-                    # Her trading pair için işlem yap
-                    for pair in all_pairs:
-                        await self.process_trading_pair(pair, market_condition)
+                    # Her 5 dakikada bir status log
+                    if hasattr(self, '_last_status_log'):
+                        if (datetime.now() - self._last_status_log).seconds > 300:
+                            logger.info(f"🔥 Live Engine: {live_status['total_analyses']} analyses, "
+                                      f"{live_status['total_decisions']} decisions")
+                            self._last_status_log = datetime.now()
+                    else:
+                        self._last_status_log = datetime.now()
+                    
+                    # Position management
+                    await self.position_manager.update_trailing_stops()
                     
                     # Monitoring kontrolleri
                     await self.monitoring.check_performance()
                     
-                    # Kısa bekleme
-                    await asyncio.sleep(1)
+                    # Bekle (canlı sistem çalışıyor, daha az sıklık)
+                    await asyncio.sleep(30)
                     
                 except Exception as e:
                     logger.error(f"❌ Trading loop hatası: {e}")

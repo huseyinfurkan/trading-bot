@@ -756,3 +756,122 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"❌ Parameter optimization hatası: {e}")
             return {'error': str(e)}
+    
+    async def get_entry_signal(self, symbol: str, market_data: Dict, signals: Dict, strategy: str) -> Optional[Dict[str, Any]]:
+        """Giriş sinyali al"""
+        try:
+            if strategy not in self.config:
+                return None
+            
+            config = self.config[strategy]
+            
+            if strategy == 'scalping':
+                return await self._scalping_entry(symbol, market_data, signals, config)
+            elif strategy == 'swing_trading':
+                return await self._swing_trading_entry(symbol, market_data, signals, config)
+            elif strategy == 'trend_following':
+                return await self._trend_following_entry(symbol, market_data, signals, config)
+            elif strategy == 'mean_reversion':
+                return await self._mean_reversion_entry(symbol, market_data, signals, config)
+            else:
+                logger.warning(f"⚠️ Bilinmeyen strateji: {strategy}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Entry signal hatası: {e}")
+            return None
+    
+    async def get_exit_signal(self, symbol: str, market_data: Dict, signals: Dict, 
+                             position: Dict, strategy: str) -> Optional[Dict[str, Any]]:
+        """Çıkış sinyali al"""
+        try:
+            if strategy not in self.config:
+                return None
+            
+            config = self.config[strategy]
+            df = market_data.get('dataframe')
+            
+            if df is None or len(df) < 10:
+                return None
+            
+            current_price = market_data.get('close', df.iloc[-1]['close'])
+            entry_price = position['entry_price']
+            side = position['side']
+            
+            # Calculate current P&L
+            if side == 'BUY':
+                pnl_pct = (current_price - entry_price) / entry_price * 100
+            else:
+                pnl_pct = (entry_price - current_price) / entry_price * 100
+            
+            # Check for exit conditions based on strategy
+            if strategy == 'scalping':
+                # Quick exit for scalping
+                if abs(pnl_pct) > 0.5:  # 0.5% target for scalping
+                    return {
+                        'exit': True,
+                        'reason': 'SCALPING_TARGET',
+                        'pnl_pct': pnl_pct
+                    }
+            
+            elif strategy == 'swing_trading':
+                # Check swing exit signals
+                combined_signals = signals.get('signals', [])
+                
+                if side == 'BUY':
+                    sell_signals = [s for s in combined_signals if s.get('type') == 'SELL']
+                    if len(sell_signals) >= 2 or pnl_pct > 3.0:  # Strong sell signals or 3% profit
+                        return {
+                            'exit': True,
+                            'reason': 'SWING_EXIT',
+                            'pnl_pct': pnl_pct
+                        }
+                else:
+                    buy_signals = [s for s in combined_signals if s.get('type') == 'BUY']
+                    if len(buy_signals) >= 2 or pnl_pct > 3.0:  # Strong buy signals or 3% profit
+                        return {
+                            'exit': True,
+                            'reason': 'SWING_EXIT',
+                            'pnl_pct': pnl_pct
+                        }
+            
+            elif strategy == 'trend_following':
+                # Trend reversal detection
+                ema_21 = df['close'].ewm(span=21).mean().iloc[-1]
+                ema_50 = df['close'].ewm(span=50).mean().iloc[-1]
+                
+                if side == 'BUY' and current_price < ema_21:
+                    return {
+                        'exit': True,
+                        'reason': 'TREND_REVERSAL',
+                        'pnl_pct': pnl_pct
+                    }
+                elif side == 'SELL' and current_price > ema_21:
+                    return {
+                        'exit': True,
+                        'reason': 'TREND_REVERSAL',
+                        'pnl_pct': pnl_pct
+                    }
+            
+            elif strategy == 'mean_reversion':
+                # Mean reversion exit
+                sma_20 = df['close'].rolling(20).mean().iloc[-1]
+                
+                if side == 'BUY' and current_price >= sma_20:
+                    return {
+                        'exit': True,
+                        'reason': 'MEAN_REVERSION',
+                        'pnl_pct': pnl_pct
+                    }
+                elif side == 'SELL' and current_price <= sma_20:
+                    return {
+                        'exit': True,
+                        'reason': 'MEAN_REVERSION',
+                        'pnl_pct': pnl_pct
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Exit signal hatası: {e}")
+            return None

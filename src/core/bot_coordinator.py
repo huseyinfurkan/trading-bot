@@ -97,3 +97,18 @@ class BotCoordinator:
             
         except Exception as e:
             logger.error(f"❌ Pozisyon temizleme hatası: {e}")
+    
+    async def run(self) -> None:
+        """Bot'u çalıştır"""
+        try:
+            await self.start()
+            
+            # Keep running until stopped
+            while self.running:
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"❌ Bot run hatası: {e}")
+            raise
+        finally:
+            await self.stop()
