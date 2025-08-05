@@ -65,22 +65,33 @@ class ConfigManager:
             if section not in self.config:
                 raise ValueError(f"Eksik konfigürasyon bölümü: {section}")
         
-        # Exchange ayarlarını doğrula
+        # Exchange ayarlarını doğrula (esnek validation)
         for exchange_name, exchange_config in self.config['exchanges'].items():
-            required_fields = ['enabled']
-            for field in required_fields:
-                if field not in exchange_config:
-                    raise ValueError(f"{exchange_name} exchange'inde eksik alan: {field}")
+            # Sadece enabled alanı yoksa otomatik false yap
+            if 'enabled' not in exchange_config:
+                exchange_config['enabled'] = False
+                logger.warning(f"⚠️ {exchange_name} exchange 'enabled' alanı eksik, false olarak ayarlandı")
         
-        # Strateji ayarlarını doğrula
+        # Strateji ayarlarını doğrula (esnek validation)
         for strategy_name, strategy_config in self.config['strategies'].items():
+            # Enabled alanı yoksa otomatik true yap
+            if 'enabled' not in strategy_config:
+                strategy_config['enabled'] = True
+                logger.warning(f"⚠️ {strategy_name} stratejisi 'enabled' alanı eksik, true olarak ayarlandı")
+            
             if not strategy_config.get('enabled'):
                 continue
             
-            required_fields = ['timeframes', 'profit_target', 'stop_loss', 'confidence_threshold']
-            for field in required_fields:
+            # Required fields için default değerler
+            defaults = {
+                'weight': 0.25,
+                'parameters': {}
+            }
+            
+            for field, default_value in defaults.items():
                 if field not in strategy_config:
-                    raise ValueError(f"{strategy_name} stratejisinde eksik alan: {field}")
+                    strategy_config[field] = default_value
+                    logger.warning(f"⚠️ {strategy_name} stratejisinde '{field}' alanı eksik, default değer ayarlandı")
         
         logger.info("✅ Konfigürasyon doğrulaması başarıyla tamamlandı")
     

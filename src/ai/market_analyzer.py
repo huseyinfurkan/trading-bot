@@ -196,7 +196,23 @@ class MarketAnalyzer:
         """Belirli bir sembol için veri al"""
         try:
             # Convert crypto symbol to yfinance format
-            yf_symbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD')
+            if '/' in symbol:
+                # Format: BTC/USDT -> BTC-USD
+                base, quote = symbol.split('/')
+                if quote in ['USDT', 'BUSD']:
+                    yf_symbol = f"{base}-USD"
+                else:
+                    yf_symbol = f"{base}-{quote}"
+            else:
+                # Format: BTCUSDT -> BTC-USD
+                if symbol.endswith('USDT'):
+                    base = symbol[:-4]
+                    yf_symbol = f"{base}-USD"
+                elif symbol.endswith('BUSD'):
+                    base = symbol[:-4]
+                    yf_symbol = f"{base}-USD"
+                else:
+                    yf_symbol = symbol
             
             ticker = yf.Ticker(yf_symbol)
             hist = ticker.history(period="30d", interval="1h")
