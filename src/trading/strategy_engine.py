@@ -14,7 +14,7 @@ import asyncio
 class StrategyEngine:
     """Strateji motoru - tüm trading stratejilerini yönetir"""
     
-def __init__(self, strategies_config: Dict[str, Any], signal_filter, market_analyzer, confidence_calculator):
+    def __init__(self, strategies_config: Dict[str, Any], signal_filter, market_analyzer, confidence_calculator):
         """
         Args:
             strategies_config: Strateji konfigürasyonları

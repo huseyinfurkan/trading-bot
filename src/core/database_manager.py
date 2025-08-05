@@ -1,441 +1,443 @@
 """
 Database Manager
-Veritabanı işlemlerini yönetir (SQLite, PostgreSQL, MongoDB desteği)
+SQLite veritabanı işlemleri ve veri yönetimi
 """
 
-import sqlite3
 import asyncio
 import aiosqlite
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union
-from pathlib import Path
-import json
 import pandas as pd
+from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta
+from pathlib import Path
 from loguru import logger
-import concurrent.futures
 
 
 class DatabaseManager:
     """Veritabanı yöneticisi"""
     
-def __init__(self, db_config: Dict[str, Any]):
+    def __init__(self, db_config: Dict[str, Any]):
         """
         Args:
             db_config: Veritabanı konfigürasyonu
         """
         self.config = db_config
-        self.db_type = db_config.get('type', 'sqlite')
-        self.db_path = db_config.get('path', 'data/trading_bot.db')
+        self.db_path = Path(db_config.get('path', 'data/trading_bot.db'))
         self.connection = None
         
-        # SQLite için path'i oluştur
-    if self.db_type == 'sqlite':
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        # Create data directory if it doesn't exist
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        logger.info("💾 Database Manager initialized")
     
-async def initialize(self) -> None:
+    async def initialize(self):
         """Veritabanını başlat ve tabloları oluştur"""
-    try:
-        if self.db_type == 'sqlite':
-                await self._initialize_sqlite()
-        elif self.db_type == 'postgresql':
-                await self._initialize_postgresql()
-        elif self.db_type == 'mongodb':
-                await self._initialize_mongodb()
-        else:
-                raise ValueError(f"Desteklenmeyen veritabanı türü: {self.db_type}")
+        try:
+            logger.info("💾 Initializing database...")
             
+            # Enable WAL mode for better concurrency
+            self.connection = await aiosqlite.connect(str(self.db_path))
+            await self.connection.execute("PRAGMA journal_mode=WAL")
+            await self.connection.execute("PRAGMA synchronous=NORMAL")
+            await self.connection.execute("PRAGMA temp_store=MEMORY")
+            await self.connection.execute("PRAGMA mmap_size=268435456")  # 256MB
+            
+            # Create tables
             await self._create_tables()
-            logger.info(f"✅ Veritabanı başlatıldı: {self.db_type}")
             
-    except Exception as e:
-            logger.error(f"❌ Veritabanı başlatma hatası: {e}")
+            logger.success("✅ Database initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Database initialization error: {e}")
             raise
     
-async def _initialize_sqlite(self) -> None:
-        """SQLite veritabanını başlat"""
-        self.connection = await aiosqlite.connect(self.db_path)
-        # Enable WAL mode for better concurrency
-        await self.connection.execute("PRAGMA journal_mode=WAL")
-        await self.connection.execute("PRAGMA foreign_keys = ON")
-        await self.connection.commit()
-    
-async def _initialize_postgresql(self) -> None:
-        """PostgreSQL veritabanını başlat"""
-        # TODO: PostgreSQL desteği eklenecek
-        raise NotImplementedError("PostgreSQL desteği henüz eklenmedi")
-    
-async def _initialize_mongodb(self) -> None:
-        """MongoDB veritabanını başlat"""
-        # TODO: MongoDB desteği eklenecek
-        raise NotImplementedError("MongoDB desteği henüz eklenmedi")
-    
-async def _create_tables(self) -> None:
-        """Gerekli tabloları oluştur"""
-        tables = {
-            'market_data': '''
+    async def _create_tables(self):
+        """Veritabanı tablolarını oluştur"""
+        try:
+            # Positions table
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    size REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    current_price REAL,
+                    stop_loss REAL,
+                    take_profit REAL,
+                    pnl REAL DEFAULT 0,
+                    status TEXT DEFAULT 'OPEN',
+                    strategy TEXT,
+                    confidence REAL,
+                    exchange TEXT,
+                    order_id TEXT,
+                    opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    closed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Market data table
+            await self.connection.execute("""
                 CREATE TABLE IF NOT EXISTS market_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT NOT NULL,
                     exchange TEXT NOT NULL,
-                    timestamp DATETIME NOT NULL,
-                    open_price REAL NOT NULL,
-                    high_price REAL NOT NULL,
-                    low_price REAL NOT NULL,
-                    close_price REAL NOT NULL,
-                    volume REAL NOT NULL,
                     timeframe TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(symbol, exchange, timestamp, timeframe)
+                    timestamp TIMESTAMP NOT NULL,
+                    open REAL NOT NULL,
+                    high REAL NOT NULL,
+                    low REAL NOT NULL,
+                    close REAL NOT NULL,
+                    volume REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, exchange, timeframe, timestamp)
                 )
-            ''',
+            """)
             
-            'positions': '''
-                CREATE TABLE IF NOT EXISTS positions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT NOT NULL,
-                    exchange TEXT NOT NULL,
-                    side TEXT NOT NULL,  -- BUY, SELL
-                    size REAL NOT NULL,
-                    entry_price REAL NOT NULL,
-                    current_price REAL,
-                    pnl REAL DEFAULT 0,
-                    pnl_percentage REAL DEFAULT 0,
-                    strategy TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    stop_loss REAL,
-                    take_profit REAL,
-                    status TEXT DEFAULT 'OPEN',  -- OPEN, CLOSED, CANCELLED
-                    opened_at DATETIME NOT NULL,
-                    closed_at DATETIME,
-                    close_reason TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''',
-            
-            'trades': '''
-                CREATE TABLE IF NOT EXISTS trades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    position_id INTEGER,
-                    symbol TEXT NOT NULL,
-                    exchange TEXT NOT NULL,
-                    side TEXT NOT NULL,
-                    size REAL NOT NULL,
-                    price REAL NOT NULL,
-                    fee REAL DEFAULT 0,
-                    trade_type TEXT NOT NULL,  -- ENTRY, EXIT, PARTIAL_EXIT
-                    order_id TEXT,
-                    executed_at DATETIME NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (position_id) REFERENCES positions (id)
-                )
-            ''',
-            
-            'signals': '''
+            # Signals table
+            await self.connection.execute("""
                 CREATE TABLE IF NOT EXISTS signals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT NOT NULL,
-                    exchange TEXT NOT NULL,
-                    signal_type TEXT NOT NULL,  -- BUY, SELL, HOLD
-                    strength REAL NOT NULL,
+                    signal_type TEXT NOT NULL,
                     confidence REAL NOT NULL,
-                    strategy TEXT NOT NULL,
-                    timeframe TEXT NOT NULL,
-                    price REAL NOT NULL,
-                    indicators TEXT,  -- JSON string
-                    ai_analysis TEXT,  -- JSON string
-                    market_condition TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    strength REAL NOT NULL,
+                    source TEXT NOT NULL,
+                    reason TEXT,
+                    price REAL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''',
+            """)
             
-            'performance': '''
-                CREATE TABLE IF NOT EXISTS performance (
+            # Performance stats table
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS performance_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date DATE NOT NULL,
-                    total_pnl REAL DEFAULT 0,
                     total_trades INTEGER DEFAULT 0,
                     winning_trades INTEGER DEFAULT 0,
                     losing_trades INTEGER DEFAULT 0,
+                    total_pnl REAL DEFAULT 0,
                     win_rate REAL DEFAULT 0,
-                    avg_win REAL DEFAULT 0,
-                    avg_loss REAL DEFAULT 0,
+                    profit_factor REAL DEFAULT 0,
                     max_drawdown REAL DEFAULT 0,
                     portfolio_value REAL DEFAULT 0,
-                    roi REAL DEFAULT 0,
-                    sharpe_ratio REAL DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(date)
                 )
-            ''',
+            """)
             
-            'ai_models': '''
-                CREATE TABLE IF NOT EXISTS ai_models (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    model_name TEXT NOT NULL,
-                    model_type TEXT NOT NULL,
-                    version TEXT NOT NULL,
-                    accuracy REAL,
-                    training_data_size INTEGER,
-                    parameters TEXT,  -- JSON string
-                    model_path TEXT,
-                    trained_at DATETIME NOT NULL,
-                    is_active BOOLEAN DEFAULT FALSE,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''',
+            # Create indexes for better performance
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, timestamp)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_symbol_time ON signals(symbol, timestamp)")
             
-            'system_logs': '''
-                CREATE TABLE IF NOT EXISTS system_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    level TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    module TEXT,
-                    function_name TEXT,
-                    line_number INTEGER,
-                    traceback TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            '''
-        }
-        
-    for table_name, create_sql in tables.items():
-            await self.connection.execute(create_sql)
-            logger.debug(f"📋 Tablo oluşturuldu/kontrol edildi: {table_name}")
-        
-        await self.connection.commit()
-        logger.info("✅ Tüm tablolar oluşturuldu")
-    
-async def save_market_data(self, symbol: str, exchange: str, timeframe: str, 
-                              data: Dict[str, Any]) -> None:
-        """Market verilerini kaydet"""
-    try:
-            sql = '''
-                INSERT OR REPLACE INTO market_data 
-                (symbol, exchange, timestamp, open_price, high_price, low_price, 
-                 close_price, volume, timeframe)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            
-            await self.connection.execute(sql, (
-                symbol, exchange, data['timestamp'], data['open'], 
-                data['high'], data['low'], data['close'], 
-                data['volume'], timeframe
-            ))
             await self.connection.commit()
+            logger.info("✅ Database tables created/verified")
             
-    except Exception as e:
-            logger.error(f"❌ Market data kaydetme hatası: {e}")
+        except Exception as e:
+            logger.error(f"❌ Table creation error: {e}")
             raise
     
-async def save_position(self, position_data: Dict[str, Any]) -> int:
+    async def save_position(self, position_data: Dict[str, Any]) -> int:
         """Pozisyon kaydet"""
-    try:
-            sql = '''
-                INSERT INTO positions 
-                (symbol, exchange, side, size, entry_price, strategy, confidence, 
-                 stop_loss, take_profit, opened_at)
+        try:
+            cursor = await self.connection.execute("""
+                INSERT INTO positions (symbol, side, size, entry_price, stop_loss, take_profit, 
+                                     strategy, confidence, exchange, order_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            
-            cursor = await self.connection.execute(sql, (
-                position_data['symbol'], position_data['exchange'],
-                position_data['side'], position_data['size'],
-                position_data['entry_price'], position_data['strategy'],
-                position_data['confidence'], position_data.get('stop_loss'),
-                position_data.get('take_profit'), position_data['opened_at']
+            """, (
+                position_data['symbol'],
+                position_data['side'],
+                position_data['size'],
+                position_data['entry_price'],
+                position_data.get('stop_loss'),
+                position_data.get('take_profit'),
+                position_data.get('strategy'),
+                position_data.get('confidence'),
+                position_data.get('exchange'),
+                position_data.get('order_id')
             ))
-            await self.connection.commit()
             
+            await self.connection.commit()
             return cursor.lastrowid
             
-    except Exception as e:
-            logger.error(f"❌ Pozisyon kaydetme hatası: {e}")
-            raise
+        except Exception as e:
+            logger.error(f"❌ Position save error: {e}")
+            return None
     
-async def update_position(self, position_id: int, updates: Dict[str, Any]) -> None:
-        """Pozisyon güncelle"""
-    try:
-            # Dinamik SQL oluştur
-            set_clause = ', '.join([f"{key} = ?" for key in updates.keys()])
-            sql = f"UPDATE positions SET {set_clause} WHERE id = ?"
-            
-            values = list(updates.values()) + [position_id]
-            await self.connection.execute(sql, values)
-            await self.connection.commit()
-            
-    except Exception as e:
-            logger.error(f"❌ Pozisyon güncelleme hatası: {e}")
-            raise
-    
-async def save_trade(self, trade_data: Dict[str, Any]) -> int:
-        """Trade kaydet"""
-    try:
-            sql = '''
-                INSERT INTO trades 
-                (position_id, symbol, exchange, side, size, price, fee, 
-                 trade_type, order_id, executed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            
-            cursor = await self.connection.execute(sql, (
-                trade_data.get('position_id'), trade_data['symbol'],
-                trade_data['exchange'], trade_data['side'],
-                trade_data['size'], trade_data['price'],
-                trade_data.get('fee', 0), trade_data['trade_type'],
-                trade_data.get('order_id'), trade_data['executed_at']
-            ))
-            await self.connection.commit()
-            
-            return cursor.lastrowid
-            
-    except Exception as e:
-            logger.error(f"❌ Trade kaydetme hatası: {e}")
-            raise
-    
-async def save_signal(self, signal_data: Dict[str, Any]) -> None:
-        """Sinyal kaydet"""
-    try:
-            sql = '''
-                INSERT INTO signals 
-                (symbol, exchange, signal_type, strength, confidence, strategy, 
-                 timeframe, price, indicators, ai_analysis, market_condition)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            
-            await self.connection.execute(sql, (
-                signal_data['symbol'], signal_data['exchange'],
-                signal_data['signal_type'], signal_data['strength'],
-                signal_data['confidence'], signal_data['strategy'],
-                signal_data['timeframe'], signal_data['price'],
-                json.dumps(signal_data.get('indicators')),
-                json.dumps(signal_data.get('ai_analysis')),
-                signal_data.get('market_condition')
-            ))
-            await self.connection.commit()
-            
-    except Exception as e:
-            logger.error(f"❌ Sinyal kaydetme hatası: {e}")
-            raise
-    
-async def get_positions(self, symbol: str = None, status: str = 'OPEN') -> List[Dict]:
+    async def get_positions(self, status: str = None, symbol: str = None) -> List[Dict[str, Any]]:
         """Pozisyonları getir"""
-    try:
-        if symbol:
-                sql = "SELECT * FROM positions WHERE symbol = ? AND status = ?"
-                cursor = await self.connection.execute(sql, (symbol, status))
-        else:
-                sql = "SELECT * FROM positions WHERE status = ?"
-                cursor = await self.connection.execute(sql, (status,))
+        try:
+            query = "SELECT * FROM positions WHERE 1=1"
+            params = []
             
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            
+            if symbol:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            
+            query += " ORDER BY created_at DESC"
+            
+            cursor = await self.connection.execute(query, params)
             rows = await cursor.fetchall()
+            
+            # Convert to list of dictionaries
             columns = [description[0] for description in cursor.description]
+            positions = []
+            for row in rows:
+                position = dict(zip(columns, row))
+                positions.append(position)
             
-            return [dict(zip(columns, row)) for row in rows]
+            return positions
             
-    except Exception as e:
-            logger.error(f"❌ Pozisyon getirme hatası: {e}")
+        except Exception as e:
+            logger.error(f"❌ Get positions error: {e}")
             return []
     
-async def get_market_data(self, symbol: str, exchange: str, timeframe: str, 
-                             limit: int = 100) -> pd.DataFrame:
-        """Market verilerini getir"""
-    try:
-            sql = '''
-                SELECT * FROM market_data 
+    async def update_position(self, position_id: int, updates: Dict[str, Any]) -> bool:
+        """Pozisyon güncelle"""
+        try:
+            # Build dynamic update query
+            set_clauses = []
+            params = []
+            
+            for key, value in updates.items():
+                set_clauses.append(f"{key} = ?")
+                params.append(value)
+            
+            params.append(position_id)
+            
+            query = f"UPDATE positions SET {', '.join(set_clauses)} WHERE id = ?"
+            
+            await self.connection.execute(query, params)
+            await self.connection.commit()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Position update error: {e}")
+            return False
+    
+    async def save_market_data(self, market_data: Dict[str, Any]) -> bool:
+        """Market data kaydet"""
+        try:
+            await self.connection.execute("""
+                INSERT OR REPLACE INTO market_data 
+                (symbol, exchange, timeframe, timestamp, open, high, low, close, volume)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                market_data['symbol'],
+                market_data['exchange'],
+                market_data['timeframe'],
+                market_data['timestamp'],
+                market_data['open'],
+                market_data['high'],
+                market_data['low'],
+                market_data['close'],
+                market_data['volume']
+            ))
+            
+            await self.connection.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Market data save error: {e}")
+            return False
+    
+    async def get_market_data(self, symbol: str, exchange: str, timeframe: str, 
+                            limit: int = 100) -> pd.DataFrame:
+        """Market data getir"""
+        try:
+            cursor = await self.connection.execute("""
+                SELECT timestamp, open, high, low, close, volume
+                FROM market_data
                 WHERE symbol = ? AND exchange = ? AND timeframe = ?
-                ORDER BY timestamp DESC LIMIT ?
-            '''
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (symbol, exchange, timeframe, limit))
             
-            # Use sync connection for pandas compatibility
-        def _read_sql_sync():
-                conn = sqlite3.connect(self.db_path)
-            try:
-                    return pd.read_sql_query(sql, conn, params=(symbol, exchange, timeframe, limit))
-            finally:
-                    conn.close()
+            rows = await cursor.fetchall()
             
-            # Run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-                df = await loop.run_in_executor(executor, _read_sql_sync)
+            if not rows:
+                return pd.DataFrame()
             
-        if not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df = df.sort_values('timestamp').reset_index(drop=True)
+            # Convert to DataFrame
+            df = pd.DataFrame(rows, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values('timestamp').reset_index(drop=True)
             
             return df
             
-    except Exception as e:
-            logger.error(f"❌ Market data getirme hatası: {e}")
+        except Exception as e:
+            logger.error(f"❌ Get market data error: {e}")
             return pd.DataFrame()
     
-async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
-        """Performans istatistiklerini getir"""
-    try:
-            # Son N günlük performans
-            start_date = datetime.now() - timedelta(days=days)
+    async def save_signal(self, signal_data: Dict[str, Any]) -> bool:
+        """Sinyal kaydet"""
+        try:
+            await self.connection.execute("""
+                INSERT INTO signals (symbol, signal_type, confidence, strength, source, reason, price)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                signal_data['symbol'],
+                signal_data['signal_type'],
+                signal_data['confidence'],
+                signal_data.get('strength', 0),
+                signal_data.get('source', 'AI'),
+                signal_data.get('reason', ''),
+                signal_data.get('price', 0)
+            ))
             
-            sql = '''
-                SELECT * FROM performance 
-                WHERE date >= ? 
-                ORDER BY date ASC
-            '''
+            await self.connection.commit()
+            return True
             
-            cursor = await self.connection.execute(sql, (start_date.date(),))
-            rows = await cursor.fetchall()
-            columns = [description[0] for description in cursor.description]
+        except Exception as e:
+            logger.error(f"❌ Signal save error: {e}")
+            return False
+    
+    async def get_daily_pnl(self, date: datetime.date) -> Optional[float]:
+        """Günlük P&L getir"""
+        try:
+            cursor = await self.connection.execute("""
+                SELECT SUM(pnl) as daily_pnl
+                FROM positions
+                WHERE DATE(created_at) = ? AND status = 'CLOSED'
+            """, (date,))
             
-            performance_data = [dict(zip(columns, row)) for row in rows]
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else 0.0
             
-        if not performance_data:
-                return {}
+        except Exception as e:
+            logger.error(f"❌ Daily PnL error: {e}")
+            return 0.0
+    
+    async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
+        """Performans istatistikleri getir"""
+        try:
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=days)
             
-            # Temel istatistikleri hesapla
-            total_pnl = sum(p['total_pnl'] for p in performance_data)
-            total_trades = sum(p['total_trades'] for p in performance_data)
-            winning_trades = sum(p['winning_trades'] for p in performance_data)
+            cursor = await self.connection.execute("""
+                SELECT 
+                    COUNT(*) as total_trades,
+                    COUNT(CASE WHEN pnl > 0 THEN 1 END) as winning_trades,
+                    COUNT(CASE WHEN pnl < 0 THEN 1 END) as losing_trades,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    MAX(pnl) as max_win,
+                    MIN(pnl) as max_loss
+                FROM positions
+                WHERE DATE(closed_at) BETWEEN ? AND ?
+                  AND status = 'CLOSED'
+            """, (start_date, end_date))
+            
+            row = await cursor.fetchone()
+            
+            if not row or row[0] == 0:
+                return {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'total_pnl': 0,
+                    'avg_pnl': 0,
+                    'profit_factor': 0
+                }
+            
+            total_trades, winning_trades, losing_trades, total_pnl, avg_pnl, max_win, max_loss = row
             
             win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
             
+            # Calculate profit factor
+            total_wins = await self._get_total_wins(start_date, end_date)
+            total_losses = abs(await self._get_total_losses(start_date, end_date))
+            profit_factor = (total_wins / total_losses) if total_losses > 0 else 0
+            
             return {
-                'total_pnl': total_pnl,
                 'total_trades': total_trades,
                 'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
                 'win_rate': win_rate,
-                'days_analyzed': len(performance_data)
+                'total_pnl': total_pnl or 0,
+                'avg_pnl': avg_pnl or 0,
+                'profit_factor': profit_factor,
+                'max_win': max_win or 0,
+                'max_loss': max_loss or 0
             }
             
-    except Exception as e:
-            logger.error(f"❌ Performans istatistikleri hatası: {e}")
+        except Exception as e:
+            logger.error(f"❌ Performance stats error: {e}")
             return {}
     
-async def cleanup_old_data(self) -> None:
+    async def _get_total_wins(self, start_date: datetime.date, end_date: datetime.date) -> float:
+        """Toplam kazanç getir"""
+        try:
+            cursor = await self.connection.execute("""
+                SELECT SUM(pnl) FROM positions
+                WHERE DATE(closed_at) BETWEEN ? AND ?
+                  AND status = 'CLOSED' AND pnl > 0
+            """, (start_date, end_date))
+            
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else 0.0
+            
+        except Exception as e:
+            logger.error(f"❌ Total wins error: {e}")
+            return 0.0
+    
+    async def _get_total_losses(self, start_date: datetime.date, end_date: datetime.date) -> float:
+        """Toplam zarar getir"""
+        try:
+            cursor = await self.connection.execute("""
+                SELECT SUM(pnl) FROM positions
+                WHERE DATE(closed_at) BETWEEN ? AND ?
+                  AND status = 'CLOSED' AND pnl < 0
+            """, (start_date, end_date))
+            
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else 0.0
+            
+        except Exception as e:
+            logger.error(f"❌ Total losses error: {e}")
+            return 0.0
+    
+    async def cleanup_old_data(self, days: int = 90):
         """Eski verileri temizle"""
-    try:
-            retention_days = self.config.get('data_retention_days', 90)
-            cutoff_date = datetime.now() - timedelta(days=retention_days)
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
             
-            tables_to_clean = ['market_data', 'signals', 'system_logs']
+            # Clean old market data
+            await self.connection.execute("""
+                DELETE FROM market_data WHERE created_at < ?
+            """, (cutoff_date,))
             
-        for table in tables_to_clean:
-                sql = f"DELETE FROM {table} WHERE created_at < ?"
-                cursor = await self.connection.execute(sql, (cutoff_date,))
-                deleted_count = cursor.rowcount
-                
-            if deleted_count > 0:
-                    logger.info(f"🧹 {table} tablosundan {deleted_count} eski kayıt silindi")
+            # Clean old signals
+            await self.connection.execute("""
+                DELETE FROM signals WHERE created_at < ?
+            """, (cutoff_date,))
             
             await self.connection.commit()
+            logger.info(f"🗑️ Old data cleaned (older than {days} days)")
             
-            # VACUUM işlemi
-            await self.connection.execute("VACUUM")
-            logger.info("✅ Veritabanı temizlik işlemi tamamlandı")
-            
-    except Exception as e:
-            logger.error(f"❌ Veritabanı temizlik hatası: {e}")
+        except Exception as e:
+            logger.error(f"❌ Data cleanup error: {e}")
     
-async def close(self) -> None:
+    async def close(self):
         """Veritabanı bağlantısını kapat"""
-    if self.connection:
-            await self.connection.close()
-            logger.info("✅ Veritabanı bağlantısı kapatıldı")
+        try:
+            if self.connection:
+                await self.connection.close()
+                logger.info("💾 Database connection closed")
+                
+        except Exception as e:
+            logger.error(f"❌ Database close error: {e}")
+    
+    async def get_connection(self):
+        """Veritabanı bağlantısını döndür"""
+        return self.connection

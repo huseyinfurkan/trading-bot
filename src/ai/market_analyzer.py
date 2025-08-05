@@ -14,9 +14,9 @@ from sklearn.preprocessing import StandardScaler
 
 
 class MarketAnalyzer:
-"""Piyasa durumu analizöru - Gerçek verilerle çalışır"""
-
-def __init__(self, market_config: Dict[str, Any], db_manager):
+    """Piyasa durumu analizöru - Gerçek verilerle çalışır"""
+    
+    def __init__(self, market_config: Dict[str, Any], db_manager):
 """
 Args:
 market_config: Market analiz konfigürasyonu

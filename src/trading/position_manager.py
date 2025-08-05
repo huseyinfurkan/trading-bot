@@ -12,7 +12,7 @@ from loguru import logger
 class PositionManager:
     """Pozisyon yöneticisi"""
     
-def __init__(self, exchange_manager, risk_manager, db_manager):
+    def __init__(self, exchange_manager, risk_manager, db_manager):
         """
         Args:
             exchange_manager: Exchange yöneticisi
