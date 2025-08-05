@@ -4,6 +4,7 @@ Pozisyon açma, kapatma ve yönetimi
 """
 
 import asyncio
+import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
@@ -23,511 +24,449 @@ class PositionManager:
         self.risk_manager = risk_manager
         self.db_manager = db_manager
         
-        # Active positions cache
-        self.active_positions: Dict[str, List[Dict]] = {}
+        # Position tracking
+        self.open_positions = {}
         self.position_update_lock = asyncio.Lock()
         
-async def open_position(self, symbol: str, action: Dict[str, Any], 
+        # Trailing stop tracking
+        self.trailing_stops = {}
+        
+        logger.info("📊 Position Manager initialized")
+    
+    async def open_position(self, symbol: str, action: Dict[str, Any], 
                           confidence: float, strategy: str) -> Optional[Dict[str, Any]]:
         """Yeni pozisyon aç"""
-    try:
+        try:
             async with self.position_update_lock:
                 logger.info(f"🔓 {symbol} pozisyon açılıyor: {action['signal']} - Strateji: {strategy}")
                 
                 # Entry price
                 entry_price = action.get('entry_price')
-            if not entry_price:
+                if not entry_price:
                     market_data = await self.exchange_manager.get_market_data(symbol)
-                if not market_data:
+                    if not market_data:
                         logger.error(f"❌ {symbol} market data alınamadı")
                         return None
-                    entry_price = market_data['close']
+                    entry_price = market_data.get('close', 0)
                 
-                # Stop loss hesapla
-                stop_loss = action.get('stop_loss')
-            if not stop_loss:
-                    stop_loss_pct = 0.02 if strategy == 'scalping' else 0.03  # Default %2-3
-                if action['signal'] == 'BUY':
-                        stop_loss = entry_price * (1 - stop_loss_pct)
-                else:
-                        stop_loss = entry_price * (1 + stop_loss_pct)
-                
-                # Position size hesapla
-                size_info = await self.risk_manager.calculate_position_size(
-                    symbol, entry_price, stop_loss, confidence, strategy
-                )
-                
-            if not size_info.get('allowed', False) or size_info['size'] <= 0:
-                    logger.warning(f"⚠️ {symbol} pozisyon açılamadı: {size_info.get('reason', 'Risk kontrolü başarısız')}")
-                    return None
-                
-                position_size = size_info['size']
-                leverage = size_info.get('leverage', 1)
-                
-                # Exchange'de emir ver
-                order_result = await self.exchange_manager.place_order(
+                # Position size calculation
+                size_result = await self.risk_manager.calculate_position_size(
                     symbol=symbol,
-                    side=action['signal'].lower(),  # BUY -> buy, SELL -> sell
-                    amount=position_size,
-                    order_type='market'
+                    entry_price=entry_price,
+                    stop_loss=action.get('stop_loss', entry_price * 0.97),
+                    confidence=confidence,
+                    strategy=strategy
                 )
                 
-            if not order_result:
-                    logger.error(f"❌ {symbol} emir verilemedi")
+                if not size_result.get('allowed', False):
+                    logger.warning(f"⚠️ {symbol} pozisyon reddedildi: {size_result.get('reason')}")
                     return None
                 
-                # Pozisyon verisini hazırla
-                position_data = {
-                    'symbol': symbol,
-                    'exchange': order_result['exchange'],
-                    'side': action['signal'],
-                    'size': position_size,
-                    'entry_price': order_result.get('price', entry_price),
-                    'strategy': strategy,
-                    'confidence': confidence,
-                    'stop_loss': stop_loss,
-                    'take_profit': action.get('take_profit'),
-                    'opened_at': datetime.now()
-                }
+                position_size = size_result['size']
                 
-                # Veritabanına kaydet
-                position_id = await self.db_manager.save_position(position_data)
-                position_data['id'] = position_id
+                # Create order
+                order_result = await self._place_order(
+                    symbol=symbol,
+                    side=action['signal'],
+                    size=position_size,
+                    price=entry_price,
+                    order_type='MARKET'
+                )
                 
-                # Trade kaydı oluştur
-                trade_data = {
-                    'position_id': position_id,
-                    'symbol': symbol,
-                    'exchange': order_result['exchange'],
-                    'side': action['signal'],
-                    'size': position_size,
-                    'price': order_result.get('price', entry_price),
-                    'fee': order_result.get('fee', 0),
-                    'trade_type': 'ENTRY',
-                    'order_id': order_result['id'],
-                    'executed_at': datetime.now()
-                }
+                if not order_result:
+                    logger.error(f"❌ {symbol} order verilemedi")
+                    return None
                 
-                await self.db_manager.save_trade(trade_data)
+                # Create position record
+                position_id = await self._create_position_record(
+                    symbol=symbol,
+                    side=action['signal'],
+                    size=position_size,
+                    entry_price=entry_price,
+                    stop_loss=action.get('stop_loss'),
+                    take_profit=action.get('take_profit'),
+                    strategy=strategy,
+                    confidence=confidence,
+                    order_id=order_result.get('order_id')
+                )
                 
-                # Cache'e ekle
-            if symbol not in self.active_positions:
-                    self.active_positions[symbol] = []
-                self.active_positions[symbol].append(position_data)
+                if position_id:
+                    # Track position
+                    self.open_positions[position_id] = {
+                        'id': position_id,
+                        'symbol': symbol,
+                        'side': action['signal'],
+                        'size': position_size,
+                        'entry_price': entry_price,
+                        'current_price': entry_price,
+                        'stop_loss': action.get('stop_loss'),
+                        'take_profit': action.get('take_profit'),
+                        'strategy': strategy,
+                        'confidence': confidence,
+                        'pnl': 0,
+                        'opened_at': datetime.now(),
+                        'status': 'OPEN'
+                    }
+                    
+                    logger.success(f"✅ {symbol} pozisyon açıldı: {position_id}")
+                    
+                    return {
+                        'id': position_id,
+                        'symbol': symbol,
+                        'side': action['signal'],
+                        'size': position_size,
+                        'entry_price': entry_price,
+                        'status': 'OPEN'
+                    }
                 
-                logger.success(f"✅ {symbol} pozisyon açıldı: {action['signal']} {position_size:.6f} @ {entry_price:.4f}")
+                return None
                 
-                return position_data
-                
-    except Exception as e:
+        except Exception as e:
             logger.error(f"❌ {symbol} pozisyon açma hatası: {e}")
             return None
     
-async def close_position(self, position: Dict[str, Any], reason: str) -> bool:
+    async def close_position(self, position_id: int, reason: str = "Manual close") -> bool:
         """Pozisyon kapat"""
-    try:
-            async with self.position_update_lock:
-                position_id = position['id']
-                symbol = position['symbol']
-                side = position['side']
-                size = position['size']
-                
-                logger.info(f"🔒 {symbol} pozisyon kapatılıyor: {reason}")
-                
-                # Ters emir ver (BUY pozisyonu SELL ile kapat)
-                close_side = 'sell' if side == 'BUY' else 'buy'
-                
-                order_result = await self.exchange_manager.place_order(
-                    symbol=symbol,
-                    side=close_side,
-                    amount=size,
-                    order_type='market'
-                )
-                
-            if not order_result:
-                    logger.error(f"❌ {symbol} pozisyon kapatılamadı")
-                    return False
-                
-                close_price = order_result.get('price', 0)
-                
-                # P&L hesapla
-                entry_price = position['entry_price']
-            if side == 'BUY':
-                    pnl = (close_price - entry_price) * size
-                    pnl_pct = (close_price - entry_price) / entry_price * 100
-            else:
-                    pnl = (entry_price - close_price) * size
-                    pnl_pct = (entry_price - close_price) / entry_price * 100
-                
-                # Pozisyonu güncelle
-                position_updates = {
-                    'current_price': close_price,
-                    'pnl': pnl,
-                    'pnl_percentage': pnl_pct,
-                    'status': 'CLOSED',
-                    'closed_at': datetime.now(),
-                    'close_reason': reason
-                }
-                
-                await self.db_manager.update_position(position_id, position_updates)
-                
-                # Kapatma trade'i kaydet
-                trade_data = {
-                    'position_id': position_id,
-                    'symbol': symbol,
-                    'exchange': order_result['exchange'],
-                    'side': close_side.upper(),
-                    'size': size,
-                    'price': close_price,
-                    'fee': order_result.get('fee', 0),
-                    'trade_type': 'EXIT',
-                    'order_id': order_result['id'],
-                    'executed_at': datetime.now()
-                }
-                
-                await self.db_manager.save_trade(trade_data)
-                
-                # Cache'den kaldır
-            if symbol in self.active_positions:
-                    self.active_positions[symbol] = [
-                        p for p in self.active_positions[symbol] 
-                    if p['id'] != position_id
-                    ]
-                    
-                if not self.active_positions[symbol]:
-                        del self.active_positions[symbol]
-                
-                pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                logger.success(f"✅ {symbol} pozisyon kapatıldı: {pnl_emoji} PnL: {pnl:.4f} USDT ({pnl_pct:.2f}%)")
-                
-                return True
-                
-    except Exception as e:
-            logger.error(f"❌ {position.get('symbol', 'UNKNOWN')} pozisyon kapatma hatası: {e}")
-            return False
-    
-async def close_all_positions(self, reason: str = "Manual close") -> None:
-        """Tüm pozisyonları kapat"""
-    try:
-            logger.info(f"🔒 Tüm pozisyonlar kapatılıyor: {reason}")
-            
-            # Database'den aktif pozisyonları al
-            positions = await self.db_manager.get_positions(status='OPEN')
-            
-        if not positions:
-                logger.info("ℹ️ Kapatılacak aktif pozisyon yok")
-                return
-            
-            # Paralel kapatma
-            close_tasks = []
-        for position in positions:
-                task = asyncio.create_task(self.close_position(position, reason))
-                close_tasks.append(task)
-            
-            # Tüm kapatma işlemlerini bekle
-            results = await asyncio.gather(*close_tasks, return_exceptions=True)
-            
-            successful_closes = sum(1 for result in results if result is True)
-            total_positions = len(positions)
-            
-            logger.info(f"✅ {successful_closes}/{total_positions} pozisyon başarıyla kapatıldı")
-            
-    except Exception as e:
-            logger.error(f"❌ Toplu pozisyon kapatma hatası: {e}")
-    
-async def update_position_prices(self) -> None:
-        """Aktif pozisyonların güncel fiyatlarını güncelle"""
-    try:
-            positions = await self.db_manager.get_positions(status='OPEN')
-            
-        if not positions:
-                return
-            
-        for position in positions:
-            try:
-                    symbol = position['symbol']
-                    position_id = position['id']
-                    
-                    # Güncel market data al
-                    market_data = await self.exchange_manager.get_market_data(symbol)
-                if not market_data:
-                        continue
-                    
-                    current_price = market_data['close']
-                    entry_price = position['entry_price']
-                    side = position['side']
-                    size = position['size']
-                    
-                    # P&L hesapla
-                if side == 'BUY':
-                        pnl = (current_price - entry_price) * size
-                        pnl_pct = (current_price - entry_price) / entry_price * 100
-                else:
-                        pnl = (entry_price - current_price) * size
-                        pnl_pct = (entry_price - current_price) / entry_price * 100
-                    
-                    # Pozisyonu güncelle
-                    await self.db_manager.update_position(position_id, {
-                        'current_price': current_price,
-                        'pnl': pnl,
-                        'pnl_percentage': pnl_pct
-                    })
-                    
-                    # Risk manager'a bildir
-                    await self.risk_manager.update_position_pnl(position_id, pnl)
-                    
-                    # Stop loss / Take profit kontrolü
-                if await self.risk_manager.check_stop_loss(position, current_price):
-                        await self.close_position(position, "STOP_LOSS")
-                elif await self.risk_manager.check_take_profit(position, current_price):
-                        await self.close_position(position, "TAKE_PROFIT")
-                    
-            except Exception as e:
-                    logger.error(f"❌ Pozisyon güncelleme hatası: {e}")
-                    continue
-                    
-    except Exception as e:
-            logger.error(f"❌ Pozisyon fiyat güncelleme hatası: {e}")
-    
-async def get_positions(self, symbol: str = None) -> List[Dict[str, Any]]:
-        """Pozisyonları getir"""
-    try:
-            return await self.db_manager.get_positions(symbol=symbol, status='OPEN')
-    except Exception as e:
-            logger.error(f"❌ Pozisyon getirme hatası: {e}")
-            return []
-    
-async def get_position_summary(self) -> Dict[str, Any]:
-        """Pozisyon özetini döndür"""
-    try:
-            positions = await self.get_positions()
-            
-        if not positions:
-                return {
-                    'total_positions': 0,
-                    'total_pnl': 0,
-                    'best_position': None,
-                    'worst_position': None
-                }
-            
-            total_pnl = sum(pos.get('pnl', 0) for pos in positions)
-            best_position = max(positions, key=lambda p: p.get('pnl', 0))
-            worst_position = min(positions, key=lambda p: p.get('pnl', 0))
-            
-            return {
-                'total_positions': len(positions),
-                'total_pnl': total_pnl,
-                'best_position': {
-                    'symbol': best_position['symbol'],
-                    'pnl': best_position.get('pnl', 0),
-                    'pnl_percentage': best_position.get('pnl_percentage', 0)
-                },
-                'worst_position': {
-                    'symbol': worst_position['symbol'],
-                    'pnl': worst_position.get('pnl', 0),
-                    'pnl_percentage': worst_position.get('pnl_percentage', 0)
-                }
-            }
-            
-    except Exception as e:
-            logger.error(f"❌ Pozisyon özeti hatası: {e}")
-            return {'total_positions': 0, 'total_pnl': 0}
-    
-async def cleanup_expired_positions(self) -> None:
-        """Süresi dolmuş pozisyonları temizle"""
-    try:
-            positions = await self.get_positions()
-            
-        for position in positions:
-            try:
-                    opened_at = position.get('opened_at')
-                if not opened_at:
-                        continue
-                    
-                if isinstance(opened_at, str):
-                        opened_at = datetime.fromisoformat(opened_at.replace('Z', '+00:00'))
-                    
-                    # 24 saatten eski pozisyonları kapat
-                    position_age = datetime.now() - opened_at
-                if position_age > timedelta(hours=24):
-                        await self.close_position(position, "EXPIRED_TIME_LIMIT")
-                        
-            except Exception as e:
-                    logger.error(f"❌ Pozisyon cleanup hatası: {e}")
-                    continue
-                    
-    except Exception as e:
-            logger.error(f"❌ Pozisyon cleanup genel hatası: {e}")
-    
-def get_active_positions_count(self) -> int:
-        """Aktif pozisyon sayısını döndür"""
-        return sum(len(positions) for positions in self.active_positions.values())
-    
-async def is_position_size_valid(self, symbol: str, size: float) -> bool:
-        """Pozisyon boyutunun geçerli olup olmadığını kontrol et"""
-    try:
-            # Minimum size kontrolü
-        if size < 0.001:  # Minimum 0.001
+        try:
+            if position_id not in self.open_positions:
+                logger.warning(f"⚠️ Pozisyon bulunamadı: {position_id}")
                 return False
             
-            # Exchange limits kontrolü
-            # Bu gerçek implementasyonda exchange'den market info alınacak
+            position = self.open_positions[position_id]
+            symbol = position['symbol']
             
-            return True
-            
-    except Exception as e:
-            logger.error(f"❌ Position size validasyon hatası: {e}")
-            return False
-    
-async def update_trailing_stops(self) -> None:
-        """Trailing stop'ları güncelle"""
-    try:
-            positions = await self.db_manager.get_positions(status='OPEN')
-            
-        for position in positions:
-            try:
-                if not position.get('trailing_stop_enabled'):
-                        continue
-                    
-                    symbol = position['symbol']
-                    position_id = position['id']
-                    side = position['side']
-                    entry_price = position['entry_price']
-                    current_stop = position.get('stop_loss')
-                    
-                    # Get current price
-                    market_data = await self.exchange_manager.get_market_data(symbol)
-                if not market_data:
-                        continue
-                    
-                    current_price = market_data['close']
-                    
-                    # Calculate trailing distance (default 2%)
-                    trailing_distance = position.get('trailing_distance', 0.02)
-                    
-                    # Calculate new stop level
-                if side == 'BUY':
-                        # For long positions, trail stop up
-                        new_stop = current_price * (1 - trailing_distance)
-                        
-                        # Only update if new stop is higher than current
-                    if not current_stop or new_stop > current_stop:
-                            await self.db_manager.update_position(position_id, {
-                                'stop_loss': new_stop,
-                                'last_trailing_update': datetime.now()
-                            })
-                            
-                            logger.info(f"📈 {symbol} trailing stop güncellendi: {current_stop} → {new_stop:.4f}")
-                    
-                else:  # SELL position
-                        # For short positions, trail stop down
-                        new_stop = current_price * (1 + trailing_distance)
-                        
-                        # Only update if new stop is lower than current
-                    if not current_stop or new_stop < current_stop:
-                            await self.db_manager.update_position(position_id, {
-                                'stop_loss': new_stop,
-                                'last_trailing_update': datetime.now()
-                            })
-                            
-                            logger.info(f"📉 {symbol} trailing stop güncellendi: {current_stop} → {new_stop:.4f}")
-                
-            except Exception as e:
-                    logger.error(f"❌ {position.get('symbol', 'UNKNOWN')} trailing stop hatası: {e}")
-                    continue
-                    
-    except Exception as e:
-            logger.error(f"❌ Trailing stop güncelleme genel hatası: {e}")
-    
-async def enable_trailing_stop(self, position_id: int, trailing_distance: float = 0.02) -> bool:
-        """Pozisyon için trailing stop'u aktifleştir"""
-    try:
-            await self.db_manager.update_position(position_id, {
-                'trailing_stop_enabled': True,
-                'trailing_distance': trailing_distance,
-                'trailing_enabled_at': datetime.now()
-            })
-            
-            logger.info(f"✅ Pozisyon {position_id} için trailing stop aktifleştirildi (%{trailing_distance*100:.1f})")
-            return True
-            
-    except Exception as e:
-            logger.error(f"❌ Trailing stop aktifleştirme hatası: {e}")
-            return False
-    
-async def disable_trailing_stop(self, position_id: int) -> bool:
-        """Pozisyon için trailing stop'u deaktifleştir"""
-    try:
-            await self.db_manager.update_position(position_id, {
-                'trailing_stop_enabled': False,
-                'trailing_disabled_at': datetime.now()
-            })
-            
-            logger.info(f"🔴 Pozisyon {position_id} için trailing stop deaktifleştirildi")
-            return True
-            
-    except Exception as e:
-            logger.error(f"❌ Trailing stop deaktifleştirme hatası: {e}")
-            return False
-    
-async def get_position_performance(self, position_id: int) -> Dict[str, Any]:
-        """Pozisyon performans metrikleri"""
-    try:
-            positions = await self.db_manager.get_positions()
-            position = next((p for p in positions if p['id'] == position_id), None)
-            
-        if not position:
-                return {'error': 'Position not found'}
+            logger.info(f"🔒 {symbol} pozisyon kapatılıyor: {position_id} - {reason}")
             
             # Get current price
-            market_data = await self.exchange_manager.get_market_data(position['symbol'])
-            current_price = market_data['close'] if market_data else position.get('current_price', position['entry_price'])
+            current_price = await self._get_current_price(symbol)
+            if not current_price:
+                logger.error(f"❌ {symbol} current price alınamadı")
+                return False
             
-            # Calculate metrics
+            # Calculate final P&L
+            final_pnl = self._calculate_pnl(position, current_price)
+            
+            # Place close order
+            close_result = await self._place_order(
+                symbol=symbol,
+                side='SELL' if position['side'] == 'BUY' else 'BUY',
+                size=position['size'],
+                price=current_price,
+                order_type='MARKET'
+            )
+            
+            if close_result:
+                # Update position record
+                await self.db_manager.update_position(position_id, {
+                    'status': 'CLOSED',
+                    'current_price': current_price,
+                    'pnl': final_pnl,
+                    'closed_at': datetime.now().isoformat(),
+                    'close_reason': reason
+                })
+                
+                # Remove from tracking
+                del self.open_positions[position_id]
+                
+                # Remove trailing stop if exists
+                if position_id in self.trailing_stops:
+                    del self.trailing_stops[position_id]
+                
+                logger.success(f"✅ {symbol} pozisyon kapatıldı: {final_pnl:.2f} USDT P&L")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Pozisyon kapatma hatası: {e}")
+            return False
+    
+    async def update_trailing_stops(self) -> None:
+        """Trailing stop'ları güncelle"""
+        try:
+            for position_id, position in self.open_positions.items():
+                if position_id not in self.trailing_stops:
+                    continue
+                
+                symbol = position['symbol']
+                current_price = await self._get_current_price(symbol)
+                
+                if not current_price:
+                    continue
+                
+                trailing_config = self.trailing_stops[position_id]
+                side = position['side']
+                
+                # Calculate new trailing stop
+                if side == 'BUY':
+                    # For long positions
+                    new_stop = current_price * (1 - trailing_config['distance'])
+                    
+                    # Update if price moved favorably
+                    if new_stop > position['stop_loss']:
+                        position['stop_loss'] = new_stop
+                        
+                        await self.db_manager.update_position(position_id, {
+                            'stop_loss': new_stop
+                        })
+                        
+                        logger.debug(f"📈 {symbol} trailing stop updated: {new_stop:.4f}")
+                
+                else:  # SELL
+                    # For short positions
+                    new_stop = current_price * (1 + trailing_config['distance'])
+                    
+                    # Update if price moved favorably
+                    if new_stop < position['stop_loss']:
+                        position['stop_loss'] = new_stop
+                        
+                        await self.db_manager.update_position(position_id, {
+                            'stop_loss': new_stop
+                        })
+                        
+                        logger.debug(f"📉 {symbol} trailing stop updated: {new_stop:.4f}")
+                
+        except Exception as e:
+            logger.error(f"❌ Trailing stop update error: {e}")
+    
+    async def enable_trailing_stop(self, position_id: int, trailing_distance: float = 0.02) -> bool:
+        """Pozisyon için trailing stop'u aktifleştir"""
+        try:
+            if position_id not in self.open_positions:
+                return False
+            
+            self.trailing_stops[position_id] = {
+                'distance': trailing_distance,
+                'enabled_at': datetime.now()
+            }
+            
+            position = self.open_positions[position_id]
+            logger.info(f"🎯 {position['symbol']} trailing stop aktif: %{trailing_distance*100:.1f}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Trailing stop enable error: {e}")
+            return False
+    
+    async def disable_trailing_stop(self, position_id: int) -> bool:
+        """Pozisyon için trailing stop'u deaktifleştir"""
+        try:
+            if position_id in self.trailing_stops:
+                del self.trailing_stops[position_id]
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Trailing stop disable error: {e}")
+            return False
+    
+    async def check_stop_loss_take_profit(self) -> None:
+        """Tüm pozisyonlar için stop loss ve take profit kontrolü"""
+        try:
+            for position_id, position in list(self.open_positions.items()):
+                symbol = position['symbol']
+                current_price = await self._get_current_price(symbol)
+                
+                if not current_price:
+                    continue
+                
+                # Update current price and P&L
+                position['current_price'] = current_price
+                position['pnl'] = self._calculate_pnl(position, current_price)
+                
+                side = position['side']
+                stop_loss = position.get('stop_loss')
+                take_profit = position.get('take_profit')
+                
+                should_close = False
+                close_reason = ""
+                
+                # Check stop loss
+                if stop_loss:
+                    if side == 'BUY' and current_price <= stop_loss:
+                        should_close = True
+                        close_reason = "Stop Loss"
+                    elif side == 'SELL' and current_price >= stop_loss:
+                        should_close = True
+                        close_reason = "Stop Loss"
+                
+                # Check take profit
+                if not should_close and take_profit:
+                    if side == 'BUY' and current_price >= take_profit:
+                        should_close = True
+                        close_reason = "Take Profit"
+                    elif side == 'SELL' and current_price <= take_profit:
+                        should_close = True
+                        close_reason = "Take Profit"
+                
+                if should_close:
+                    await self.close_position(position_id, close_reason)
+                
+        except Exception as e:
+            logger.error(f"❌ Stop loss/take profit check error: {e}")
+    
+    async def get_position_performance(self, position_id: int) -> Dict[str, Any]:
+        """Pozisyon performans metrikleri"""
+        try:
+            if position_id not in self.open_positions:
+                # Check closed positions in database
+                positions = await self.db_manager.get_positions()
+                for pos in positions:
+                    if pos['id'] == position_id:
+                        return self._calculate_position_metrics(pos)
+                return {}
+            
+            position = self.open_positions[position_id]
+            current_price = await self._get_current_price(position['symbol'])
+            
+            if current_price:
+                position['current_price'] = current_price
+                position['pnl'] = self._calculate_pnl(position, current_price)
+            
+            return self._calculate_position_metrics(position)
+            
+        except Exception as e:
+            logger.error(f"❌ Position performance error: {e}")
+            return {}
+    
+    def _calculate_position_metrics(self, position: Dict) -> Dict[str, Any]:
+        """Pozisyon metriklerini hesapla"""
+        try:
             entry_price = position['entry_price']
-            side = position['side']
+            current_price = position.get('current_price', entry_price)
             size = position['size']
+            pnl = position.get('pnl', 0)
             
-        if side == 'BUY':
-                unrealized_pnl = (current_price - entry_price) * size
-                pnl_pct = (current_price - entry_price) / entry_price * 100
-        else:
-                unrealized_pnl = (entry_price - current_price) * size
-                pnl_pct = (entry_price - current_price) / entry_price * 100
-            
-            # Time metrics
-            opened_at = position['opened_at']
-        if isinstance(opened_at, str):
+            # Duration
+            opened_at = position.get('opened_at', datetime.now())
+            if isinstance(opened_at, str):
                 opened_at = datetime.fromisoformat(opened_at.replace('Z', '+00:00'))
             
             duration = datetime.now() - opened_at
-            duration_hours = duration.total_seconds() / 3600
             
-            # Risk metrics
+            # P&L percentage
             position_value = entry_price * size
-            risk_amount = position_value * 0.02  # Assumed 2% risk
+            pnl_percentage = (pnl / position_value * 100) if position_value > 0 else 0
             
-            risk_reward_ratio = abs(unrealized_pnl / risk_amount) if risk_amount > 0 else 0
+            # Risk-reward ratio
+            stop_loss = position.get('stop_loss')
+            take_profit = position.get('take_profit')
+            
+            risk_reward_ratio = None
+            if stop_loss and take_profit:
+                risk = abs(entry_price - stop_loss)
+                reward = abs(take_profit - entry_price)
+                risk_reward_ratio = reward / risk if risk > 0 else 0
             
             return {
-                'position_id': position_id,
+                'position_id': position.get('id'),
                 'symbol': position['symbol'],
-                'side': side,
+                'side': position['side'],
                 'entry_price': entry_price,
                 'current_price': current_price,
                 'size': size,
-                'unrealized_pnl': unrealized_pnl,
-                'pnl_percentage': pnl_pct,
-                'position_value': position_value,
-                'duration_hours': duration_hours,
+                'pnl': pnl,
+                'pnl_percentage': pnl_percentage,
+                'duration_hours': duration.total_seconds() / 3600,
                 'risk_reward_ratio': risk_reward_ratio,
-                'stop_loss': position.get('stop_loss'),
-                'take_profit': position.get('take_profit'),
-                'trailing_stop_enabled': position.get('trailing_stop_enabled', False),
-                'strategy': position.get('strategy'),
-                'confidence': position.get('confidence')
+                'status': position.get('status', 'OPEN')
             }
             
-    except Exception as e:
-            logger.error(f"❌ Position performance hatası: {e}")
-            return {'error': str(e)}
+        except Exception as e:
+            logger.error(f"❌ Position metrics calculation error: {e}")
+            return {}
+    
+    def _calculate_pnl(self, position: Dict, current_price: float) -> float:
+        """P&L hesapla"""
+        try:
+            entry_price = position['entry_price']
+            size = position['size']
+            side = position['side']
+            
+            if side == 'BUY':
+                return (current_price - entry_price) * size
+            else:  # SELL
+                return (entry_price - current_price) * size
+                
+        except Exception as e:
+            logger.error(f"❌ P&L calculation error: {e}")
+            return 0.0
+    
+    async def _place_order(self, symbol: str, side: str, size: float, 
+                          price: float, order_type: str = 'MARKET') -> Optional[Dict]:
+        """Order placement"""
+        try:
+            # Simulate order placement
+            order_id = str(uuid.uuid4())
+            
+            logger.info(f"📋 Order placed: {symbol} {side} {size:.6f} @ {price:.4f}")
+            
+            return {
+                'order_id': order_id,
+                'symbol': symbol,
+                'side': side,
+                'size': size,
+                'price': price,
+                'status': 'FILLED'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Order placement error: {e}")
+            return None
+    
+    async def _get_current_price(self, symbol: str) -> Optional[float]:
+        """Güncel fiyat al"""
+        try:
+            market_data = await self.exchange_manager.get_real_time_data(symbol)
+            return market_data.get('price') if market_data else None
+            
+        except Exception as e:
+            logger.error(f"❌ Current price error for {symbol}: {e}")
+            return None
+    
+    async def _create_position_record(self, symbol: str, side: str, size: float,
+                                    entry_price: float, stop_loss: Optional[float],
+                                    take_profit: Optional[float], strategy: str,
+                                    confidence: float, order_id: str) -> Optional[int]:
+        """Pozisyon kaydı oluştur"""
+        try:
+            position_data = {
+                'symbol': symbol,
+                'side': side,
+                'size': size,
+                'entry_price': entry_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'strategy': strategy,
+                'confidence': confidence,
+                'exchange': 'binance',  # Default
+                'order_id': order_id
+            }
+            
+            position_id = await self.db_manager.save_position(position_data)
+            return position_id
+            
+        except Exception as e:
+            logger.error(f"❌ Position record creation error: {e}")
+            return None
+    
+    async def get_open_positions(self) -> List[Dict[str, Any]]:
+        """Açık pozisyonları getir"""
+        return list(self.open_positions.values())
+    
+    async def get_position_count(self) -> int:
+        """Açık pozisyon sayısı"""
+        return len(self.open_positions)
+    
+    async def close(self):
+        """Position manager'ı kapat"""
+        try:
+            # Close all open positions
+            for position_id in list(self.open_positions.keys()):
+                await self.close_position(position_id, "System shutdown")
+            
+            logger.info("📊 Position Manager closed")
+            
+        except Exception as e:
+            logger.error(f"❌ Position Manager close error: {e}")
