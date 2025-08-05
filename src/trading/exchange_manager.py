@@ -181,6 +181,63 @@ class ExchangeManager:
             logger.error(f"❌ {symbol} market data hatası: {e}")
             return None
     
+    async def get_real_time_data(self, symbol: str, exchange_name: str = None) -> Optional[Dict[str, Any]]:
+        """Gerçek zamanlı market data al"""
+        try:
+            if not exchange_name:
+                exchange_name = await self._select_best_exchange(symbol)
+            
+            if not exchange_name or exchange_name not in self.exchanges:
+                return None
+            
+            exchange = self.exchanges[exchange_name]
+            
+            # Rate limiting kontrol
+            await self._check_rate_limit(exchange_name)
+            
+            # Ticker bilgisi
+            ticker = await exchange.fetch_ticker(symbol)
+            
+            # Order book (top 10)
+            try:
+                orderbook = await exchange.fetch_order_book(symbol, limit=10)
+            except:
+                orderbook = {'bids': [], 'asks': []}
+            
+            # Son trades
+            try:
+                trades = await exchange.fetch_trades(symbol, limit=20)
+                recent_trades = trades[-10:] if trades else []
+            except:
+                recent_trades = []
+            
+            # Spread hesaplama
+            spread_pct = 0
+            if ticker['bid'] and ticker['ask'] and ticker['ask'] > 0:
+                spread_pct = (ticker['ask'] - ticker['bid']) / ticker['ask'] * 100
+            
+            return {
+                'symbol': symbol,
+                'exchange': exchange_name,
+                'price': ticker['last'],
+                'bid': ticker['bid'],
+                'ask': ticker['ask'],
+                'spread_pct': spread_pct,
+                'volume_24h': ticker['baseVolume'],
+                'quote_volume_24h': ticker['quoteVolume'],
+                'change_24h': ticker['change'],
+                'change_pct_24h': ticker['percentage'],
+                'high_24h': ticker['high'],
+                'low_24h': ticker['low'],
+                'orderbook': orderbook,
+                'recent_trades': recent_trades,
+                'timestamp': datetime.now()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ {symbol} real-time data hatası: {e}")
+            return None
+    
     async def get_historical_data(self, symbol: str, timeframe: str = '1h', 
                                  days: int = 30, exchange_name: str = None) -> pd.DataFrame:
         """Geçmiş verileri al"""

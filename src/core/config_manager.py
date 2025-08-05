@@ -8,6 +8,7 @@ import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 from loguru import logger
+from dotenv import load_dotenv
 
 
 class ConfigManager:
@@ -78,31 +79,82 @@ class ConfigManager:
         logger.info("✅ Konfigürasyon doğrulaması başarıyla tamamlandı")
     
     def _set_environment_variables(self):
-        """Konfigürasyondan environment variable'ları ayarla"""
-        # API anahtarları için environment variable'ları kontrol et
-        for exchange_name, exchange_config in self.config['exchanges'].items():
-            api_key_env = f"{exchange_name.upper()}_API_KEY"
-            secret_env = f"{exchange_name.upper()}_SECRET"
+        """Environment variables ile konfigürasyonu güncelle"""
+        try:
+            # Load .env file
+            load_dotenv()
             
-            if os.getenv(api_key_env):
-                exchange_config['api_key'] = os.getenv(api_key_env)
-            if os.getenv(secret_env):
-                exchange_config['secret'] = os.getenv(secret_env)
+            # Exchange API keys
+            exchanges = self.config.get('exchanges', {})
             
-            # OKX için passphrase
-            if exchange_name == 'okx':
-                passphrase_env = f"{exchange_name.upper()}_PASSPHRASE"
-                if os.getenv(passphrase_env):
-                    exchange_config['passphrase'] = os.getenv(passphrase_env)
-        
-        # Telegram bot token
-        telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        if telegram_token:
-            self.config['notifications']['telegram']['bot_token'] = telegram_token
-        
-        telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        if telegram_chat_id:
-            self.config['notifications']['telegram']['chat_id'] = telegram_chat_id
+            for exchange_name, exchange_config in exchanges.items():
+                api_key_env = f"{exchange_name.upper()}_API_KEY"
+                secret_env = f"{exchange_name.upper()}_SECRET"
+                sandbox_env = f"{exchange_name.upper()}_SANDBOX"
+                
+                if os.getenv(api_key_env):
+                    exchange_config['api_key'] = os.getenv(api_key_env)
+                
+                if os.getenv(secret_env):
+                    exchange_config['secret'] = os.getenv(secret_env)
+                
+                if os.getenv(sandbox_env):
+                    exchange_config['sandbox'] = os.getenv(sandbox_env).lower() == 'true'
+                
+                # OKX passphrase
+                if exchange_name.upper() == 'OKX' and os.getenv('OKX_PASSPHRASE'):
+                    exchange_config['passphrase'] = os.getenv('OKX_PASSPHRASE')
+            
+            # Notification settings
+            notifications = self.config.get('notifications', {})
+            
+            # Telegram
+            if os.getenv('TELEGRAM_BOT_TOKEN'):
+                notifications.setdefault('telegram', {})['bot_token'] = os.getenv('TELEGRAM_BOT_TOKEN')
+            if os.getenv('TELEGRAM_CHAT_ID'):
+                notifications.setdefault('telegram', {})['chat_id'] = os.getenv('TELEGRAM_CHAT_ID')
+            
+            # Discord
+            if os.getenv('DISCORD_WEBHOOK_URL'):
+                notifications.setdefault('discord', {})['webhook_url'] = os.getenv('DISCORD_WEBHOOK_URL')
+            
+            # Email
+            email_config = notifications.setdefault('email', {})
+            if os.getenv('EMAIL_SMTP_HOST'):
+                email_config['smtp_host'] = os.getenv('EMAIL_SMTP_HOST')
+            if os.getenv('EMAIL_SMTP_PORT'):
+                email_config['smtp_port'] = int(os.getenv('EMAIL_SMTP_PORT'))
+            if os.getenv('EMAIL_FROM'):
+                email_config['from_email'] = os.getenv('EMAIL_FROM')
+            if os.getenv('EMAIL_PASSWORD'):
+                email_config['password'] = os.getenv('EMAIL_PASSWORD')
+            if os.getenv('EMAIL_TO'):
+                email_config['to_email'] = os.getenv('EMAIL_TO')
+            
+            # Risk Management
+            risk_mgmt = self.config.get('risk_management', {})
+            if os.getenv('MAX_PORTFOLIO_RISK'):
+                risk_mgmt['max_portfolio_risk'] = float(os.getenv('MAX_PORTFOLIO_RISK'))
+            if os.getenv('MAX_DAILY_LOSS'):
+                risk_mgmt['max_daily_loss'] = float(os.getenv('MAX_DAILY_LOSS'))
+            if os.getenv('MAX_OPEN_POSITIONS'):
+                risk_mgmt['max_open_positions'] = int(os.getenv('MAX_OPEN_POSITIONS'))
+            
+            # AI Settings
+            ai_settings = self.config.get('ai_settings', {})
+            if os.getenv('AI_CONFIDENCE_THRESHOLD'):
+                ai_settings['confidence_threshold'] = float(os.getenv('AI_CONFIDENCE_THRESHOLD'))
+            if os.getenv('AI_RETRAIN_FREQUENCY_HOURS'):
+                ai_settings['retrain_frequency_hours'] = int(os.getenv('AI_RETRAIN_FREQUENCY_HOURS'))
+            
+            # Trading Mode
+            if os.getenv('TRADING_MODE'):
+                self.config['trading_mode'] = os.getenv('TRADING_MODE')
+            
+            logger.info("✅ Environment variables entegre edildi")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Environment variable entegrasyon hatası: {e}")
     
     def get_config(self) -> Dict[str, Any]:
         """Mevcut konfigürasyonu döndür"""

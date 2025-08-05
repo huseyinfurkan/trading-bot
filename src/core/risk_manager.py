@@ -283,22 +283,30 @@ class RiskManager:
             return 1
     
     async def _check_correlation(self, symbol: str) -> Dict[str, Any]:
-        """Correlation kontrolü"""
+        """Gerçek correlation kontrolü"""
         try:
-            # Bu basit bir implementasyon
-            # Gerçek implementasyon için historical price correlation hesaplanmalı
-            
-            # Şimdilik temel kontrol
             current_positions = await self.db_manager.get_positions(status='OPEN')
+            
+            if not current_positions:
+                return {'allowed': True, 'reason': 'No existing positions'}
             
             # Aynı base currency kontrolü
             base_currency = symbol.split('/')[0]
             same_base_count = sum(1 for pos in current_positions if pos['symbol'].startswith(base_currency))
             
-            if same_base_count >= 3:  # Maximum 3 position per base currency
+            if same_base_count >= 3:
                 return {
                     'allowed': False,
                     'reason': f"Too many positions with {base_currency}: {same_base_count}"
+                }
+            
+            # Gerçek correlation hesaplama
+            correlation_check = await self._calculate_price_correlation(symbol, current_positions)
+            
+            if correlation_check['max_correlation'] > self.correlation_limit:
+                return {
+                    'allowed': False,
+                    'reason': f"High correlation detected: {correlation_check['max_correlation']:.3f} with {correlation_check['correlated_symbol']}"
                 }
             
             return {'allowed': True, 'reason': 'Correlation check passed'}
@@ -306,6 +314,111 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Correlation kontrol hatası: {e}")
             return {'allowed': True, 'reason': 'Correlation check skipped due to error'}
+    
+    async def _calculate_price_correlation(self, symbol: str, current_positions: List[Dict]) -> Dict[str, Any]:
+        """Gerçek fiyat korelasyonu hesapla"""
+        try:
+            import pandas as pd
+            import numpy as np
+            from datetime import datetime, timedelta
+            
+            # Get historical data for the new symbol
+            new_symbol_data = await self._get_price_history(symbol, days=30)
+            
+            if new_symbol_data is None or len(new_symbol_data) < 20:
+                return {'max_correlation': 0.0, 'correlated_symbol': None}
+            
+            max_correlation = 0.0
+            correlated_symbol = None
+            
+            # Check correlation with each existing position
+            for position in current_positions:
+                existing_symbol = position['symbol']
+                existing_data = await self._get_price_history(existing_symbol, days=30)
+                
+                if existing_data is None or len(existing_data) < 20:
+                    continue
+                
+                # Align data by timestamp
+                correlation = self._compute_correlation(new_symbol_data, existing_data)
+                
+                if abs(correlation) > abs(max_correlation):
+                    max_correlation = correlation
+                    correlated_symbol = existing_symbol
+            
+            return {
+                'max_correlation': abs(max_correlation),
+                'correlated_symbol': correlated_symbol
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Price correlation hesaplama hatası: {e}")
+            return {'max_correlation': 0.0, 'correlated_symbol': None}
+    
+    async def _get_price_history(self, symbol: str, days: int = 30) -> Optional[pd.DataFrame]:
+        """Sembol için fiyat geçmişi al"""
+        try:
+            # Try database first
+            market_data = await self.db_manager.get_market_data(
+                symbol=symbol,
+                exchange='binance',  # Default exchange
+                timeframe='1h',
+                limit=days * 24
+            )
+            
+            if not market_data.empty and len(market_data) >= 20:
+                return market_data[['timestamp', 'close']].copy()
+            
+            # Fallback to yfinance for crypto data
+            import yfinance as yf
+            
+            # Convert symbol format
+            yf_symbol = symbol.replace('USDT', '-USD').replace('/', '-')
+            
+            ticker = yf.Ticker(yf_symbol)
+            data = ticker.history(period=f"{days}d", interval="1h")
+            
+            if data.empty:
+                return None
+            
+            df = pd.DataFrame({
+                'timestamp': data.index,
+                'close': data['Close'].values
+            })
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ {symbol} fiyat geçmişi alınamadı: {e}")
+            return None
+    
+    def _compute_correlation(self, data1: pd.DataFrame, data2: pd.DataFrame) -> float:
+        """İki fiyat serisi arasında korelasyon hesapla"""
+        try:
+            # Merge on timestamp
+            merged = pd.merge(data1, data2, on='timestamp', suffixes=('_1', '_2'))
+            
+            if len(merged) < 10:
+                return 0.0
+            
+            # Calculate returns
+            merged['return_1'] = merged['close_1'].pct_change()
+            merged['return_2'] = merged['close_2'].pct_change()
+            
+            # Remove NaN values
+            merged = merged.dropna()
+            
+            if len(merged) < 10:
+                return 0.0
+            
+            # Calculate correlation
+            correlation = merged['return_1'].corr(merged['return_2'])
+            
+            return correlation if not pd.isna(correlation) else 0.0
+            
+        except Exception as e:
+            logger.error(f"❌ Korelasyon hesaplama hatası: {e}")
+            return 0.0
     
     async def _check_market_conditions(self) -> Dict[str, Any]:
         """Market koşulları kontrolü"""
