@@ -59,11 +59,19 @@ class ConfigManager:
         """Konfigürasyonu doğrula"""
         logger.info("🔍 Konfigürasyon doğrulanıyor...")
         
-        # Gerekli ana bölümleri kontrol et
-        required_sections = ['exchanges', 'strategies', 'risk_management', 'trading_pairs']
+        # Gerekli ana bölümleri kontrol et (esnek validation)
+        required_sections = ['exchanges', 'strategies', 'risk_management']
+        optional_sections = ['trading_pairs', 'ai', 'notifications', 'database']
+        
         for section in required_sections:
             if section not in self.config:
                 raise ValueError(f"Eksik konfigürasyon bölümü: {section}")
+        
+        # Optional bölümler için default değerler
+        for section in optional_sections:
+            if section not in self.config:
+                self.config[section] = {}
+                logger.warning(f"⚠️ Optional section '{section}' eksik, boş dictionary olarak ayarlandı")
         
         # Exchange ayarlarını doğrula (esnek validation)
         for exchange_name, exchange_config in self.config['exchanges'].items():

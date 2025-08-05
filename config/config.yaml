@@ -311,6 +311,33 @@ backtesting:
         take_profit_pct: [0.004, 0.006, 0.008]
 
 # =============================================================================
+# TRADING PAIRS
+# =============================================================================
+trading_pairs:
+  # Major cryptocurrencies - High volume, stable
+  major:
+    - "BTCUSDT"
+    - "ETHUSDT" 
+    - "BNBUSDT"
+    
+  # Mid-cap altcoins - Good volume
+  altcoins:
+    - "ADAUSDT"
+    - "SOLUSDT"
+    - "MATICUSDT"
+    - "DOTUSDT"
+    - "LINKUSDT"
+    
+  # DeFi tokens - Higher volatility
+  defi:
+    - "AVAXUSDT"
+    - "ATOMUSDT"
+    - "UNIUSDT"
+    - "AAVEUSDT"
+    - "COMPUSDT"
+    - "SUSHIUSDT"
+
+# =============================================================================
 # TRADING SETTINGS
 # =============================================================================
 trading:
