@@ -1,43 +1,32 @@
 """
 AI Signal Filter
-Yapay zeka ile trading sinyallerini filtreler ve güçlendirir
+Gerçek makine öğrenmesi modelleri ile sinyal filtreleme ve üretme
 """
 
 import numpy as np
 import pandas as pd
+import asyncio
+import pickle
+import joblib
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
+from pathlib import Path
 from loguru import logger
-import asyncio
-import json
 
-# Machine Learning imports
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+# ML Libraries
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import classification_report, accuracy_score
+import yfinance as yf
 
 # Technical Analysis
-import ta
-from ta.volatility import BollingerBands, AverageTrueRange
-from ta.momentum import RSIIndicator, StochRSIIndicator, MFIIndicator
-from ta.trend import MACD, EMAIndicator, SMAIndicator, ADXIndicator
-from ta.volume import OnBalanceVolumeIndicator, VolumeSMAIndicator
-
-# Deep Learning (optional - requires tensorflow)
-try:
-    import tensorflow as tf
-    from tensorflow.keras.models import Sequential, load_model
-    from tensorflow.keras.layers import LSTM, Dense, Dropout
-    from tensorflow.keras.optimizers import Adam
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-    logger.warning("⚠️ TensorFlow bulunamadı, LSTM modeller kullanılamayacak")
+import talib
+import pandas_ta as ta
 
 
 class AISignalFilter:
-    """AI sinyal filtreleme sistemi"""
+    """AI destekli sinyal filtreleme sistemi"""
     
     def __init__(self, ai_config: Dict[str, Any], db_manager):
         """
@@ -48,492 +37,614 @@ class AISignalFilter:
         self.config = ai_config
         self.db_manager = db_manager
         
-        # Model parametreleri
+        # Model configuration
         self.confidence_threshold = ai_config.get('confidence_threshold', 0.75)
         self.signal_strength_min = ai_config.get('signal_strength_min', 0.65)
-        self.model_retrain_hours = ai_config.get('ml_model_retrain_hours', 24)
-        
-        # Ağırlıklar
-        self.sentiment_weight = ai_config.get('sentiment_weight', 0.3)
         self.technical_weight = ai_config.get('technical_weight', 0.5)
+        self.sentiment_weight = ai_config.get('sentiment_weight', 0.3)
         self.fundamental_weight = ai_config.get('fundamental_weight', 0.2)
         
-        # Model saklama
-        self.models: Dict[str, Any] = {}
-        self.scalers: Dict[str, StandardScaler] = {}
-        self.last_training: Dict[str, datetime] = {}
-        
-        # Feature engineering parametreleri
+        # Models
+        self.models = {}
+        self.scalers = {}
+        self.label_encoders = {}
         self.feature_columns = []
-        self.target_column = 'signal'
         
+        # Model paths
+        self.model_dir = Path("models")
+        self.model_dir.mkdir(exist_ok=True)
+        
+        # Feature definitions
+        self._define_features()
+        
+        # Training data cache
+        self.training_data_cache = {}
+        self.last_retrain = None
+        self.retrain_frequency = ai_config.get('retrain_frequency_hours', 24)
+        
+    def _define_features(self) -> None:
+        """Feature tanımlarını oluştur"""
+        # Technical features
+        self.technical_features = [
+            'rsi_14', 'rsi_21', 'rsi_30',
+            'sma_10', 'sma_20', 'sma_50', 'sma_200',
+            'ema_12', 'ema_26', 'ema_50',
+            'macd', 'macd_signal', 'macd_histogram',
+            'bb_upper', 'bb_middle', 'bb_lower', 'bb_width',
+            'atr_14', 'atr_ratio',
+            'stoch_k', 'stoch_d',
+            'williams_r',
+            'cci_14',
+            'momentum_10',
+            'roc_10',
+            'mfi_14',
+            'obv_ratio',
+            'ad_line',
+            'price_change_1h', 'price_change_4h', 'price_change_1d',
+            'volume_change_1h', 'volume_change_4h',
+            'volume_sma_ratio',
+            'high_low_ratio',
+            'support_resistance_score',
+            'trend_strength',
+            'volatility_rank'
+        ]
+        
+        # Pattern features
+        self.pattern_features = [
+            'doji', 'hammer', 'shooting_star', 'engulfing_bull', 'engulfing_bear',
+            'morning_star', 'evening_star', 'hanging_man'
+        ]
+        
+        # Market context features
+        self.context_features = [
+            'hour_of_day', 'day_of_week', 'market_session',
+            'btc_correlation', 'market_dominance'
+        ]
+        
+        # All features
+        self.feature_columns = (
+            self.technical_features + 
+            self.pattern_features + 
+            self.context_features
+        )
+        
+        logger.info(f"📊 Toplam feature sayısı: {len(self.feature_columns)}")
+    
     async def initialize(self) -> None:
-        """AI modelleri başlat"""
+        """AI sistemini başlat"""
         try:
-            logger.info("🧠 AI Signal Filter başlatılıyor...")
+            logger.info("🤖 AI Signal Filter başlatılıyor...")
             
-            # Önceki modelleri yükle
+            # Load existing models
             await self._load_saved_models()
             
-            # Feature column'ları tanımla
-            self._define_features()
+            # Check if retraining is needed
+            if self._should_retrain():
+                await self.retrain_all_models()
             
             logger.success("✅ AI Signal Filter başlatıldı")
             
         except Exception as e:
-            logger.error(f"❌ AI Signal Filter başlatma hatası: {e}")
+            logger.error(f"❌ AI inicializasyon hatası: {e}")
             raise
     
-    def _define_features(self) -> None:
-        """Feature column'larını tanımla"""
-        self.feature_columns = [
-            # Price features
-            'close', 'volume', 'high', 'low', 'open',
-            
-            # Technical indicators - Trend
-            'ema_9', 'ema_21', 'ema_50', 'sma_200',
-            'macd', 'macd_signal', 'macd_diff',
-            'adx',
-            
-            # Technical indicators - Momentum  
-            'rsi', 'stoch_rsi', 'mfi', 'cci', 'williams_r',
-            
-            # Technical indicators - Volatility
-            'bb_upper', 'bb_middle', 'bb_lower', 'bb_width',
-            'atr',
-            
-            # Technical indicators - Volume
-            'obv', 'vwap', 'volume_sma',
-            
-            # Price patterns
-            'price_change_1h', 'price_change_4h', 'price_change_1d',
-            'volume_change_1h', 'volume_change_4h',
-            
-            # Market structure
-            'support_resistance_score', 'trend_strength',
-            'volatility_percentile', 'volume_percentile'
-        ]
-    
     async def analyze_signals(self, symbol: str, market_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Ana sinyal analiz fonksiyonu"""
+        """Ana sinyal analizi fonksiyonu"""
         try:
-            df = market_data.get('dataframe')
-            if df is None or df.empty:
-                return {'strength': 0, 'confidence': 0, 'signals': []}
+            logger.debug(f"🔍 {symbol} için sinyal analizi başlatılıyor...")
             
-            # Feature'ları hesapla
+            # Get dataframe
+            df = market_data.get('dataframe')
+            if df is None or len(df) < 200:
+                logger.warning(f"⚠️ {symbol} için yetersiz veri")
+                return self._get_empty_signals()
+            
+            # Calculate features
             features_df = await self._calculate_features(df)
             
-            if features_df.empty:
-                return {'strength': 0, 'confidence': 0, 'signals': []}
+            if features_df is None or len(features_df) == 0:
+                logger.warning(f"⚠️ {symbol} için feature hesaplanamadı")
+                return self._get_empty_signals()
             
-            # ML model sinyalleri
-            ml_signals = await self._get_ml_signals(symbol, features_df)
+            # Get ML signals
+            ml_signals = await self._get_ml_signals(features_df, symbol)
             
-            # Technical analysis sinyalleri
-            ta_signals = await self._get_technical_signals(features_df)
+            # Get technical signals
+            technical_signals = await self._get_technical_signals(df)
             
-            # Pattern recognition sinyalleri
-            pattern_signals = await self._get_pattern_signals(features_df)
+            # Get pattern signals
+            pattern_signals = await self._get_pattern_signals(df)
             
-            # Sentiment analizi (eğer veri varsa)
+            # Get sentiment signals (placeholder for now)
             sentiment_signals = await self._get_sentiment_signals(symbol)
             
-            # Sinyalleri birleştir ve filtrele
+            # Combine all signals
             combined_signals = await self._combine_signals(
-                ml_signals, ta_signals, pattern_signals, sentiment_signals
+                ml_signals, technical_signals, pattern_signals, sentiment_signals
             )
             
-            # Güven faktörü hesapla
+            # Calculate overall confidence and strength
             confidence = await self._calculate_signal_confidence(combined_signals)
-            
-            # Sinyal gücü hesapla
             strength = await self._calculate_signal_strength(combined_signals)
             
-            # Sonuçları kaydet
-            await self._save_signal_analysis(symbol, market_data, combined_signals, confidence, strength)
-            
-            return {
-                'strength': strength,
-                'confidence': confidence,
+            result = {
+                'symbol': symbol,
+                'timestamp': datetime.now(),
                 'signals': combined_signals,
-                'ml_signals': ml_signals,
-                'ta_signals': ta_signals,
-                'pattern_signals': pattern_signals,
-                'sentiment_signals': sentiment_signals,
-                'timestamp': datetime.now()
+                'confidence': confidence,
+                'strength': strength,
+                'ml_prediction': ml_signals,
+                'technical_score': len(technical_signals),
+                'pattern_score': len(pattern_signals),
+                'recommendation': self._get_recommendation(combined_signals, confidence)
             }
             
+            # Save analysis
+            await self._save_signal_analysis(symbol, result)
+            
+            logger.debug(f"✅ {symbol} sinyal analizi tamamlandı: {len(combined_signals)} sinyal")
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"❌ {symbol} sinyal analiz hatası: {e}")
-            return {'strength': 0, 'confidence': 0, 'signals': []}
+            logger.error(f"❌ {symbol} sinyal analizi hatası: {e}")
+            return self._get_empty_signals()
     
-    async def _calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Technical indicator'ları ve feature'ları hesapla"""
+    async def _calculate_features(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """Tüm feature'ları hesapla"""
         try:
-            if len(df) < 50:  # Minimum veri gereksinimi
-                return pd.DataFrame()
+            if len(df) < 200:
+                return None
             
             features_df = df.copy()
             
-            # Trend indicators
-            features_df['ema_9'] = EMAIndicator(close=df['close'], window=9).ema_indicator()
-            features_df['ema_21'] = EMAIndicator(close=df['close'], window=21).ema_indicator()
-            features_df['ema_50'] = EMAIndicator(close=df['close'], window=50).ema_indicator()
-            features_df['sma_200'] = SMAIndicator(close=df['close'], window=200).sma_indicator()
+            # Technical indicators using talib
+            try:
+                # RSI
+                features_df['rsi_14'] = talib.RSI(df['close'].values, timeperiod=14)
+                features_df['rsi_21'] = talib.RSI(df['close'].values, timeperiod=21)
+                features_df['rsi_30'] = talib.RSI(df['close'].values, timeperiod=30)
+                
+                # Moving averages
+                features_df['sma_10'] = talib.SMA(df['close'].values, timeperiod=10)
+                features_df['sma_20'] = talib.SMA(df['close'].values, timeperiod=20)
+                features_df['sma_50'] = talib.SMA(df['close'].values, timeperiod=50)
+                features_df['sma_200'] = talib.SMA(df['close'].values, timeperiod=200)
+                
+                features_df['ema_12'] = talib.EMA(df['close'].values, timeperiod=12)
+                features_df['ema_26'] = talib.EMA(df['close'].values, timeperiod=26)
+                features_df['ema_50'] = talib.EMA(df['close'].values, timeperiod=50)
+                
+                # MACD
+                macd, macd_signal, macd_hist = talib.MACD(df['close'].values)
+                features_df['macd'] = macd
+                features_df['macd_signal'] = macd_signal
+                features_df['macd_histogram'] = macd_hist
+                
+                # Bollinger Bands
+                bb_upper, bb_middle, bb_lower = talib.BBANDS(df['close'].values)
+                features_df['bb_upper'] = bb_upper
+                features_df['bb_middle'] = bb_middle
+                features_df['bb_lower'] = bb_lower
+                features_df['bb_width'] = (bb_upper - bb_lower) / bb_middle
+                
+                # ATR
+                features_df['atr_14'] = talib.ATR(df['high'].values, df['low'].values, df['close'].values)
+                features_df['atr_ratio'] = features_df['atr_14'] / features_df['close']
+                
+                # Stochastic
+                stoch_k, stoch_d = talib.STOCH(df['high'].values, df['low'].values, df['close'].values)
+                features_df['stoch_k'] = stoch_k
+                features_df['stoch_d'] = stoch_d
+                
+                # Williams %R
+                features_df['williams_r'] = talib.WILLR(df['high'].values, df['low'].values, df['close'].values)
+                
+                # CCI
+                features_df['cci_14'] = talib.CCI(df['high'].values, df['low'].values, df['close'].values)
+                
+                # Momentum
+                features_df['momentum_10'] = talib.MOM(df['close'].values, timeperiod=10)
+                
+                # ROC
+                features_df['roc_10'] = talib.ROC(df['close'].values, timeperiod=10)
+                
+                # MFI
+                features_df['mfi_14'] = talib.MFI(df['high'].values, df['low'].values, df['close'].values, df['volume'].values)
+                
+                # OBV
+                obv = talib.OBV(df['close'].values, df['volume'].values)
+                features_df['obv_ratio'] = obv / obv.rolling(20).mean()
+                
+                # AD Line
+                features_df['ad_line'] = talib.AD(df['high'].values, df['low'].values, df['close'].values, df['volume'].values)
+                
+            except Exception as e:
+                logger.warning(f"⚠️ TALib hesaplama hatası: {e}")
+                # Fallback to pandas calculations
+                features_df = self._calculate_features_pandas(features_df)
             
-            # MACD
-            macd = MACD(close=df['close'])
-            features_df['macd'] = macd.macd()
-            features_df['macd_signal'] = macd.macd_signal()
-            features_df['macd_diff'] = macd.macd_diff()
+            # Price and volume changes
+            features_df['price_change_1h'] = features_df['close'].pct_change(1)
+            features_df['price_change_4h'] = features_df['close'].pct_change(4)
+            features_df['price_change_1d'] = features_df['close'].pct_change(24)
             
-            # ADX
-            features_df['adx'] = ADXIndicator(high=df['high'], low=df['low'], close=df['close']).adx()
+            features_df['volume_change_1h'] = features_df['volume'].pct_change(1)
+            features_df['volume_change_4h'] = features_df['volume'].pct_change(4)
             
-            # Momentum indicators
-            features_df['rsi'] = RSIIndicator(close=df['close']).rsi()
-            features_df['stoch_rsi'] = StochRSIIndicator(close=df['close']).stochrsi()
-            features_df['mfi'] = MFIIndicator(high=df['high'], low=df['low'], 
-                                            close=df['close'], volume=df['volume']).money_flow_index()
-            features_df['cci'] = ta.trend.cci(high=df['high'], low=df['low'], close=df['close'])
-            features_df['williams_r'] = ta.momentum.williams_r(high=df['high'], low=df['low'], close=df['close'])
+            # Volume ratio
+            features_df['volume_sma_ratio'] = features_df['volume'] / features_df['volume'].rolling(20).mean()
             
-            # Volatility indicators
-            bb = BollingerBands(close=df['close'])
-            features_df['bb_upper'] = bb.bollinger_hband()
-            features_df['bb_middle'] = bb.bollinger_mavg()
-            features_df['bb_lower'] = bb.bollinger_lband()
-            features_df['bb_width'] = (features_df['bb_upper'] - features_df['bb_lower']) / features_df['bb_middle']
+            # High-Low ratio
+            features_df['high_low_ratio'] = (features_df['high'] - features_df['low']) / features_df['close']
             
-            features_df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close']).average_true_range()
+            # Custom features
+            features_df['support_resistance_score'] = self._calculate_support_resistance(features_df)
+            features_df['trend_strength'] = self._calculate_trend_strength(features_df)
+            features_df['volatility_rank'] = features_df['atr_ratio'].rolling(100).rank(pct=True)
             
-            # Volume indicators
-            features_df['obv'] = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume']).on_balance_volume()
-            features_df['vwap'] = ta.volume.volume_weighted_average_price(
-                high=df['high'], low=df['low'], close=df['close'], volume=df['volume']
-            )
-            features_df['volume_sma'] = VolumeSMAIndicator(close=df['close'], volume=df['volume']).volume_sma()
+            # Candlestick patterns
+            patterns = self._calculate_candlestick_patterns(df)
+            for pattern_name, pattern_values in patterns.items():
+                features_df[pattern_name] = pattern_values
             
-            # Price change features
-            features_df['price_change_1h'] = df['close'].pct_change(periods=1)
-            features_df['price_change_4h'] = df['close'].pct_change(periods=4)
-            features_df['price_change_1d'] = df['close'].pct_change(periods=24)
+            # Market context
+            features_df['hour_of_day'] = pd.to_datetime(features_df['timestamp']).dt.hour
+            features_df['day_of_week'] = pd.to_datetime(features_df['timestamp']).dt.dayofweek
+            features_df['market_session'] = self._get_market_session(features_df['hour_of_day'])
             
-            # Volume change features
-            features_df['volume_change_1h'] = df['volume'].pct_change(periods=1)
-            features_df['volume_change_4h'] = df['volume'].pct_change(periods=4)
-            
-            # Market structure features
-            features_df['support_resistance_score'] = await self._calculate_support_resistance(df)
-            features_df['trend_strength'] = await self._calculate_trend_strength(features_df)
-            features_df['volatility_percentile'] = features_df['atr'].rolling(100).rank(pct=True)
-            features_df['volume_percentile'] = features_df['volume'].rolling(100).rank(pct=True)
+            # BTC correlation (placeholder)
+            features_df['btc_correlation'] = 0.7
+            features_df['market_dominance'] = 0.5
             
             # NaN değerleri temizle
             features_df = features_df.ffill().fillna(0)
+            
+            # Select only feature columns
+            feature_cols = [col for col in self.feature_columns if col in features_df.columns]
+            features_df = features_df[feature_cols]
             
             return features_df
             
         except Exception as e:
             logger.error(f"❌ Feature hesaplama hatası: {e}")
-            return pd.DataFrame()
+            return None
     
-    async def _calculate_support_resistance(self, df: pd.DataFrame) -> pd.Series:
-        """Destek/direnç skorunu hesapla"""
+    def _calculate_features_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Pandas ile temel feature hesaplamaları (TALib fallback)"""
         try:
-            window = min(20, len(df) // 2)
+            # RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi_14'] = 100 - (100 / (1 + rs))
             
-            # Pivot noktaları bul
-            highs = df['high'].rolling(window).max()
-            lows = df['low'].rolling(window).min()
+            # Moving averages
+            df['sma_20'] = df['close'].rolling(20).mean()
+            df['sma_50'] = df['close'].rolling(50).mean()
+            df['ema_12'] = df['close'].ewm(span=12).mean()
+            df['ema_26'] = df['close'].ewm(span=26).mean()
             
-            # Mevcut fiyatın destek/direnç seviyelerine yakınlığını hesapla
-            current_price = df['close']
+            # MACD
+            df['macd'] = df['ema_12'] - df['ema_26']
+            df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            df['macd_histogram'] = df['macd'] - df['macd_signal']
             
-            # Normalize et
-            score = ((current_price - lows) / (highs - lows)).fillna(0.5)
+            # Bollinger Bands
+            df['bb_middle'] = df['close'].rolling(20).mean()
+            bb_std = df['close'].rolling(20).std()
+            df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+            df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
             
-            return score
+            # ATR approximation
+            df['tr'] = np.maximum(
+                df['high'] - df['low'],
+                np.maximum(
+                    abs(df['high'] - df['close'].shift(1)),
+                    abs(df['low'] - df['close'].shift(1))
+                )
+            )
+            df['atr_14'] = df['tr'].rolling(14).mean()
+            df['atr_ratio'] = df['atr_14'] / df['close']
+            
+            return df
             
         except Exception as e:
-            logger.error(f"❌ Destek/direnç hesaplama hatası: {e}")
-            return pd.Series([0.5] * len(df))
+            logger.error(f"❌ Pandas feature hesaplama hatası: {e}")
+            return df
     
-    async def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.Series:
+    def _calculate_candlestick_patterns(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Candlestick pattern'larını hesapla"""
+        try:
+            patterns = {}
+            
+            if len(df) < 10:
+                return {name: np.zeros(len(df)) for name in self.pattern_features}
+            
+            try:
+                # TALib patterns
+                patterns['doji'] = talib.CDLDOJI(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['hammer'] = talib.CDLHAMMER(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['shooting_star'] = talib.CDLSHOOTINGSTAR(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['engulfing_bull'] = talib.CDLENGULFING(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['engulfing_bear'] = -patterns['engulfing_bull']  # Reverse for bearish
+                patterns['morning_star'] = talib.CDLMORNINGSTAR(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['evening_star'] = talib.CDLEVENINGSTAR(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                patterns['hanging_man'] = talib.CDLHANGINGMAN(df['open'].values, df['high'].values, df['low'].values, df['close'].values)
+                
+            except Exception:
+                # Fallback: simple pattern detection
+                patterns = self._simple_pattern_detection(df)
+            
+            return patterns
+            
+        except Exception as e:
+            logger.error(f"❌ Pattern hesaplama hatası: {e}")
+            return {name: np.zeros(len(df)) for name in self.pattern_features}
+    
+    def _simple_pattern_detection(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Basit pattern tanıma (TALib olmadan)"""
+        patterns = {}
+        length = len(df)
+        
+        # Doji detection
+        body_size = abs(df['close'] - df['open'])
+        total_range = df['high'] - df['low']
+        doji_condition = body_size / total_range < 0.1
+        patterns['doji'] = np.where(doji_condition, 100, 0)
+        
+        # Simple hammer detection
+        lower_shadow = np.where(df['close'] > df['open'], 
+                               df['open'] - df['low'], 
+                               df['close'] - df['low'])
+        upper_shadow = np.where(df['close'] > df['open'],
+                               df['high'] - df['close'],
+                               df['high'] - df['open'])
+        hammer_condition = (lower_shadow > 2 * body_size) & (upper_shadow < body_size)
+        patterns['hammer'] = np.where(hammer_condition, 100, 0)
+        
+        # Fill other patterns with zeros for now
+        for pattern_name in self.pattern_features:
+            if pattern_name not in patterns:
+                patterns[pattern_name] = np.zeros(length)
+        
+        return patterns
+    
+    def _calculate_support_resistance(self, df: pd.DataFrame) -> pd.Series:
+        """Support/Resistance skorunu hesapla"""
+        try:
+            if len(df) < 50:
+                return pd.Series(0.5, index=df.index)
+            
+            # Rolling min/max for support/resistance levels
+            window = 20
+            support = df['low'].rolling(window).min()
+            resistance = df['high'].rolling(window).max()
+            
+            # Distance from support/resistance
+            dist_support = (df['close'] - support) / df['close']
+            dist_resistance = (resistance - df['close']) / df['close']
+            
+            # Score (0-1, where 0.5 is neutral)
+            score = 0.5 + (dist_support - dist_resistance) * 5
+            return np.clip(score, 0, 1)
+            
+        except Exception as e:
+            logger.error(f"❌ Support/Resistance hesaplama hatası: {e}")
+            return pd.Series(0.5, index=df.index)
+    
+    def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.Series:
         """Trend gücünü hesapla"""
         try:
-            # EMA'ların sıralamasını kontrol et
-            ema_9 = df['ema_9']
-            ema_21 = df['ema_21'] 
-            ema_50 = df['ema_50']
+            if len(df) < 50:
+                return pd.Series(0.5, index=df.index)
             
-            # Yükseliş trendi: EMA9 > EMA21 > EMA50
-            uptrend = ((ema_9 > ema_21) & (ema_21 > ema_50)).astype(int)
+            # Price vs moving averages
+            sma_20 = df['close'].rolling(20).mean()
+            sma_50 = df['close'].rolling(50).mean()
             
-            # Düşüş trendi: EMA9 < EMA21 < EMA50
-            downtrend = ((ema_9 < ema_21) & (ema_21 < ema_50)).astype(int)
+            # Price above/below MAs
+            above_sma20 = (df['close'] > sma_20).astype(int)
+            above_sma50 = (df['close'] > sma_50).astype(int)
             
-            # Trend gücü: +1 (güçlü yükseliş) ile -1 (güçlü düşüş) arası
-            trend_strength = uptrend - downtrend
+            # Trend consistency over last 10 periods
+            trend_consistency = (above_sma20.rolling(10).sum() / 10)
             
-            # MACD ile doğrula
-            macd_confirmation = (df['macd'] > df['macd_signal']).astype(int) * 2 - 1
-            
-            # ADX ile güçlendir
-            adx_strength = (df['adx'] / 100).fillna(0.5)
-            
-            final_strength = trend_strength * adx_strength * 0.7 + macd_confirmation * adx_strength * 0.3
-            
-            return final_strength.fillna(0)
+            return trend_consistency
             
         except Exception as e:
-            logger.error(f"❌ Trend gücü hesaplama hatası: {e}")
-            return pd.Series([0] * len(df))
+            logger.error(f"❌ Trend strength hesaplama hatası: {e}")
+            return pd.Series(0.5, index=df.index)
     
-    async def _get_ml_signals(self, symbol: str, df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Machine learning modellerinden sinyaller al"""
+    def _get_market_session(self, hour: pd.Series) -> pd.Series:
+        """Market session'ı belirle (UTC saatine göre)"""
         try:
-            signals = []
+            # 0: Asian (22-06 UTC), 1: European (06-14 UTC), 2: US (14-22 UTC)
+            conditions = [
+                (hour >= 22) | (hour < 6),
+                (hour >= 6) & (hour < 14),
+                (hour >= 14) & (hour < 22)
+            ]
+            choices = [0, 1, 2]
             
-            # Model'in var olup olmadığını ve yeniden eğitim gerekip gerekmediğini kontrol et
-            await self._check_and_retrain_models(symbol, df)
+            return pd.Series(np.select(conditions, choices, default=0), index=hour.index)
             
-            # Mevcut feature'ları hazırla
-            latest_features = await self._prepare_features_for_prediction(df)
+        except Exception as e:
+            logger.error(f"❌ Market session hesaplama hatası: {e}")
+            return pd.Series(0, index=hour.index)
+    
+    async def _get_ml_signals(self, features_df: pd.DataFrame, symbol: str) -> Dict[str, Any]:
+        """ML modellerinden sinyal al"""
+        try:
+            if len(features_df) == 0 or symbol not in self.models:
+                return {'prediction': 'HOLD', 'confidence': 0.5, 'probabilities': [0.33, 0.34, 0.33]}
             
-            if latest_features is None:
-                return signals
+            # Get latest features
+            latest_features = features_df.iloc[-1:][self.feature_columns]
             
-            # Her model için tahmin yap
-            for model_name in self.config.get('models', ['gradient_boosting_signals']):
-                if f"{symbol}_{model_name}" in self.models:
-                    try:
-                        model = self.models[f"{symbol}_{model_name}"]
-                        scaler = self.scalers.get(f"{symbol}_{model_name}")
-                        
-                        if scaler:
-                            features_scaled = scaler.transform([latest_features])
-                        else:
-                            features_scaled = [latest_features]
-                        
-                        # Tahmin yap
-                        if hasattr(model, 'predict_proba'):
-                            prediction_proba = model.predict_proba(features_scaled)[0]
-                            prediction = np.argmax(prediction_proba)
-                            confidence = np.max(prediction_proba)
-                        else:
-                            prediction = model.predict(features_scaled)[0]
-                            confidence = 0.7  # Default confidence for models without probability
-                        
-                        # Sinyali yorumla (0: SELL, 1: HOLD, 2: BUY)
-                        signal_map = {0: 'SELL', 1: 'HOLD', 2: 'BUY'}
-                        signal_type = signal_map.get(prediction, 'HOLD')
-                        
-                        if signal_type != 'HOLD' and confidence >= self.signal_strength_min:
-                            signals.append({
-                                'type': signal_type,
-                                'strength': confidence,
-                                'source': f'ML_{model_name}',
-                                'confidence': confidence,
-                                'timestamp': datetime.now()
-                            })
-                            
-                    except Exception as e:
-                        logger.warning(f"⚠️ {model_name} model tahmin hatası: {e}")
-                        continue
+            # Handle missing columns
+            for col in self.feature_columns:
+                if col not in latest_features.columns:
+                    latest_features[col] = 0
             
-            return signals
+            latest_features = latest_features[self.feature_columns]
+            
+            # Scale features
+            if symbol in self.scalers:
+                latest_features_scaled = self.scalers[symbol].transform(latest_features)
+            else:
+                latest_features_scaled = latest_features.values
+            
+            # Predict
+            model = self.models[symbol]
+            prediction = model.predict(latest_features_scaled)[0]
+            probabilities = model.predict_proba(latest_features_scaled)[0]
+            
+            # Convert prediction to signal
+            signal_map = {0: 'SELL', 1: 'HOLD', 2: 'BUY'}
+            signal = signal_map.get(prediction, 'HOLD')
+            
+            confidence = max(probabilities)
+            
+            return {
+                'prediction': signal,
+                'confidence': confidence,
+                'probabilities': probabilities.tolist()
+            }
             
         except Exception as e:
             logger.error(f"❌ ML sinyal hatası: {e}")
-            return []
+            return {'prediction': 'HOLD', 'confidence': 0.5, 'probabilities': [0.33, 0.34, 0.33]}
     
     async def _get_technical_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Technical analysis sinyalleri"""
+        """Teknik analiz sinyalleri"""
+        signals = []
+        
         try:
-            signals = []
+            if len(df) < 50:
+                return signals
+            
             latest = df.iloc[-1]
-            prev = df.iloc[-2] if len(df) > 1 else latest
+            prev = df.iloc[-2]
             
-            # RSI sinyalleri
-            rsi = latest['rsi']
-            if rsi < 30:  # Oversold
-                signals.append({
-                    'type': 'BUY',
-                    'strength': min(0.9, (30 - rsi) / 30),
-                    'source': 'RSI_Oversold',
-                    'confidence': 0.7
-                })
-            elif rsi > 70:  # Overbought
-                signals.append({
-                    'type': 'SELL',
-                    'strength': min(0.9, (rsi - 70) / 30),
-                    'source': 'RSI_Overbought',
-                    'confidence': 0.7
-                })
+            # RSI signals
+            rsi = self._calculate_rsi(df['close'], 14)
+            if len(rsi) > 0:
+                current_rsi = rsi.iloc[-1]
+                if current_rsi < 30:
+                    signals.append({'type': 'BUY', 'reason': 'RSI_OVERSOLD', 'strength': 0.8})
+                elif current_rsi > 70:
+                    signals.append({'type': 'SELL', 'reason': 'RSI_OVERBOUGHT', 'strength': 0.8})
             
-            # MACD sinyalleri
-            if latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal']:
-                signals.append({
-                    'type': 'BUY',
-                    'strength': 0.8,
-                    'source': 'MACD_Bullish_Cross',
-                    'confidence': 0.75
-                })
-            elif latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal']:
-                signals.append({
-                    'type': 'SELL',
-                    'strength': 0.8,
-                    'source': 'MACD_Bearish_Cross',
-                    'confidence': 0.75
-                })
+            # MACD signals
+            ema12 = df['close'].ewm(span=12).mean()
+            ema26 = df['close'].ewm(span=26).mean()
+            macd = ema12 - ema26
+            signal_line = macd.ewm(span=9).mean()
             
-            # Bollinger Bands sinyalleri
-            if latest['close'] < latest['bb_lower']:
-                signals.append({
-                    'type': 'BUY',
-                    'strength': 0.7,
-                    'source': 'BB_Oversold',
-                    'confidence': 0.65
-                })
-            elif latest['close'] > latest['bb_upper']:
-                signals.append({
-                    'type': 'SELL',
-                    'strength': 0.7,
-                    'source': 'BB_Overbought',
-                    'confidence': 0.65
-                })
+            if len(macd) > 1:
+                if macd.iloc[-1] > signal_line.iloc[-1] and macd.iloc[-2] <= signal_line.iloc[-2]:
+                    signals.append({'type': 'BUY', 'reason': 'MACD_CROSSOVER', 'strength': 0.7})
+                elif macd.iloc[-1] < signal_line.iloc[-1] and macd.iloc[-2] >= signal_line.iloc[-2]:
+                    signals.append({'type': 'SELL', 'reason': 'MACD_CROSSUNDER', 'strength': 0.7})
             
-            # EMA trend sinyalleri
-            if (latest['ema_9'] > latest['ema_21'] > latest['ema_50'] and 
-                latest['close'] > latest['ema_9']):
-                signals.append({
-                    'type': 'BUY',
-                    'strength': 0.8,
-                    'source': 'EMA_Uptrend',
-                    'confidence': 0.8
-                })
-            elif (latest['ema_9'] < latest['ema_21'] < latest['ema_50'] and 
-                  latest['close'] < latest['ema_9']):
-                signals.append({
-                    'type': 'SELL',
-                    'strength': 0.8,
-                    'source': 'EMA_Downtrend',
-                    'confidence': 0.8
-                })
+            # Moving Average signals
+            sma20 = df['close'].rolling(20).mean()
+            sma50 = df['close'].rolling(50).mean()
             
-            # Volume confirmation
-            volume_avg = df['volume'].rolling(20).mean().iloc[-1]
-            if latest['volume'] > volume_avg * 1.5:
-                # Yüksek volume ile sinyalleri güçlendir
-                for signal in signals:
-                    signal['strength'] *= 1.2
-                    signal['confidence'] *= 1.1
+            if len(sma20) > 1 and len(sma50) > 1:
+                if (sma20.iloc[-1] > sma50.iloc[-1] and sma20.iloc[-2] <= sma50.iloc[-2]):
+                    signals.append({'type': 'BUY', 'reason': 'MA_GOLDEN_CROSS', 'strength': 0.9})
+                elif (sma20.iloc[-1] < sma50.iloc[-1] and sma20.iloc[-2] >= sma50.iloc[-2]):
+                    signals.append({'type': 'SELL', 'reason': 'MA_DEATH_CROSS', 'strength': 0.9})
+            
+            # Bollinger Bands signals
+            bb_period = 20
+            sma = df['close'].rolling(bb_period).mean()
+            bb_std = df['close'].rolling(bb_period).std()
+            bb_upper = sma + (bb_std * 2)
+            bb_lower = sma - (bb_std * 2)
+            
+            if len(bb_upper) > 0 and len(bb_lower) > 0:
+                if latest['close'] < bb_lower.iloc[-1]:
+                    signals.append({'type': 'BUY', 'reason': 'BB_OVERSOLD', 'strength': 0.6})
+                elif latest['close'] > bb_upper.iloc[-1]:
+                    signals.append({'type': 'SELL', 'reason': 'BB_OVERBOUGHT', 'strength': 0.6})
             
             return signals
             
         except Exception as e:
-            logger.error(f"❌ Technical sinyal hatası: {e}")
-            return []
+            logger.error(f"❌ Teknik sinyal hatası: {e}")
+            return signals
+    
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """RSI hesapla"""
+        try:
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+        except Exception as e:
+            logger.error(f"❌ RSI hesaplama hatası: {e}")
+            return pd.Series()
     
     async def _get_pattern_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Candlestick pattern sinyalleri"""
+        signals = []
+        
         try:
-            signals = []
-            
-            if len(df) < 3:
+            if len(df) < 10:
                 return signals
             
-            latest = df.iloc[-1]
-            prev1 = df.iloc[-2]
-            prev2 = df.iloc[-3]
+            patterns = self._calculate_candlestick_patterns(df)
             
-            # Doji pattern
-            body_size = abs(latest['close'] - latest['open'])
-            candle_range = latest['high'] - latest['low']
-            
-            if body_size < candle_range * 0.1:  # Doji
-                signals.append({
-                    'type': 'HOLD',
-                    'strength': 0.6,
-                    'source': 'Doji_Pattern',
-                    'confidence': 0.6
-                })
-            
-            # Hammer pattern (bullish reversal)
-            if (latest['low'] < prev1['low'] and 
-                latest['close'] > latest['open'] and
-                (latest['high'] - latest['close']) < body_size * 0.3 and
-                (latest['close'] - latest['low']) > body_size * 2):
-                signals.append({
-                    'type': 'BUY',
-                    'strength': 0.7,
-                    'source': 'Hammer_Pattern',
-                    'confidence': 0.7
-                })
-            
-            # Shooting star pattern (bearish reversal)
-            if (latest['high'] > prev1['high'] and 
-                latest['close'] < latest['open'] and
-                (latest['close'] - latest['low']) < body_size * 0.3 and
-                (latest['high'] - latest['open']) > body_size * 2):
-                signals.append({
-                    'type': 'SELL',
-                    'strength': 0.7,
-                    'source': 'Shooting_Star_Pattern',
-                    'confidence': 0.7
-                })
-            
-            # Engulfing patterns
-            if (latest['close'] > latest['open'] and prev1['close'] < prev1['open'] and
-                latest['open'] < prev1['close'] and latest['close'] > prev1['open']):
-                signals.append({
-                    'type': 'BUY',
-                    'strength': 0.8,
-                    'source': 'Bullish_Engulfing',
-                    'confidence': 0.75
-                })
-            
-            if (latest['close'] < latest['open'] and prev1['close'] > prev1['open'] and
-                latest['open'] > prev1['close'] and latest['close'] < prev1['open']):
-                signals.append({
-                    'type': 'SELL',
-                    'strength': 0.8,
-                    'source': 'Bearish_Engulfing',
-                    'confidence': 0.75
-                })
+            # Check latest patterns
+            for pattern_name, pattern_values in patterns.items():
+                if len(pattern_values) > 0 and pattern_values[-1] != 0:
+                    if pattern_name in ['hammer', 'morning_star', 'engulfing_bull']:
+                        signals.append({
+                            'type': 'BUY',
+                            'reason': f'PATTERN_{pattern_name.upper()}',
+                            'strength': 0.6
+                        })
+                    elif pattern_name in ['shooting_star', 'evening_star', 'engulfing_bear', 'hanging_man']:
+                        signals.append({
+                            'type': 'SELL',
+                            'reason': f'PATTERN_{pattern_name.upper()}',
+                            'strength': 0.6
+                        })
             
             return signals
             
         except Exception as e:
             logger.error(f"❌ Pattern sinyal hatası: {e}")
-            return []
+            return signals
     
     async def _get_sentiment_signals(self, symbol: str) -> List[Dict[str, Any]]:
-        """Sentiment analysis sinyalleri"""
+        """Sentiment analizi sinyalleri (placeholder)"""
         try:
-            # TODO: Sentiment analizi - news, social media, fear & greed index
-            # Şimdilik placeholder
+            # Placeholder - gerçekte fear & greed index, social sentiment vb. kullanılacak
+            import random
+            
+            fear_greed_index = random.randint(0, 100)
+            
             signals = []
             
-            # Fear & Greed Index simulation
-            import random
-            fear_greed_score = random.uniform(0, 100)
-            
-            if fear_greed_score < 25:  # Extreme Fear
+            if fear_greed_index < 25:  # Extreme fear
                 signals.append({
                     'type': 'BUY',
-                    'strength': 0.6,
-                    'source': 'Fear_Greed_Index',
-                    'confidence': 0.6
+                    'reason': 'SENTIMENT_EXTREME_FEAR',
+                    'strength': 0.5
                 })
-            elif fear_greed_score > 75:  # Extreme Greed
+            elif fear_greed_index > 75:  # Extreme greed
                 signals.append({
                     'type': 'SELL',
-                    'strength': 0.6,
-                    'source': 'Fear_Greed_Index',
-                    'confidence': 0.6
+                    'reason': 'SENTIMENT_EXTREME_GREED',
+                    'strength': 0.5
                 })
             
             return signals
@@ -542,102 +653,80 @@ class AISignalFilter:
             logger.error(f"❌ Sentiment sinyal hatası: {e}")
             return []
     
-    async def _combine_signals(self, ml_signals: List, ta_signals: List, 
-                              pattern_signals: List, sentiment_signals: List) -> List[Dict[str, Any]]:
-        """Sinyalleri birleştir ve filtrele"""
+    async def _combine_signals(self, ml_signals: Dict, technical_signals: List, 
+                             pattern_signals: List, sentiment_signals: List) -> List[Dict[str, Any]]:
+        """Tüm sinyalleri birleştir"""
         try:
-            all_signals = ml_signals + ta_signals + pattern_signals + sentiment_signals
+            combined = []
             
-            if not all_signals:
-                return []
-            
-            # Sinyal türlerine göre grupla
-            buy_signals = [s for s in all_signals if s['type'] == 'BUY']
-            sell_signals = [s for s in all_signals if s['type'] == 'SELL']
-            hold_signals = [s for s in all_signals if s['type'] == 'HOLD']
-            
-            combined_signals = []
-            
-            # BUY sinyalleri
-            if buy_signals:
-                avg_strength = np.mean([s['strength'] for s in buy_signals])
-                avg_confidence = np.mean([s['confidence'] for s in buy_signals])
-                
-                combined_signals.append({
-                    'type': 'BUY',
-                    'strength': avg_strength,
-                    'confidence': avg_confidence,
-                    'count': len(buy_signals),
-                    'sources': [s['source'] for s in buy_signals],
-                    'weight': self.technical_weight + (len(ml_signals) * 0.1)
+            # Add ML signal
+            if ml_signals['prediction'] != 'HOLD':
+                combined.append({
+                    'type': ml_signals['prediction'],
+                    'reason': 'ML_PREDICTION',
+                    'strength': ml_signals['confidence'],
+                    'source': 'ml'
                 })
             
-            # SELL sinyalleri
-            if sell_signals:
-                avg_strength = np.mean([s['strength'] for s in sell_signals])
-                avg_confidence = np.mean([s['confidence'] for s in sell_signals])
-                
-                combined_signals.append({
-                    'type': 'SELL',
-                    'strength': avg_strength,
-                    'confidence': avg_confidence,
-                    'count': len(sell_signals),
-                    'sources': [s['source'] for s in sell_signals],
-                    'weight': self.technical_weight + (len(ml_signals) * 0.1)
-                })
+            # Add technical signals
+            for signal in technical_signals:
+                signal['source'] = 'technical'
+                combined.append(signal)
             
-            # Güven eşiğinin altındaki sinyalleri filtrele
-            filtered_signals = [
-                s for s in combined_signals 
-                if s['confidence'] >= self.signal_strength_min
-            ]
+            # Add pattern signals
+            for signal in pattern_signals:
+                signal['source'] = 'pattern'
+                combined.append(signal)
             
-            return filtered_signals
+            # Add sentiment signals
+            for signal in sentiment_signals:
+                signal['source'] = 'sentiment'
+                combined.append(signal)
+            
+            return combined
             
         except Exception as e:
             logger.error(f"❌ Sinyal birleştirme hatası: {e}")
             return []
     
     async def _calculate_signal_confidence(self, signals: List[Dict[str, Any]]) -> float:
-        """Genel sinyal güven faktörünü hesapla"""
+        """Sinyal güvenilirliğini hesapla"""
         try:
             if not signals:
                 return 0.0
             
-            # Sinyal sayısı ve türü
-            total_signals = len(signals)
+            # Signal agreement
+            buy_signals = [s for s in signals if s['type'] == 'BUY']
+            sell_signals = [s for s in signals if s['type'] == 'SELL']
             
-            # Ağırlıklı güven ortalaması
-            weighted_confidence = 0
-            total_weight = 0
-            
-            for signal in signals:
-                weight = signal.get('weight', 1.0)
-                confidence = signal['confidence']
-                strength = signal['strength']
-                count = signal.get('count', 1)
-                
-                # Çoklu sinyal desteği güveni artırır
-                count_bonus = min(0.2, count * 0.05)
-                adjusted_confidence = min(1.0, confidence + count_bonus)
-                
-                weighted_confidence += adjusted_confidence * strength * weight
-                total_weight += weight
-            
-            if total_weight == 0:
+            if len(buy_signals) == 0 and len(sell_signals) == 0:
                 return 0.0
             
-            final_confidence = weighted_confidence / total_weight
+            # Consensus strength
+            total_strength = sum(s.get('strength', 0.5) for s in signals)
+            signal_count = len(signals)
             
-            # Çelişkili sinyaller güveni azaltır
-            buy_count = sum(1 for s in signals if s['type'] == 'BUY')
-            sell_count = sum(1 for s in signals if s['type'] == 'SELL')
+            if signal_count == 0:
+                return 0.0
             
-            if buy_count > 0 and sell_count > 0:
-                conflict_penalty = min(0.3, abs(buy_count - sell_count) * 0.1)
-                final_confidence *= (1 - conflict_penalty)
+            # Agreement score
+            if len(buy_signals) > len(sell_signals):
+                agreement = len(buy_signals) / signal_count
+                avg_strength = sum(s.get('strength', 0.5) for s in buy_signals) / len(buy_signals)
+            elif len(sell_signals) > len(buy_signals):
+                agreement = len(sell_signals) / signal_count
+                avg_strength = sum(s.get('strength', 0.5) for s in sell_signals) / len(sell_signals)
+            else:
+                agreement = 0.5
+                avg_strength = 0.5
             
-            return min(1.0, max(0.0, final_confidence))
+            # Diversity bonus (signals from different sources)
+            sources = set(s.get('source', 'unknown') for s in signals)
+            diversity_bonus = min(0.2, len(sources) * 0.05)
+            
+            confidence = (agreement * 0.6 + avg_strength * 0.3 + diversity_bonus)
+            
+            return min(1.0, max(0.0, confidence))
             
         except Exception as e:
             logger.error(f"❌ Güven hesaplama hatası: {e}")
@@ -649,227 +738,254 @@ class AISignalFilter:
             if not signals:
                 return 0.0
             
-            # En güçlü sinyali bul
-            max_strength = max(s['strength'] for s in signals)
-            
-            # Sinyal konsensüsü
-            buy_strength = sum(s['strength'] for s in signals if s['type'] == 'BUY')
-            sell_strength = sum(s['strength'] for s in signals if s['type'] == 'SELL')
-            
-            net_strength = abs(buy_strength - sell_strength)
-            total_strength = buy_strength + sell_strength
-            
-            if total_strength == 0:
-                return 0.0
-            
-            # Normalleştirilmiş güç
-            normalized_strength = net_strength / total_strength
-            
-            # Maximum güç ile birleştir
-            final_strength = (normalized_strength + max_strength) / 2
-            
-            return min(1.0, final_strength)
+            strengths = [s.get('strength', 0.5) for s in signals]
+            return np.mean(strengths)
             
         except Exception as e:
-            logger.error(f"❌ Güç hesaplama hatası: {e}")
+            logger.error(f"❌ Sinyal gücü hesaplama hatası: {e}")
             return 0.0
     
-    async def _prepare_features_for_prediction(self, df: pd.DataFrame) -> Optional[List[float]]:
-        """Model tahmini için feature'ları hazırla"""
+    def _get_recommendation(self, signals: List[Dict[str, Any]], confidence: float) -> str:
+        """Final öneri oluştur"""
         try:
-            if df.empty or len(df) == 0:
-                return None
+            if confidence < self.confidence_threshold:
+                return 'HOLD'
             
-            latest = df.iloc[-1]
+            buy_count = len([s for s in signals if s['type'] == 'BUY'])
+            sell_count = len([s for s in signals if s['type'] == 'SELL'])
             
-            # Sadece gerekli feature'ları al
-            features = []
-            for col in self.feature_columns:
-                if col in latest:
-                    value = latest[col]
-                    # NaN kontrol et
-                    if pd.isna(value):
-                        value = 0.0
-                    features.append(float(value))
-                else:
-                    features.append(0.0)
-            
-            return features
-            
-        except Exception as e:
-            logger.error(f"❌ Feature hazırlama hatası: {e}")
-            return None
-    
-    async def _check_and_retrain_models(self, symbol: str, df: pd.DataFrame) -> None:
-        """Model'lerin yeniden eğitim gereksinimini kontrol et"""
-        try:
-            model_key = f"{symbol}_gradient_boosting_signals"
-            
-            # Son eğitim zamanını kontrol et
-            last_training = self.last_training.get(model_key)
-            now = datetime.now()
-            
-            should_retrain = (
-                model_key not in self.models or
-                last_training is None or
-                (now - last_training).total_seconds() > self.model_retrain_hours * 3600
-            )
-            
-            if should_retrain and len(df) >= 200:  # Minimum veri gereksinimi
-                await self._train_model(symbol, df)
+            if buy_count > sell_count:
+                return 'BUY'
+            elif sell_count > buy_count:
+                return 'SELL'
+            else:
+                return 'HOLD'
                 
         except Exception as e:
-            logger.error(f"❌ Model kontrol hatası: {e}")
+            logger.error(f"❌ Öneri oluşturma hatası: {e}")
+            return 'HOLD'
     
-    async def _train_model(self, symbol: str, df: pd.DataFrame) -> None:
-        """Machine learning modelini eğit"""
-        try:
-            logger.info(f"🧠 {symbol} için ML model eğitiliyor...")
-            
-            # Feature'ları hazırla
-            features_df = await self._calculate_features(df)
-            
-            if len(features_df) < 100:
-                logger.warning(f"⚠️ {symbol} için yetersiz veri, model eğitimi atlandı")
-                return
-            
-            # Target variable oluştur (future returns based)
-            future_returns = features_df['close'].pct_change(periods=5).shift(-5)  # 5 period ilerideki return
-            
-            # Signal labels: 0=SELL, 1=HOLD, 2=BUY
-            labels = pd.cut(future_returns, 
-                          bins=[-np.inf, -0.02, 0.02, np.inf], 
-                          labels=[0, 1, 2]).astype(int)
-            
-            # Features ve labels hazırla
-            feature_data = []
-            for _, row in features_df.iterrows():
-                features = []
-                for col in self.feature_columns:
-                    if col in row:
-                        value = row[col]
-                        if pd.isna(value):
-                            value = 0.0
-                        features.append(float(value))
-                    else:
-                        features.append(0.0)
-                feature_data.append(features)
-            
-            X = np.array(feature_data)
-            y = labels.values
-            
-            # NaN'ları temizle
-            valid_indices = ~(pd.isna(y) | np.isnan(X).any(axis=1))
-            X = X[valid_indices]
-            y = y[valid_indices]
-            
-            if len(X) < 50:
-                logger.warning(f"⚠️ {symbol} için yetersiz temiz veri")
-                return
-            
-            # Train/test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y
-            )
-            
-            # Feature scaling
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
-            
-            # Model eğitimi
-            model = GradientBoostingClassifier(
-                n_estimators=100,
-                learning_rate=0.1,
-                max_depth=5,
-                random_state=42
-            )
-            
-            model.fit(X_train_scaled, y_train)
-            
-            # Model değerlendirme
-            y_pred = model.predict(X_test_scaled)
-            accuracy = accuracy_score(y_test, y_pred)
-            
-            logger.info(f"✅ {symbol} model eğitimi tamamlandı - Accuracy: {accuracy:.3f}")
-            
-            # Model'i kaydet
-            model_key = f"{symbol}_gradient_boosting_signals"
-            self.models[model_key] = model
-            self.scalers[model_key] = scaler
-            self.last_training[model_key] = datetime.now()
-            
-            # Veritabanına kaydet
-            await self._save_model_info(symbol, model_key, accuracy, len(X_train))
-            
-        except Exception as e:
-            logger.error(f"❌ {symbol} model eğitim hatası: {e}")
+    def _get_empty_signals(self) -> Dict[str, Any]:
+        """Boş sinyal response'u"""
+        return {
+            'symbol': '',
+            'timestamp': datetime.now(),
+            'signals': [],
+            'confidence': 0.0,
+            'strength': 0.0,
+            'ml_prediction': {'prediction': 'HOLD', 'confidence': 0.5},
+            'technical_score': 0,
+            'pattern_score': 0,
+            'recommendation': 'HOLD'
+        }
     
-    async def _save_signal_analysis(self, symbol: str, market_data: Dict, 
-                                   signals: List, confidence: float, strength: float) -> None:
-        """Sinyal analizini veritabanına kaydet"""
+    async def _save_signal_analysis(self, symbol: str, analysis: Dict[str, Any]) -> None:
+        """Sinyal analizini kaydet"""
         try:
             signal_data = {
                 'symbol': symbol,
-                'exchange': market_data.get('exchange', 'unknown'),
-                'signal_type': 'HOLD',  # Default
-                'strength': strength,
-                'confidence': confidence,
-                'strategy': 'AI_Signal_Filter',
-                'timeframe': '1m',  # Default
-                'price': market_data.get('close', 0),
-                'indicators': {
-                    'technical_signals': len([s for s in signals if 'technical' in s.get('source', '').lower()]),
-                    'ml_signals': len([s for s in signals if 'ml' in s.get('source', '').lower()]),
-                    'pattern_signals': len([s for s in signals if 'pattern' in s.get('source', '').lower()]),
-                    'total_signals': len(signals)
-                },
-                'ai_analysis': {
-                    'signals': signals,
-                    'confidence_threshold': self.confidence_threshold,
-                    'signal_strength_min': self.signal_strength_min
-                },
-                'market_condition': 'unknown'  # Market analyzer'dan gelecek
+                'timestamp': analysis['timestamp'].isoformat(),
+                'signal_type': analysis['recommendation'],
+                'confidence': analysis['confidence'],
+                'strength': analysis['strength'],
+                'signal_count': len(analysis['signals']),
+                'analysis_data': str(analysis)  # JSON as string for SQLite
             }
-            
-            # Dominant signal type
-            if signals:
-                buy_signals = [s for s in signals if s['type'] == 'BUY']
-                sell_signals = [s for s in signals if s['type'] == 'SELL']
-                
-                if len(buy_signals) > len(sell_signals):
-                    signal_data['signal_type'] = 'BUY'
-                elif len(sell_signals) > len(buy_signals):
-                    signal_data['signal_type'] = 'SELL'
             
             await self.db_manager.save_signal(signal_data)
             
         except Exception as e:
             logger.error(f"❌ Sinyal kaydetme hatası: {e}")
     
-    async def _save_model_info(self, symbol: str, model_name: str, 
-                              accuracy: float, training_size: int) -> None:
-        """Model bilgilerini veritabanına kaydet"""
+    async def retrain_all_models(self) -> None:
+        """Tüm modelleri yeniden eğit"""
         try:
-            # TODO: AI models tablosuna kaydet
-            pass
+            logger.info("🔄 Model yeniden eğitimi başlatılıyor...")
+            
+            # Major trading pairs for training
+            symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT']
+            
+            for symbol in symbols:
+                try:
+                    await self._train_model(symbol)
+                    logger.info(f"✅ {symbol} modeli eğitildi")
+                except Exception as e:
+                    logger.error(f"❌ {symbol} model eğitimi hatası: {e}")
+            
+            self.last_retrain = datetime.now()
+            logger.success("✅ Model yeniden eğitimi tamamlandı")
+            
         except Exception as e:
-            logger.error(f"❌ Model bilgi kaydetme hatası: {e}")
+            logger.error(f"❌ Model eğitimi genel hatası: {e}")
+    
+    async def _train_model(self, symbol: str) -> None:
+        """Tek sembol için model eğit"""
+        try:
+            # Get training data
+            training_data = await self._prepare_training_data(symbol)
+            
+            if training_data is None or len(training_data) < 1000:
+                logger.warning(f"⚠️ {symbol} için yetersiz eğitim verisi")
+                return
+            
+            # Prepare features and labels
+            X = training_data[self.feature_columns]
+            y = training_data['target']
+            
+            # Handle missing columns
+            for col in self.feature_columns:
+                if col not in X.columns:
+                    X[col] = 0
+            
+            X = X[self.feature_columns]
+            
+            # Train-test split
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+            
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train model
+            model = GradientBoostingClassifier(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=6,
+                random_state=42
+            )
+            
+            model.fit(X_train_scaled, y_train)
+            
+            # Evaluate
+            train_score = model.score(X_train_scaled, y_train)
+            test_score = model.score(X_test_scaled, y_test)
+            
+            logger.info(f"📊 {symbol} Model Performance: Train={train_score:.3f}, Test={test_score:.3f}")
+            
+            # Save model and scaler
+            self.models[symbol] = model
+            self.scalers[symbol] = scaler
+            
+            # Save to disk
+            model_path = self.model_dir / f"{symbol}_model.pkl"
+            scaler_path = self.model_dir / f"{symbol}_scaler.pkl"
+            
+            joblib.dump(model, model_path)
+            joblib.dump(scaler, scaler_path)
+            
+        except Exception as e:
+            logger.error(f"❌ {symbol} model eğitimi hatası: {e}")
+    
+    async def _prepare_training_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Model eğitimi için veri hazırla"""
+        try:
+            # Get historical data from yfinance
+            yf_symbol = symbol.replace('USDT', '-USD')
+            ticker = yf.Ticker(yf_symbol)
+            
+            # Get 1 year of 1h data
+            data = ticker.history(period="1y", interval="1h")
+            
+            if data.empty:
+                logger.warning(f"⚠️ {symbol} için veri alınamadı")
+                return None
+            
+            # Convert to our format
+            df = pd.DataFrame({
+                'timestamp': data.index,
+                'open': data['Open'].values,
+                'high': data['High'].values,
+                'low': data['Low'].values,
+                'close': data['Close'].values,
+                'volume': data['Volume'].values
+            })
+            
+            # Calculate features
+            features_df = await self._calculate_features(df)
+            
+            if features_df is None:
+                return None
+            
+            # Create labels (future price movement)
+            # 0: SELL (price decreases > 1%), 1: HOLD (price stable), 2: BUY (price increases > 1%)
+            future_returns = df['close'].shift(-4).pct_change()  # 4-hour future return
+            
+            labels = []
+            for ret in future_returns:
+                if pd.isna(ret):
+                    labels.append(1)  # HOLD
+                elif ret > 0.01:  # 1% increase
+                    labels.append(2)  # BUY
+                elif ret < -0.01:  # 1% decrease
+                    labels.append(0)  # SELL
+                else:
+                    labels.append(1)  # HOLD
+            
+            features_df['target'] = labels
+            
+            # Remove last rows (no future data)
+            features_df = features_df[:-4]
+            
+            # Remove NaN rows
+            features_df = features_df.dropna()
+            
+            return features_df
+            
+        except Exception as e:
+            logger.error(f"❌ {symbol} eğitim verisi hazırlama hatası: {e}")
+            return None
     
     async def _load_saved_models(self) -> None:
         """Kaydedilmiş modelleri yükle"""
         try:
-            # TODO: Veritabanından model bilgilerini yükle
-            # Şimdilik boş
-            pass
+            model_files = list(self.model_dir.glob("*_model.pkl"))
+            
+            for model_file in model_files:
+                try:
+                    symbol = model_file.stem.replace('_model', '')
+                    scaler_file = self.model_dir / f"{symbol}_scaler.pkl"
+                    
+                    if scaler_file.exists():
+                        model = joblib.load(model_file)
+                        scaler = joblib.load(scaler_file)
+                        
+                        self.models[symbol] = model
+                        self.scalers[symbol] = scaler
+                        
+                        logger.debug(f"✅ {symbol} modeli yüklendi")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ {model_file} yüklenemedi: {e}")
+            
+            logger.info(f"📂 {len(self.models)} model yüklendi")
+            
         except Exception as e:
             logger.error(f"❌ Model yükleme hatası: {e}")
     
-    async def retrain_all_models(self) -> None:
-        """Tüm modelleri yeniden eğit"""
+    def _should_retrain(self) -> bool:
+        """Yeniden eğitim gerekli mi kontrol et"""
+        if not self.last_retrain:
+            return True
+        
+        hours_since_retrain = (datetime.now() - self.last_retrain).total_seconds() / 3600
+        return hours_since_retrain >= self.retrain_frequency
+    
+    def get_model_info(self, symbol: str) -> Dict[str, Any]:
+        """Model bilgilerini döndür"""
         try:
-            logger.info("🔄 Tüm AI modelleri yeniden eğitiliyor...")
-            self.last_training.clear()
-            logger.info("✅ Model yeniden eğitimi tamamlandı")
+            if symbol not in self.models:
+                return {'trained': False, 'last_retrain': None}
+            
+            return {
+                'trained': True,
+                'last_retrain': self.last_retrain.isoformat() if self.last_retrain else None,
+                'features_count': len(self.feature_columns),
+                'model_type': type(self.models[symbol]).__name__
+            }
+            
         except Exception as e:
-            logger.error(f"❌ Toplu model eğitim hatası: {e}")
+            logger.error(f"❌ Model bilgi hatası: {e}")
+            return {'trained': False, 'error': str(e)}
