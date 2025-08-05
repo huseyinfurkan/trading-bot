@@ -31,13 +31,21 @@ class ConfigManager:
     async def load_config(self) -> Dict[str, Any]:
         """Konfigürasyon dosyasını yükle ve doğrula"""
         try:
+            logger.info(f"📋 Konfigürasyon yükleniyor: {self.config_path}")
+            
             with open(self.config_path, 'r', encoding='utf-8') as file:
                 self.config = yaml.safe_load(file)
             
-            self._validate_config()
+            if not self.config:
+                raise ValueError("Konfigürasyon dosyası boş")
+            
+            # Environment variables ile override et
             self._set_environment_variables()
             
-            logger.info(f"✅ Konfigürasyon başarıyla yüklendi: {self.config_path}")
+            # Konfigürasyonu doğrula
+            await self._validate_config()
+            
+            logger.success("✅ Konfigürasyon başarıyla yüklendi")
             return self.config
             
         except yaml.YAMLError as e:
@@ -47,26 +55,24 @@ class ConfigManager:
             logger.error(f"❌ Konfigürasyon yükleme hatası: {e}")
             raise
     
-    def _validate_config(self):
-        """Konfigürasyon dosyasını doğrula"""
-        if not self.config:
-            raise ValueError("Konfigürasyon yüklenemedi")
+    async def _validate_config(self):
+        """Konfigürasyonu doğrula"""
+        logger.info("🔍 Konfigürasyon doğrulanıyor...")
         
-        required_sections = [
-            'exchanges', 'trading_pairs', 'ai_settings', 
-            'strategies', 'risk_management', 'market_conditions'
-        ]
-        
+        # Gerekli ana bölümleri kontrol et
+        required_sections = ['exchanges', 'strategies', 'risk_management', 'trading_pairs']
         for section in required_sections:
             if section not in self.config:
-                raise ValueError(f"Gerekli konfigürasyon bölümü eksik: {section}")
+                raise ValueError(f"Eksik konfigürasyon bölümü: {section}")
         
-        # Exchange konfigürasyonlarını doğrula
+        # Exchange ayarlarını doğrula
         for exchange_name, exchange_config in self.config['exchanges'].items():
-            if not exchange_config.get('api_key') or not exchange_config.get('secret'):
-                logger.warning(f"⚠️ {exchange_name} API anahtarları eksik")
+            required_fields = ['enabled']
+            for field in required_fields:
+                if field not in exchange_config:
+                    raise ValueError(f"{exchange_name} exchange'inde eksik alan: {field}")
         
-        # Strateji konfigürasyonlarını doğrula
+        # Strateji ayarlarını doğrula
         for strategy_name, strategy_config in self.config['strategies'].items():
             if not strategy_config.get('enabled'):
                 continue
@@ -169,20 +175,6 @@ class ConfigManager:
             raise KeyError(f"Konfigürasyon bölümü bulunamadı: {section_name}")
         return config[section_name]
     
-    def get_exchange_config(self, exchange_name: str) -> Dict[str, Any]:
-        """Belirli bir exchange konfigürasyonunu döndür"""
-        exchanges = self.get_section('exchanges')
-        if exchange_name not in exchanges:
-            raise KeyError(f"Exchange konfigürasyonu bulunamadı: {exchange_name}")
-        return exchanges[exchange_name]
-    
-    def get_strategy_config(self, strategy_name: str) -> Dict[str, Any]:
-        """Belirli bir strateji konfigürasyonunu döndür"""
-        strategies = self.get_section('strategies')
-        if strategy_name not in strategies:
-            raise KeyError(f"Strateji konfigürasyonu bulunamadı: {strategy_name}")
-        return strategies[strategy_name]
-    
     def update_config(self, section: str, key: str, value: Any) -> None:
         """Konfigürasyonu güncelle"""
         if not self.config:
@@ -192,17 +184,44 @@ class ConfigManager:
             self.config[section] = {}
         
         self.config[section][key] = value
-        logger.info(f"🔧 Konfigürasyon güncellendi: {section}.{key} = {value}")
+        logger.debug(f"📝 Konfigürasyon güncellendi: {section}.{key} = {value}")
     
     async def save_config(self) -> None:
         """Konfigürasyonu dosyaya kaydet"""
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as file:
-                yaml.dump(self.config, file, default_flow_style=False, 
-                         allow_unicode=True, indent=2)
+            if not self.config:
+                raise ValueError("Kaydedilecek konfigürasyon yok")
             
-            logger.info(f"💾 Konfigürasyon kaydedildi: {self.config_path}")
+            # Backup oluştur
+            backup_path = self.config_path.with_suffix('.yaml.backup')
+            if self.config_path.exists():
+                import shutil
+                shutil.copy2(self.config_path, backup_path)
+            
+            with open(self.config_path, 'w', encoding='utf-8') as file:
+                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
+            
+            logger.info(f"✅ Konfigürasyon kaydedildi: {self.config_path}")
             
         except Exception as e:
             logger.error(f"❌ Konfigürasyon kaydetme hatası: {e}")
             raise
+    
+    def reload_config(self) -> Dict[str, Any]:
+        """Konfigürasyonu yeniden yükle"""
+        import asyncio
+        return asyncio.run(self.load_config())
+    
+    def get_exchange_config(self, exchange_name: str) -> Dict[str, Any]:
+        """Belirli bir exchange konfigürasyonunu al"""
+        exchanges = self.get_section('exchanges')
+        if exchange_name not in exchanges:
+            raise KeyError(f"Exchange bulunamadı: {exchange_name}")
+        return exchanges[exchange_name]
+    
+    def get_strategy_config(self, strategy_name: str) -> Dict[str, Any]:
+        """Belirli bir strateji konfigürasyonunu al"""
+        strategies = self.get_section('strategies')
+        if strategy_name not in strategies:
+            raise KeyError(f"Strateji bulunamadı: {strategy_name}")
+        return strategies[strategy_name]

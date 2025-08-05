@@ -16,7 +16,7 @@ from loguru import logger
 class NotificationManager:
     """Bildirim yöneticisi"""
     
-    def __init__(self, notification_config: Dict[str, Any]):
+def __init__(self, notification_config: Dict[str, Any]):
         """
         Args:
             notification_config: Bildirim konfigürasyonu
@@ -42,32 +42,32 @@ class NotificationManager:
         self.last_notification = {}
         self.min_interval = 60  # seconds between same type notifications
         
-    async def initialize(self) -> None:
+async def initialize(self) -> None:
         """Bildirim sistemini başlat"""
-        try:
+    try:
             logger.info("📱 Notification Manager başlatılıyor...")
             
             # Test connections
-            if self.telegram_enabled:
+        if self.telegram_enabled:
                 await self._test_telegram()
             
-            if self.discord_enabled:
+        if self.discord_enabled:
                 await self._test_discord()
             
-            if self.email_enabled:
+        if self.email_enabled:
                 await self._test_email()
             
             logger.success("✅ Notification Manager başlatıldı")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Notification Manager başlatma hatası: {e}")
     
-    async def send_message(self, message: str, message_type: str = "info", 
+async def send_message(self, message: str, message_type: str = "info", 
                           priority: str = "normal") -> None:
         """Ana bildirim gönderme fonksiyonu"""
-        try:
+    try:
             # Rate limiting check
-            if not await self._check_rate_limit(message_type):
+        if not await self._check_rate_limit(message_type):
                 return
             
             # Format message
@@ -76,27 +76,27 @@ class NotificationManager:
             # Send to all enabled channels
             tasks = []
             
-            if self.telegram_enabled:
+        if self.telegram_enabled:
                 tasks.append(self._send_telegram(formatted_message))
             
-            if self.discord_enabled:
+        if self.discord_enabled:
                 tasks.append(self._send_discord(formatted_message, message_type))
             
-            if self.email_enabled and priority in ["high", "critical"]:
+        if self.email_enabled and priority in ["high", "critical"]:
                 tasks.append(self._send_email(formatted_message, message_type))
             
-            if tasks:
+        if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             
             # Update rate limiting
             self.last_notification[message_type] = datetime.now()
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Bildirim gönderme hatası: {e}")
     
-    async def send_trade_alert(self, trade_data: Dict[str, Any]) -> None:
+async def send_trade_alert(self, trade_data: Dict[str, Any]) -> None:
         """Trade bildirimi gönder"""
-        try:
+    try:
             symbol = trade_data.get('symbol', 'UNKNOWN')
             side = trade_data.get('side', 'UNKNOWN')
             size = trade_data.get('size', 0)
@@ -121,12 +121,12 @@ class NotificationManager:
             priority = "high" if abs(pnl) > 100 else "normal"
             await self.send_message(message, "trade", priority)
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Trade alert hatası: {e}")
     
-    async def send_signal_alert(self, signal_data: Dict[str, Any]) -> None:
+async def send_signal_alert(self, signal_data: Dict[str, Any]) -> None:
         """Sinyal bildirimi gönder"""
-        try:
+    try:
             symbol = signal_data.get('symbol', 'UNKNOWN')
             signal_type = signal_data.get('signal_type', 'UNKNOWN')
             strength = signal_data.get('strength', 0)
@@ -149,12 +149,12 @@ class NotificationManager:
             priority = "normal" if confidence > 0.8 else "low"
             await self.send_message(message, "signal", priority)
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Signal alert hatası: {e}")
     
-    async def send_error_alert(self, error_message: str, module: str = "Unknown") -> None:
+async def send_error_alert(self, error_message: str, module: str = "Unknown") -> None:
         """Hata bildirimi gönder"""
-        try:
+    try:
             message = (
                 f"🚨 **ERROR ALERT**\n\n"
                 f"📍 **Module**: {module}\n"
@@ -164,12 +164,12 @@ class NotificationManager:
             
             await self.send_message(message, "error", "high")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Error alert hatası: {e}")
     
-    async def send_performance_summary(self, performance_data: Dict[str, Any]) -> None:
+async def send_performance_summary(self, performance_data: Dict[str, Any]) -> None:
         """Performans özeti gönder"""
-        try:
+    try:
             total_pnl = performance_data.get('total_pnl', 0)
             total_trades = performance_data.get('total_trades', 0)
             win_rate = performance_data.get('win_rate', 0)
@@ -190,12 +190,12 @@ class NotificationManager:
             
             await self.send_message(message, "performance", "normal")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Performance summary hatası: {e}")
     
-    async def _format_message(self, message: str, message_type: str, priority: str) -> str:
+async def _format_message(self, message: str, message_type: str, priority: str) -> str:
         """Mesajı formatla"""
-        try:
+    try:
             # Priority prefix
             priority_prefix = {
                 "low": "ℹ️",
@@ -211,14 +211,14 @@ class NotificationManager:
             
             return formatted
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Message formatting hatası: {e}")
             return message
     
-    async def _send_telegram(self, message: str) -> bool:
+async def _send_telegram(self, message: str) -> bool:
         """Telegram mesajı gönder"""
-        try:
-            if not self.telegram_bot_token or not self.telegram_chat_id:
+    try:
+        if not self.telegram_bot_token or not self.telegram_chat_id:
                 return False
             
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
@@ -231,21 +231,21 @@ class NotificationManager:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as response:
-                    if response.status == 200:
+                if response.status == 200:
                         logger.debug("✅ Telegram mesajı gönderildi")
                         return True
-                    else:
+                else:
                         logger.error(f"❌ Telegram hatası: {response.status}")
                         return False
                         
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Telegram gönderim hatası: {e}")
             return False
     
-    async def _send_discord(self, message: str, message_type: str) -> bool:
+async def _send_discord(self, message: str, message_type: str) -> bool:
         """Discord webhook mesajı gönder"""
-        try:
-            if not self.discord_webhook_url:
+    try:
+        if not self.discord_webhook_url:
                 return False
             
             # Color based on message type
@@ -270,26 +270,26 @@ class NotificationManager:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.discord_webhook_url, json=payload) as response:
-                    if response.status == 204:
+                if response.status == 204:
                         logger.debug("✅ Discord mesajı gönderildi")
                         return True
-                    else:
+                else:
                         logger.error(f"❌ Discord hatası: {response.status}")
                         return False
                         
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Discord gönderim hatası: {e}")
             return False
     
-    async def _send_email(self, message: str, message_type: str) -> bool:
+async def _send_email(self, message: str, message_type: str) -> bool:
         """Email gönder"""
-        try:
+    try:
             smtp_server = self.email_config.get('smtp_server')
             smtp_port = self.email_config.get('smtp_port', 587)
             email = self.email_config.get('email')
             password = self.email_config.get('password')
             
-            if not all([smtp_server, email, password]):
+        if not all([smtp_server, email, password]):
                 return False
             
             msg = MIMEMultipart()
@@ -308,60 +308,60 @@ class NotificationManager:
             logger.debug("✅ Email gönderildi")
             return True
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Email gönderim hatası: {e}")
             return False
     
-    async def _check_rate_limit(self, message_type: str) -> bool:
+async def _check_rate_limit(self, message_type: str) -> bool:
         """Rate limiting kontrolü"""
-        try:
+    try:
             last_time = self.last_notification.get(message_type)
             
-            if last_time:
+        if last_time:
                 elapsed = (datetime.now() - last_time).total_seconds()
                 
-                if elapsed < self.min_interval:
+            if elapsed < self.min_interval:
                     return False
             
             return True
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Rate limit kontrol hatası: {e}")
             return True
     
-    async def _test_telegram(self) -> None:
+async def _test_telegram(self) -> None:
         """Telegram bağlantısını test et"""
-        try:
-            if self.telegram_bot_token and self.telegram_chat_id:
+    try:
+        if self.telegram_bot_token and self.telegram_chat_id:
                 test_message = "🤖 Advanced Trading Bot - Telegram connection test"
                 await self._send_telegram(test_message)
                 logger.info("✅ Telegram bağlantısı test edildi")
-        except Exception as e:
+    except Exception as e:
             logger.warning(f"⚠️ Telegram test hatası: {e}")
     
-    async def _test_discord(self) -> None:
+async def _test_discord(self) -> None:
         """Discord bağlantısını test et"""
-        try:
-            if self.discord_webhook_url:
+    try:
+        if self.discord_webhook_url:
                 test_message = "🤖 Advanced Trading Bot - Discord connection test"
                 await self._send_discord(test_message, "info")
                 logger.info("✅ Discord bağlantısı test edildi")
-        except Exception as e:
+    except Exception as e:
             logger.warning(f"⚠️ Discord test hatası: {e}")
     
-    async def _test_email(self) -> None:
+async def _test_email(self) -> None:
         """Email bağlantısını test et"""
-        try:
+    try:
             # Email test is optional to avoid spam
             logger.info("✅ Email konfigürasyonu kontrol edildi")
-        except Exception as e:
+    except Exception as e:
             logger.warning(f"⚠️ Email test hatası: {e}")
     
-    async def close(self) -> None:
+async def close(self) -> None:
         """Notification manager'ı kapat"""
-        try:
+    try:
             logger.info("📱 Notification Manager kapatılıyor...")
             # Cleanup resources if needed
             logger.info("✅ Notification Manager kapatıldı")
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Notification Manager kapatma hatası: {e}")

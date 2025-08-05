@@ -12,7 +12,7 @@ from typing import Dict, Any
 
 def setup_logging(logging_config: Dict[str, Any]) -> None:
     """Logging sistemini kur"""
-    try:
+try:
         # Mevcut logger'ları temizle
         logger.remove()
         
@@ -28,7 +28,7 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         log_dir.mkdir(parents=True, exist_ok=True)
         
         # Console logger
-        if console_output:
+    if console_output:
             logger.add(
                 sys.stdout,
                 level=level,
@@ -74,7 +74,7 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         
         logger.info(f"✅ Logging sistemi kuruldu - Level: {level}, File: {file_path}")
         
-    except Exception as e:
+except Exception as e:
         print(f"❌ Logging kurulum hatası: {e}")
         # Fallback basic console logging
         logger.add(sys.stdout, level="INFO")
@@ -87,7 +87,7 @@ def get_performance_logger():
 
 def log_trade_performance(trade_data: Dict[str, Any]) -> None:
     """Trade performansını logla"""
-    try:
+try:
         perf_logger = get_performance_logger()
         
         message = (
@@ -100,13 +100,13 @@ def log_trade_performance(trade_data: Dict[str, Any]) -> None:
         
         perf_logger.info(message)
         
-    except Exception as e:
+except Exception as e:
         logger.error(f"❌ Trade performance log hatası: {e}")
 
 
 def log_signal_performance(signal_data: Dict[str, Any]) -> None:
     """Sinyal performansını logla"""
-    try:
+try:
         perf_logger = get_performance_logger()
         
         message = (
@@ -119,13 +119,13 @@ def log_signal_performance(signal_data: Dict[str, Any]) -> None:
         
         perf_logger.info(message)
         
-    except Exception as e:
+except Exception as e:
         logger.error(f"❌ Signal performance log hatası: {e}")
 
 
 def log_system_metrics(metrics: Dict[str, Any]) -> None:
     """Sistem metriklerini logla"""
-    try:
+try:
         perf_logger = get_performance_logger()
         
         message = (
@@ -137,5 +137,5 @@ def log_system_metrics(metrics: Dict[str, Any]) -> None:
         
         perf_logger.info(message)
         
-    except Exception as e:
+except Exception as e:
         logger.error(f"❌ System metrics log hatası: {e}")

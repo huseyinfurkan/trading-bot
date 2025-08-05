@@ -18,7 +18,7 @@ import concurrent.futures
 class DatabaseManager:
     """Veritabanı yöneticisi"""
     
-    def __init__(self, db_config: Dict[str, Any]):
+def __init__(self, db_config: Dict[str, Any]):
         """
         Args:
             db_config: Veritabanı konfigürasyonu
@@ -29,29 +29,29 @@ class DatabaseManager:
         self.connection = None
         
         # SQLite için path'i oluştur
-        if self.db_type == 'sqlite':
+    if self.db_type == 'sqlite':
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
     
-    async def initialize(self) -> None:
+async def initialize(self) -> None:
         """Veritabanını başlat ve tabloları oluştur"""
-        try:
-            if self.db_type == 'sqlite':
+    try:
+        if self.db_type == 'sqlite':
                 await self._initialize_sqlite()
-            elif self.db_type == 'postgresql':
+        elif self.db_type == 'postgresql':
                 await self._initialize_postgresql()
-            elif self.db_type == 'mongodb':
+        elif self.db_type == 'mongodb':
                 await self._initialize_mongodb()
-            else:
+        else:
                 raise ValueError(f"Desteklenmeyen veritabanı türü: {self.db_type}")
             
             await self._create_tables()
             logger.info(f"✅ Veritabanı başlatıldı: {self.db_type}")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Veritabanı başlatma hatası: {e}")
             raise
     
-    async def _initialize_sqlite(self) -> None:
+async def _initialize_sqlite(self) -> None:
         """SQLite veritabanını başlat"""
         self.connection = await aiosqlite.connect(self.db_path)
         # Enable WAL mode for better concurrency
@@ -59,17 +59,17 @@ class DatabaseManager:
         await self.connection.execute("PRAGMA foreign_keys = ON")
         await self.connection.commit()
     
-    async def _initialize_postgresql(self) -> None:
+async def _initialize_postgresql(self) -> None:
         """PostgreSQL veritabanını başlat"""
         # TODO: PostgreSQL desteği eklenecek
         raise NotImplementedError("PostgreSQL desteği henüz eklenmedi")
     
-    async def _initialize_mongodb(self) -> None:
+async def _initialize_mongodb(self) -> None:
         """MongoDB veritabanını başlat"""
         # TODO: MongoDB desteği eklenecek
         raise NotImplementedError("MongoDB desteği henüz eklenmedi")
     
-    async def _create_tables(self) -> None:
+async def _create_tables(self) -> None:
         """Gerekli tabloları oluştur"""
         tables = {
             'market_data': '''
@@ -198,17 +198,17 @@ class DatabaseManager:
             '''
         }
         
-        for table_name, create_sql in tables.items():
+    for table_name, create_sql in tables.items():
             await self.connection.execute(create_sql)
             logger.debug(f"📋 Tablo oluşturuldu/kontrol edildi: {table_name}")
         
         await self.connection.commit()
         logger.info("✅ Tüm tablolar oluşturuldu")
     
-    async def save_market_data(self, symbol: str, exchange: str, timeframe: str, 
+async def save_market_data(self, symbol: str, exchange: str, timeframe: str, 
                               data: Dict[str, Any]) -> None:
         """Market verilerini kaydet"""
-        try:
+    try:
             sql = '''
                 INSERT OR REPLACE INTO market_data 
                 (symbol, exchange, timestamp, open_price, high_price, low_price, 
@@ -223,13 +223,13 @@ class DatabaseManager:
             ))
             await self.connection.commit()
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Market data kaydetme hatası: {e}")
             raise
     
-    async def save_position(self, position_data: Dict[str, Any]) -> int:
+async def save_position(self, position_data: Dict[str, Any]) -> int:
         """Pozisyon kaydet"""
-        try:
+    try:
             sql = '''
                 INSERT INTO positions 
                 (symbol, exchange, side, size, entry_price, strategy, confidence, 
@@ -248,13 +248,13 @@ class DatabaseManager:
             
             return cursor.lastrowid
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Pozisyon kaydetme hatası: {e}")
             raise
     
-    async def update_position(self, position_id: int, updates: Dict[str, Any]) -> None:
+async def update_position(self, position_id: int, updates: Dict[str, Any]) -> None:
         """Pozisyon güncelle"""
-        try:
+    try:
             # Dinamik SQL oluştur
             set_clause = ', '.join([f"{key} = ?" for key in updates.keys()])
             sql = f"UPDATE positions SET {set_clause} WHERE id = ?"
@@ -263,13 +263,13 @@ class DatabaseManager:
             await self.connection.execute(sql, values)
             await self.connection.commit()
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Pozisyon güncelleme hatası: {e}")
             raise
     
-    async def save_trade(self, trade_data: Dict[str, Any]) -> int:
+async def save_trade(self, trade_data: Dict[str, Any]) -> int:
         """Trade kaydet"""
-        try:
+    try:
             sql = '''
                 INSERT INTO trades 
                 (position_id, symbol, exchange, side, size, price, fee, 
@@ -288,13 +288,13 @@ class DatabaseManager:
             
             return cursor.lastrowid
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Trade kaydetme hatası: {e}")
             raise
     
-    async def save_signal(self, signal_data: Dict[str, Any]) -> None:
+async def save_signal(self, signal_data: Dict[str, Any]) -> None:
         """Sinyal kaydet"""
-        try:
+    try:
             sql = '''
                 INSERT INTO signals 
                 (symbol, exchange, signal_type, strength, confidence, strategy, 
@@ -313,17 +313,17 @@ class DatabaseManager:
             ))
             await self.connection.commit()
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Sinyal kaydetme hatası: {e}")
             raise
     
-    async def get_positions(self, symbol: str = None, status: str = 'OPEN') -> List[Dict]:
+async def get_positions(self, symbol: str = None, status: str = 'OPEN') -> List[Dict]:
         """Pozisyonları getir"""
-        try:
-            if symbol:
+    try:
+        if symbol:
                 sql = "SELECT * FROM positions WHERE symbol = ? AND status = ?"
                 cursor = await self.connection.execute(sql, (symbol, status))
-            else:
+        else:
                 sql = "SELECT * FROM positions WHERE status = ?"
                 cursor = await self.connection.execute(sql, (status,))
             
@@ -332,14 +332,14 @@ class DatabaseManager:
             
             return [dict(zip(columns, row)) for row in rows]
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Pozisyon getirme hatası: {e}")
             return []
     
-    async def get_market_data(self, symbol: str, exchange: str, timeframe: str, 
+async def get_market_data(self, symbol: str, exchange: str, timeframe: str, 
                              limit: int = 100) -> pd.DataFrame:
         """Market verilerini getir"""
-        try:
+    try:
             sql = '''
                 SELECT * FROM market_data 
                 WHERE symbol = ? AND exchange = ? AND timeframe = ?
@@ -347,31 +347,31 @@ class DatabaseManager:
             '''
             
             # Use sync connection for pandas compatibility
-            def _read_sql_sync():
+        def _read_sql_sync():
                 conn = sqlite3.connect(self.db_path)
-                try:
+            try:
                     return pd.read_sql_query(sql, conn, params=(symbol, exchange, timeframe, limit))
-                finally:
+            finally:
                     conn.close()
             
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
                 df = await loop.run_in_executor(executor, _read_sql_sync)
             
-            if not df.empty:
+        if not df.empty:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 df = df.sort_values('timestamp').reset_index(drop=True)
             
             return df
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Market data getirme hatası: {e}")
             return pd.DataFrame()
     
-    async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
+async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
         """Performans istatistiklerini getir"""
-        try:
+    try:
             # Son N günlük performans
             start_date = datetime.now() - timedelta(days=days)
             
@@ -387,7 +387,7 @@ class DatabaseManager:
             
             performance_data = [dict(zip(columns, row)) for row in rows]
             
-            if not performance_data:
+        if not performance_data:
                 return {}
             
             # Temel istatistikleri hesapla
@@ -405,24 +405,24 @@ class DatabaseManager:
                 'days_analyzed': len(performance_data)
             }
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Performans istatistikleri hatası: {e}")
             return {}
     
-    async def cleanup_old_data(self) -> None:
+async def cleanup_old_data(self) -> None:
         """Eski verileri temizle"""
-        try:
+    try:
             retention_days = self.config.get('data_retention_days', 90)
             cutoff_date = datetime.now() - timedelta(days=retention_days)
             
             tables_to_clean = ['market_data', 'signals', 'system_logs']
             
-            for table in tables_to_clean:
+        for table in tables_to_clean:
                 sql = f"DELETE FROM {table} WHERE created_at < ?"
                 cursor = await self.connection.execute(sql, (cutoff_date,))
                 deleted_count = cursor.rowcount
                 
-                if deleted_count > 0:
+            if deleted_count > 0:
                     logger.info(f"🧹 {table} tablosundan {deleted_count} eski kayıt silindi")
             
             await self.connection.commit()
@@ -431,11 +431,11 @@ class DatabaseManager:
             await self.connection.execute("VACUUM")
             logger.info("✅ Veritabanı temizlik işlemi tamamlandı")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Veritabanı temizlik hatası: {e}")
     
-    async def close(self) -> None:
+async def close(self) -> None:
         """Veritabanı bağlantısını kapat"""
-        if self.connection:
+    if self.connection:
             await self.connection.close()
             logger.info("✅ Veritabanı bağlantısı kapatıldı")

@@ -14,7 +14,7 @@ import asyncio
 class ConfidenceCalculator:
     """Güven faktörü hesaplayıcısı"""
     
-    def __init__(self, ai_config: Dict[str, Any], db_manager):
+def __init__(self, ai_config: Dict[str, Any], db_manager):
         """
         Args:
             ai_config: AI konfigürasyonu
@@ -36,10 +36,10 @@ class ConfidenceCalculator:
         self.performance_history = {}
         self.signal_accuracy = {}
         
-    async def calculate_confidence(self, symbol: str, market_data: Dict[str, Any], 
+async def calculate_confidence(self, symbol: str, market_data: Dict[str, Any], 
                                  signals: Dict[str, Any], market_condition: Dict[str, Any]) -> float:
         """Ana güven faktörü hesaplama fonksiyonu"""
-        try:
+    try:
             # Base confidence from signal analysis
             signal_confidence = await self._calculate_signal_confidence(signals)
             
@@ -83,16 +83,16 @@ class ConfidenceCalculator:
             
             return min(1.0, max(0.0, adjusted_confidence))
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ {symbol} güven hesaplama hatası: {e}")
             return 0.5  # Default moderate confidence
     
-    async def _calculate_signal_confidence(self, signals: Dict[str, Any]) -> float:
+async def _calculate_signal_confidence(self, signals: Dict[str, Any]) -> float:
         """Sinyal bazlı güven hesapla"""
-        try:
+    try:
             signal_list = signals.get('signals', [])
             
-            if not signal_list:
+        if not signal_list:
                 return 0.0
             
             # Signal count and agreement
@@ -121,67 +121,67 @@ class ConfidenceCalculator:
             
             return min(1.0, final_confidence)
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Sinyal güven hesaplama hatası: {e}")
             return 0.5
     
-    async def _calculate_market_alignment(self, signals: Dict[str, Any], 
+async def _calculate_market_alignment(self, signals: Dict[str, Any], 
                                         market_condition: Dict[str, Any]) -> float:
         """Market koşulları ile sinyal uyumunu hesapla"""
-        try:
+    try:
             signal_list = signals.get('signals', [])
             market_cond = market_condition.get('condition', 'sideways')
             market_strength = market_condition.get('strength', 0.5)
             
-            if not signal_list:
+        if not signal_list:
                 return 0.5
             
             # Determine dominant signal direction
             buy_signals = [s for s in signal_list if s.get('type') == 'BUY']
             sell_signals = [s for s in signal_list if s.get('type') == 'SELL']
             
-            if len(buy_signals) > len(sell_signals):
+        if len(buy_signals) > len(sell_signals):
                 signal_direction = 'bullish'
-            elif len(sell_signals) > len(buy_signals):
+        elif len(sell_signals) > len(buy_signals):
                 signal_direction = 'bearish'
-            else:
+        else:
                 signal_direction = 'neutral'
             
             # Alignment scoring
             alignment_score = 0.5  # Default neutral
             
-            if market_cond == 'bull_market':
-                if signal_direction == 'bullish':
+        if market_cond == 'bull_market':
+            if signal_direction == 'bullish':
                     alignment_score = 0.8 + market_strength * 0.2
-                elif signal_direction == 'bearish':
+            elif signal_direction == 'bearish':
                     alignment_score = 0.2 - market_strength * 0.1
             
-            elif market_cond == 'bear_market':
-                if signal_direction == 'bearish':
+        elif market_cond == 'bear_market':
+            if signal_direction == 'bearish':
                     alignment_score = 0.8 + market_strength * 0.2
-                elif signal_direction == 'bullish':
+            elif signal_direction == 'bullish':
                     alignment_score = 0.2 - market_strength * 0.1
             
-            else:  # sideways market
-                if signal_direction == 'neutral':
+        else:  # sideways market
+            if signal_direction == 'neutral':
                     alignment_score = 0.7
-                else:
+            else:
                     # In sideways markets, contrarian signals can be good
                     alignment_score = 0.6
             
             return min(1.0, max(0.0, alignment_score))
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Market alignment hesaplama hatası: {e}")
             return 0.5
     
-    async def _calculate_technical_confluence(self, market_data: Dict[str, Any], 
+async def _calculate_technical_confluence(self, market_data: Dict[str, Any], 
                                            signals: Dict[str, Any]) -> float:
         """Technical indicator confluence hesapla"""
-        try:
+    try:
             df = market_data.get('dataframe')
             
-            if df is None or df.empty:
+        if df is None or df.empty:
                 return 0.5
             
             latest = df.iloc[-1]
@@ -191,48 +191,48 @@ class ConfidenceCalculator:
             
             # Trend alignment
             trend_alignment = 0.5
-            try:
+        try:
                 # Simple trend check with multiple timeframes
                 short_trend = latest['close'] > df['close'].rolling(10).mean().iloc[-1]
                 medium_trend = latest['close'] > df['close'].rolling(50).mean().iloc[-1]
                 
-                if short_trend and medium_trend:
+            if short_trend and medium_trend:
                     trend_alignment = 0.8
-                elif not short_trend and not medium_trend:
+            elif not short_trend and not medium_trend:
                     trend_alignment = 0.8
-                else:
+            else:
                     trend_alignment = 0.3
-            except:
+        except:
                 pass
             
             # Volume confirmation
             volume_conf = 0.5
-            try:
+        try:
                 recent_volume = latest['volume']
                 avg_volume = df['volume'].rolling(20).mean().iloc[-1]
                 
-                if recent_volume > avg_volume * 1.2:
+            if recent_volume > avg_volume * 1.2:
                     volume_conf = 0.8
-                elif recent_volume < avg_volume * 0.8:
+            elif recent_volume < avg_volume * 0.8:
                     volume_conf = 0.3
-            except:
+        except:
                 pass
             
             # RSI levels
             rsi_conf = 0.5
-            try:
+        try:
                 # RSI will be calculated in signal filter
                 # This is a placeholder
-                import random
+            import random
                 rsi = random.uniform(30, 70)
                 
-                if 40 <= rsi <= 60:  # Neutral zone
+            if 40 <= rsi <= 60:  # Neutral zone
                     rsi_conf = 0.7
-                elif rsi < 30 or rsi > 70:  # Extreme zones
+            elif rsi < 30 or rsi > 70:  # Extreme zones
                     rsi_conf = 0.8
-                else:
+            else:
                     rsi_conf = 0.6
-            except:
+        except:
                 pass
             
             # Combine technical factors
@@ -241,16 +241,16 @@ class ConfidenceCalculator:
             
             return confluence_score
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Technical confluence hesaplama hatası: {e}")
             return 0.5
     
-    async def _calculate_volume_confirmation(self, market_data: Dict[str, Any]) -> float:
+async def _calculate_volume_confirmation(self, market_data: Dict[str, Any]) -> float:
         """Volume confirmation hesapla"""
-        try:
+    try:
             df = market_data.get('dataframe')
             
-            if df is None or df.empty:
+        if df is None or df.empty:
                 return 0.5
             
             latest = df.iloc[-1]
@@ -268,40 +268,40 @@ class ConfidenceCalculator:
             # Ideal: rising price with rising volume (bullish) or falling price with rising volume (bearish)
             pv_confirmation = 0.5
             
-            if price_change > 0 and volume_change > 0:  # Bullish confirmation
+        if price_change > 0 and volume_change > 0:  # Bullish confirmation
                 pv_confirmation = 0.8
-            elif price_change < 0 and volume_change > 0:  # Bearish confirmation
+        elif price_change < 0 and volume_change > 0:  # Bearish confirmation
                 pv_confirmation = 0.8
-            elif abs(price_change) < 0.01:  # Low price movement
+        elif abs(price_change) < 0.01:  # Low price movement
                 pv_confirmation = 0.6
-            else:  # Divergence
+        else:  # Divergence
                 pv_confirmation = 0.3
             
             # Volume magnitude factor
-            if volume_ratio > 1.5:
+        if volume_ratio > 1.5:
                 magnitude_factor = 0.9
-            elif volume_ratio > 1.2:
+        elif volume_ratio > 1.2:
                 magnitude_factor = 0.7
-            elif volume_ratio < 0.8:
+        elif volume_ratio < 0.8:
                 magnitude_factor = 0.4
-            else:
+        else:
                 magnitude_factor = 0.6
             
             final_volume_conf = (pv_confirmation + magnitude_factor) / 2
             
             return min(1.0, final_volume_conf)
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Volume confirmation hesaplama hatası: {e}")
             return 0.5
     
-    async def _get_historical_performance(self, symbol: str) -> float:
+async def _get_historical_performance(self, symbol: str) -> float:
         """Historical performance based confidence"""
-        try:
+    try:
             # Bu fonksiyon geçmiş sinyal performansını analiz eder
             # Şimdilik basit bir simülasyon
             
-            if symbol not in self.performance_history:
+        if symbol not in self.performance_history:
                 # Initialize with neutral performance
                 self.performance_history[symbol] = {
                     'total_signals': 0,
@@ -312,55 +312,55 @@ class ConfidenceCalculator:
             
             performance = self.performance_history[symbol]
             
-            if performance['total_signals'] == 0:
+        if performance['total_signals'] == 0:
                 return 0.6  # Default for new symbols
             
             success_rate = performance['successful_signals'] / performance['total_signals']
             
             # Convert success rate to confidence
-            if success_rate > 0.7:
+        if success_rate > 0.7:
                 return 0.9
-            elif success_rate > 0.6:
+        elif success_rate > 0.6:
                 return 0.8
-            elif success_rate > 0.5:
+        elif success_rate > 0.5:
                 return 0.7
-            elif success_rate > 0.4:
+        elif success_rate > 0.4:
                 return 0.6
-            else:
+        else:
                 return 0.4
                 
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Historical performance hesaplama hatası: {e}")
             return 0.6
     
-    async def _calculate_time_factor(self) -> float:
+async def _calculate_time_factor(self) -> float:
         """Time of day factor"""
-        try:
+    try:
             now = datetime.now()
             hour = now.hour
             
             # Market hours considerations (crypto trades 24/7 but has patterns)
             # Higher activity during certain hours
             
-            if 8 <= hour <= 12:  # Morning hours (high activity)
+        if 8 <= hour <= 12:  # Morning hours (high activity)
                 return 0.8
-            elif 13 <= hour <= 17:  # Afternoon (moderate activity)
+        elif 13 <= hour <= 17:  # Afternoon (moderate activity)
                 return 0.7
-            elif 18 <= hour <= 22:  # Evening (high activity)
+        elif 18 <= hour <= 22:  # Evening (high activity)
                 return 0.8
-            else:  # Night hours (lower activity)
+        else:  # Night hours (lower activity)
                 return 0.6
                 
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Time factor hesaplama hatası: {e}")
             return 0.7
     
-    async def _calculate_volatility_factor(self, market_data: Dict[str, Any]) -> float:
+async def _calculate_volatility_factor(self, market_data: Dict[str, Any]) -> float:
         """Volatility based confidence adjustment"""
-        try:
+    try:
             df = market_data.get('dataframe')
             
-            if df is None or df.empty:
+        if df is None or df.empty:
                 return 0.7
             
             # Calculate recent volatility
@@ -371,24 +371,24 @@ class ConfidenceCalculator:
             vol_ratio = recent_vol / historical_vol if historical_vol > 0 else 1.0
             
             # Moderate volatility is best for most strategies
-            if 0.8 <= vol_ratio <= 1.2:  # Normal volatility
+        if 0.8 <= vol_ratio <= 1.2:  # Normal volatility
                 return 0.8
-            elif vol_ratio > 2.0:  # Very high volatility
+        elif vol_ratio > 2.0:  # Very high volatility
                 return 0.4
-            elif vol_ratio < 0.5:  # Very low volatility
+        elif vol_ratio < 0.5:  # Very low volatility
                 return 0.5
-            elif vol_ratio > 1.5:  # High volatility
+        elif vol_ratio > 1.5:  # High volatility
                 return 0.6
-            else:  # Low-moderate volatility
+        else:  # Low-moderate volatility
                 return 0.7
                 
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Volatility factor hesaplama hatası: {e}")
             return 0.7
     
-    async def _combine_confidence_factors(self, factors: Dict[str, float]) -> float:
+async def _combine_confidence_factors(self, factors: Dict[str, float]) -> float:
         """Güven faktörlerini birleştir"""
-        try:
+    try:
             # Weighted combination
             weights = {
                 'signal_confidence': 0.25,
@@ -403,43 +403,43 @@ class ConfidenceCalculator:
             weighted_sum = 0
             total_weight = 0
             
-            for factor_name, factor_value in factors.items():
+        for factor_name, factor_value in factors.items():
                 weight = weights.get(factor_name, 0.1)
                 weighted_sum += factor_value * weight
                 total_weight += weight
             
-            if total_weight == 0:
+        if total_weight == 0:
                 return 0.5
             
             final_confidence = weighted_sum / total_weight
             
             return final_confidence
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Faktör birleştirme hatası: {e}")
             return 0.5
     
-    async def _apply_risk_adjustments(self, confidence: float, symbol: str, 
+async def _apply_risk_adjustments(self, confidence: float, symbol: str, 
                                     market_data: Dict[str, Any]) -> float:
         """Risk bazlı güven ayarlamaları"""
-        try:
+    try:
             adjusted_confidence = confidence
             
             # Market cap adjustment (if available)
             # Larger cap coins get slightly higher confidence
-            if 'BTC' in symbol or 'ETH' in symbol:
+        if 'BTC' in symbol or 'ETH' in symbol:
                 adjusted_confidence *= 1.05
             
             # Spread adjustment
             bid = market_data.get('bid', 0)
             ask = market_data.get('ask', 0)
             
-            if bid > 0 and ask > 0:
+        if bid > 0 and ask > 0:
                 spread_pct = (ask - bid) / bid * 100
                 
-                if spread_pct > 0.5:  # High spread
+            if spread_pct > 0.5:  # High spread
                     adjusted_confidence *= 0.9
-                elif spread_pct > 0.2:  # Moderate spread
+            elif spread_pct > 0.2:  # Moderate spread
                     adjusted_confidence *= 0.95
             
             # Recent performance penalty
@@ -447,15 +447,15 @@ class ConfidenceCalculator:
             
             return min(1.0, max(0.0, adjusted_confidence))
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Risk ayarlama hatası: {e}")
             return confidence
     
-    async def update_signal_performance(self, symbol: str, signal_id: str, 
+async def update_signal_performance(self, symbol: str, signal_id: str, 
                                       success: bool, return_pct: float) -> None:
         """Sinyal performansını güncelle"""
-        try:
-            if symbol not in self.performance_history:
+    try:
+        if symbol not in self.performance_history:
                 self.performance_history[symbol] = {
                     'total_signals': 0,
                     'successful_signals': 0,
@@ -468,7 +468,7 @@ class ConfidenceCalculator:
             # Update stats
             performance['total_signals'] += 1
             
-            if success:
+        if success:
                 performance['successful_signals'] += 1
             
             # Update average return
@@ -480,16 +480,16 @@ class ConfidenceCalculator:
             
             logger.info(f"📊 {symbol} performance güncellendi: {performance['successful_signals']}/{performance['total_signals']} başarılı")
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Performance güncelleme hatası: {e}")
     
-    def get_min_confidence_threshold(self) -> float:
+def get_min_confidence_threshold(self) -> float:
         """Minimum güven eşiğini döndür"""
         return self.min_confidence
     
-    async def is_confidence_sufficient(self, confidence: float, strategy: str) -> bool:
+async def is_confidence_sufficient(self, confidence: float, strategy: str) -> bool:
         """Güven seviyesinin yeterli olup olmadığını kontrol et"""
-        try:
+    try:
             # Strategy-specific thresholds
             strategy_thresholds = {
                 'scalping': 0.8,  # Scalping requires high confidence
@@ -502,6 +502,6 @@ class ConfidenceCalculator:
             
             return confidence >= required_confidence
             
-        except Exception as e:
+    except Exception as e:
             logger.error(f"❌ Güven kontrol hatası: {e}")
             return confidence >= self.min_confidence
