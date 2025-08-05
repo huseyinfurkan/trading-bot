@@ -423,7 +423,6 @@ class PositionManager:
             # Get real-time price from exchange manager
             market_data = await self.exchange_manager.get_real_time_data(symbol)
             return market_data.get('price') if market_data else None
-                
         except Exception as e:
             logger.error(f"❌ Current price error for {symbol}: {e}")
             return None

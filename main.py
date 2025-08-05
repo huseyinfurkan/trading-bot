@@ -34,13 +34,13 @@ from src.ai.confidence_calculator import ConfidenceCalculator
 
 # Utils
 from src.utils.notifications import NotificationManager
-from src.utils.logger_setup import setup_logging
+from src.utils.logger_setup import setup_logger
 
 
 class AdvancedTradingBot:
     """Advanced Multi-Coin Trading Bot with Live Data Analysis"""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the trading bot"""
         self.config_path = config_path
         self.running = False
