@@ -231,7 +231,7 @@ class AISignalFilter:
             features_df['volume_percentile'] = features_df['volume'].rolling(100).rank(pct=True)
             
             # NaN değerleri temizle
-            features_df = features_df.fillna(method='ffill').fillna(0)
+            features_df = features_df.ffill().fillna(0)
             
             return features_df
             

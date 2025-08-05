@@ -20,6 +20,9 @@ from pathlib import Path
 from loguru import logger
 from typing import Dict, List, Optional
 
+# Add src to Python path for proper imports
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
+
 # Core modules
 from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager

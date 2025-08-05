@@ -3,7 +3,7 @@ Exchange Manager
 Çoklu exchange bağlantılarını yönetir ve API çağrılarını koordine eder
 """
 
-import ccxt
+import ccxt.async_support as ccxt
 import asyncio
 import aiohttp
 from datetime import datetime, timedelta
@@ -107,17 +107,22 @@ class ExchangeManager:
         try:
             # Test API çağrısı
             if hasattr(exchange, 'fetch_status'):
-                status = await exchange.fetch_status()
-                if status['status'] != 'ok':
-                    raise Exception(f"{name} exchange durumu: {status}")
+                try:
+                    status = await exchange.fetch_status()
+                    if status and status.get('status') != 'ok':
+                        logger.warning(f"⚠️ {name} exchange durumu: {status}")
+                except Exception as e:
+                    logger.warning(f"⚠️ {name} status kontrolü başarısız: {e}")
             
-            # Balance çağrısı ile API anahtarlarını test et
+            # Balance çağrısı ile API anahtarlarını test et (eğer API keys varsa)
             if exchange.apiKey and exchange.secret:
                 try:
                     await exchange.fetch_balance()
                     logger.info(f"✅ {name} API anahtarları doğrulandı")
                 except Exception as e:
                     logger.warning(f"⚠️ {name} API anahtarları test edilemedi: {e}")
+            else:
+                logger.info(f"ℹ️ {name} için API anahtarları ayarlanmamış (sadece okuma modu)")
             
         except Exception as e:
             logger.warning(f"⚠️ {name} bağlantı testi başarısız: {e}")

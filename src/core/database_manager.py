@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import pandas as pd
 from loguru import logger
+import concurrent.futures
 
 
 class DatabaseManager:
@@ -53,6 +54,8 @@ class DatabaseManager:
     async def _initialize_sqlite(self) -> None:
         """SQLite veritabanını başlat"""
         self.connection = await aiosqlite.connect(self.db_path)
+        # Enable WAL mode for better concurrency
+        await self.connection.execute("PRAGMA journal_mode=WAL")
         await self.connection.execute("PRAGMA foreign_keys = ON")
         await self.connection.commit()
     
@@ -343,8 +346,18 @@ class DatabaseManager:
                 ORDER BY timestamp DESC LIMIT ?
             '''
             
-            df = pd.read_sql_query(sql, await aiosqlite.connect(self.db_path), 
-                                  params=(symbol, exchange, timeframe, limit))
+            # Use sync connection for pandas compatibility
+            def _read_sql_sync():
+                conn = sqlite3.connect(self.db_path)
+                try:
+                    return pd.read_sql_query(sql, conn, params=(symbol, exchange, timeframe, limit))
+                finally:
+                    conn.close()
+            
+            # Run in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                df = await loop.run_in_executor(executor, _read_sql_sync)
             
             if not df.empty:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
