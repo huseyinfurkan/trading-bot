@@ -26,9 +26,9 @@ import pandas_ta as ta
 
 
 class AISignalFilter:
-"""AI destekli sinyal filtreleme sistemi"""
-
-def __init__(self, ai_config: Dict[str, Any], db_manager):
+    """AI destekli sinyal filtreleme sistemi"""
+    
+    def __init__(self, ai_config: Dict[str, Any], db_manager):
 """
 Args:
 ai_config: AI konfigürasyonu
