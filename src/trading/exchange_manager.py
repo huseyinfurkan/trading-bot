@@ -238,6 +238,184 @@ class ExchangeManager:
             logger.error(f"❌ {symbol} real-time data hatası: {e}")
             return None
     
+    async def start_websocket_streams(self, symbols: List[str]) -> None:
+        """WebSocket stream'lerini başlat"""
+        try:
+            for exchange_name, exchange in self.exchanges.items():
+                if hasattr(exchange, 'watch_ticker'):
+                    logger.info(f"🔌 {exchange_name} WebSocket stream'leri başlatılıyor...")
+                    
+                    for symbol in symbols:
+                        try:
+                            # Start ticker stream
+                            asyncio.create_task(self._watch_ticker_stream(exchange, symbol))
+                            
+                            # Start orderbook stream
+                            if hasattr(exchange, 'watch_order_book'):
+                                asyncio.create_task(self._watch_orderbook_stream(exchange, symbol))
+                            
+                            await asyncio.sleep(0.1)  # Rate limiting
+                            
+                        except Exception as e:
+                            logger.warning(f"⚠️ {symbol} WebSocket stream başlatılamadı: {e}")
+                            
+                else:
+                    logger.info(f"ℹ️ {exchange_name} WebSocket desteklemiyor, polling kullanılacak")
+                    
+        except Exception as e:
+            logger.error(f"❌ WebSocket stream başlatma hatası: {e}")
+    
+    async def _watch_ticker_stream(self, exchange, symbol: str) -> None:
+        """Ticker WebSocket stream'ini izle"""
+        try:
+            while True:
+                try:
+                    ticker = await exchange.watch_ticker(symbol)
+                    
+                    # Cache the latest ticker
+                    if not hasattr(self, 'ticker_cache'):
+                        self.ticker_cache = {}
+                    
+                    self.ticker_cache[f"{exchange.id}:{symbol}"] = {
+                        'ticker': ticker,
+                        'timestamp': datetime.now(),
+                        'exchange': exchange.id
+                    }
+                    
+                    # Emit real-time signal if needed
+                    await self._emit_ticker_update(symbol, ticker, exchange.id)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ {symbol} ticker stream hatası: {e}")
+                    await asyncio.sleep(5)  # Wait before retry
+                    
+        except Exception as e:
+            logger.error(f"❌ {symbol} ticker stream fatal hatası: {e}")
+    
+    async def _watch_orderbook_stream(self, exchange, symbol: str) -> None:
+        """OrderBook WebSocket stream'ini izle"""
+        try:
+            while True:
+                try:
+                    orderbook = await exchange.watch_order_book(symbol)
+                    
+                    # Cache the latest orderbook
+                    if not hasattr(self, 'orderbook_cache'):
+                        self.orderbook_cache = {}
+                    
+                    self.orderbook_cache[f"{exchange.id}:{symbol}"] = {
+                        'orderbook': orderbook,
+                        'timestamp': datetime.now(),
+                        'exchange': exchange.id
+                    }
+                    
+                    # Emit real-time signal if needed
+                    await self._emit_orderbook_update(symbol, orderbook, exchange.id)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ {symbol} orderbook stream hatası: {e}")
+                    await asyncio.sleep(5)  # Wait before retry
+                    
+        except Exception as e:
+            logger.error(f"❌ {symbol} orderbook stream fatal hatası: {e}")
+    
+    async def _emit_ticker_update(self, symbol: str, ticker: Dict, exchange_id: str) -> None:
+        """Ticker güncellemesi event'i"""
+        try:
+            # Here you could emit to event bus, send notifications, etc.
+            price_change = ticker.get('percentage', 0)
+            
+            # Log significant price movements
+            if abs(price_change) > 5:  # 5%+ movement
+                logger.info(f"🚨 {symbol} on {exchange_id}: {price_change:+.2f}% değişim!")
+                
+        except Exception as e:
+            logger.error(f"❌ Ticker update emit hatası: {e}")
+    
+    async def _emit_orderbook_update(self, symbol: str, orderbook: Dict, exchange_id: str) -> None:
+        """OrderBook güncellemesi event'i"""
+        try:
+            bids = orderbook.get('bids', [])
+            asks = orderbook.get('asks', [])
+            
+            if bids and asks:
+                spread = asks[0][0] - bids[0][0]
+                spread_pct = spread / asks[0][0] * 100
+                
+                # Log wide spreads
+                if spread_pct > 1:  # 1%+ spread
+                    logger.warning(f"⚠️ {symbol} on {exchange_id}: Geniş spread %{spread_pct:.2f}")
+                    
+        except Exception as e:
+            logger.error(f"❌ OrderBook update emit hatası: {e}")
+    
+    async def get_cached_ticker(self, symbol: str, exchange_name: str = None) -> Optional[Dict]:
+        """Cache'den ticker al"""
+        try:
+            if not hasattr(self, 'ticker_cache'):
+                return None
+            
+            if exchange_name:
+                cache_key = f"{exchange_name}:{symbol}"
+                return self.ticker_cache.get(cache_key)
+            else:
+                # Find in any exchange
+                for key, data in self.ticker_cache.items():
+                    if key.endswith(f":{symbol}"):
+                        return data
+                        
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Cached ticker hatası: {e}")
+            return None
+    
+    async def get_multi_exchange_prices(self, symbol: str) -> Dict[str, float]:
+        """Tüm exchange'lerdeki fiyatları al"""
+        try:
+            prices = {}
+            
+            for exchange_name, exchange in self.exchanges.items():
+                try:
+                    # First try cache
+                    cached = await self.get_cached_ticker(symbol, exchange_name)
+                    if cached and (datetime.now() - cached['timestamp']).seconds < 10:
+                        prices[exchange_name] = cached['ticker']['last']
+                        continue
+                    
+                    # Fallback to API call
+                    ticker = await exchange.fetch_ticker(symbol)
+                    if ticker and ticker.get('last'):
+                        prices[exchange_name] = ticker['last']
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ {exchange_name} fiyat alınamadı: {e}")
+                    continue
+            
+            if prices:
+                # Find best bid/ask across exchanges
+                max_price = max(prices.values())
+                min_price = min(prices.values())
+                avg_price = sum(prices.values()) / len(prices)
+                
+                logger.debug(f"💰 {symbol} fiyatları: Min {min_price}, Max {max_price}, Avg {avg_price:.2f}")
+                
+                return {
+                    'exchanges': prices,
+                    'min_price': min_price,
+                    'max_price': max_price,
+                    'avg_price': avg_price,
+                    'price_spread': max_price - min_price,
+                    'best_exchange_buy': min(prices, key=prices.get),  # Cheapest
+                    'best_exchange_sell': max(prices, key=prices.get)  # Most expensive
+                }
+            else:
+                return {}
+                
+        except Exception as e:
+            logger.error(f"❌ Multi-exchange price hatası: {e}")
+            return {}
+    
     async def get_historical_data(self, symbol: str, timeframe: str = '1h', 
                                  days: int = 30, exchange_name: str = None) -> pd.DataFrame:
         """Geçmiş verileri al"""

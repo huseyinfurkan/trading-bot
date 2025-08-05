@@ -378,3 +378,156 @@ class PositionManager:
         except Exception as e:
             logger.error(f"❌ Position size validasyon hatası: {e}")
             return False
+    
+    async def update_trailing_stops(self) -> None:
+        """Trailing stop'ları güncelle"""
+        try:
+            positions = await self.db_manager.get_positions(status='OPEN')
+            
+            for position in positions:
+                try:
+                    if not position.get('trailing_stop_enabled'):
+                        continue
+                    
+                    symbol = position['symbol']
+                    position_id = position['id']
+                    side = position['side']
+                    entry_price = position['entry_price']
+                    current_stop = position.get('stop_loss')
+                    
+                    # Get current price
+                    market_data = await self.exchange_manager.get_market_data(symbol)
+                    if not market_data:
+                        continue
+                    
+                    current_price = market_data['close']
+                    
+                    # Calculate trailing distance (default 2%)
+                    trailing_distance = position.get('trailing_distance', 0.02)
+                    
+                    # Calculate new stop level
+                    if side == 'BUY':
+                        # For long positions, trail stop up
+                        new_stop = current_price * (1 - trailing_distance)
+                        
+                        # Only update if new stop is higher than current
+                        if not current_stop or new_stop > current_stop:
+                            await self.db_manager.update_position(position_id, {
+                                'stop_loss': new_stop,
+                                'last_trailing_update': datetime.now()
+                            })
+                            
+                            logger.info(f"📈 {symbol} trailing stop güncellendi: {current_stop} → {new_stop:.4f}")
+                    
+                    else:  # SELL position
+                        # For short positions, trail stop down
+                        new_stop = current_price * (1 + trailing_distance)
+                        
+                        # Only update if new stop is lower than current
+                        if not current_stop or new_stop < current_stop:
+                            await self.db_manager.update_position(position_id, {
+                                'stop_loss': new_stop,
+                                'last_trailing_update': datetime.now()
+                            })
+                            
+                            logger.info(f"📉 {symbol} trailing stop güncellendi: {current_stop} → {new_stop:.4f}")
+                
+                except Exception as e:
+                    logger.error(f"❌ {position.get('symbol', 'UNKNOWN')} trailing stop hatası: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"❌ Trailing stop güncelleme genel hatası: {e}")
+    
+    async def enable_trailing_stop(self, position_id: int, trailing_distance: float = 0.02) -> bool:
+        """Pozisyon için trailing stop'u aktifleştir"""
+        try:
+            await self.db_manager.update_position(position_id, {
+                'trailing_stop_enabled': True,
+                'trailing_distance': trailing_distance,
+                'trailing_enabled_at': datetime.now()
+            })
+            
+            logger.info(f"✅ Pozisyon {position_id} için trailing stop aktifleştirildi (%{trailing_distance*100:.1f})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Trailing stop aktifleştirme hatası: {e}")
+            return False
+    
+    async def disable_trailing_stop(self, position_id: int) -> bool:
+        """Pozisyon için trailing stop'u deaktifleştir"""
+        try:
+            await self.db_manager.update_position(position_id, {
+                'trailing_stop_enabled': False,
+                'trailing_disabled_at': datetime.now()
+            })
+            
+            logger.info(f"🔴 Pozisyon {position_id} için trailing stop deaktifleştirildi")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Trailing stop deaktifleştirme hatası: {e}")
+            return False
+    
+    async def get_position_performance(self, position_id: int) -> Dict[str, Any]:
+        """Pozisyon performans metrikleri"""
+        try:
+            positions = await self.db_manager.get_positions()
+            position = next((p for p in positions if p['id'] == position_id), None)
+            
+            if not position:
+                return {'error': 'Position not found'}
+            
+            # Get current price
+            market_data = await self.exchange_manager.get_market_data(position['symbol'])
+            current_price = market_data['close'] if market_data else position.get('current_price', position['entry_price'])
+            
+            # Calculate metrics
+            entry_price = position['entry_price']
+            side = position['side']
+            size = position['size']
+            
+            if side == 'BUY':
+                unrealized_pnl = (current_price - entry_price) * size
+                pnl_pct = (current_price - entry_price) / entry_price * 100
+            else:
+                unrealized_pnl = (entry_price - current_price) * size
+                pnl_pct = (entry_price - current_price) / entry_price * 100
+            
+            # Time metrics
+            opened_at = position['opened_at']
+            if isinstance(opened_at, str):
+                opened_at = datetime.fromisoformat(opened_at.replace('Z', '+00:00'))
+            
+            duration = datetime.now() - opened_at
+            duration_hours = duration.total_seconds() / 3600
+            
+            # Risk metrics
+            position_value = entry_price * size
+            risk_amount = position_value * 0.02  # Assumed 2% risk
+            
+            risk_reward_ratio = abs(unrealized_pnl / risk_amount) if risk_amount > 0 else 0
+            
+            return {
+                'position_id': position_id,
+                'symbol': position['symbol'],
+                'side': side,
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'size': size,
+                'unrealized_pnl': unrealized_pnl,
+                'pnl_percentage': pnl_pct,
+                'position_value': position_value,
+                'duration_hours': duration_hours,
+                'risk_reward_ratio': risk_reward_ratio,
+                'stop_loss': position.get('stop_loss'),
+                'take_profit': position.get('take_profit'),
+                'trailing_stop_enabled': position.get('trailing_stop_enabled', False),
+                'strategy': position.get('strategy'),
+                'confidence': position.get('confidence')
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Position performance hatası: {e}")
+            return {'error': str(e)}
