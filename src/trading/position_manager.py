@@ -417,7 +417,7 @@ class PositionManager:
             logger.error(f"❌ Order placement error: {e}")
             return None
     
-        async def _get_current_price(self, symbol: str) -> Optional[float]:
+    async def _get_current_price(self, symbol: str) -> Optional[float]:
         """Güncel fiyat al"""
         try:
             # Get real-time price from exchange manager

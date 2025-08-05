@@ -1,41 +1,41 @@
 # 🤖 Advanced Trading Bot
 
-**Profesyonel seviyede, AI destekli kripto para trading botu**
+**Professional-grade, AI-powered cryptocurrency trading bot**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Production Ready](https://img.shields.io/badge/production-ready-green.svg)]()
 
-> **🎯 Tamamen fonksiyonel, production-ready trading bot**  
-> Bybit, Binance ve OKX borsalarında backtesting, paper trading ve live trading desteği
+> **🎯 Fully functional, production-ready trading bot**  
+> Supporting backtesting, paper trading, and live trading on Bybit, Binance, and OKX
 
 ---
 
-## 📋 **İÇİNDEKİLER**
+## 📋 **TABLE OF CONTENTS**
 
-- [🌟 Özellikler](#-özellikler)
-- [🚀 Hızlı Başlangıç](#-hızlı-başlangıç)
-- [📊 Trading Stratejileri](#-trading-stratejileri)
-- [🧠 AI ve ML Özellikleri](#-ai-ve-ml-özellikleri)
-- [⚖️ Risk Yönetimi](#-risk-yönetimi)
+- [🌟 Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [📊 Trading Strategies](#-trading-strategies)
+- [🧠 AI & ML Features](#-ai--ml-features)
+- [⚖️ Risk Management](#-risk-management)
 - [📈 Backtesting](#-backtesting)
 - [🧪 Paper Trading](#-paper-trading)
-- [🔧 Kurulum](#-kurulum)
-- [📚 Dokümantasyon](#-dokümantasyon)
-- [🤝 Katkıda Bulunma](#-katkıda-bulunma)
+- [🔧 Installation](#-installation)
+- [📚 Documentation](#-documentation)
+- [🤝 Contributing](#-contributing)
 
 ---
 
-## 🌟 **ÖZELLİKLER**
+## 🌟 **FEATURES**
 
 ### 🔥 **Core Features**
-- ✅ **Live Data Analysis Engine** - Gerçek zamanlı veri analizi
-- ✅ **AI Signal Filtering** - Makine öğrenmesi ile sinyal filtreleme
-- ✅ **Multi-Strategy Trading** - 4 farklı trading stratejisi
-- ✅ **Risk Management** - Kelly Criterion ve korelasyon analizi
-- ✅ **Multi-Exchange Support** - Bybit, Binance, OKX desteği
-- ✅ **Backtesting & Optimization** - Parametre optimizasyonu
+- ✅ **Live Data Analysis Engine** - Real-time data analysis
+- ✅ **AI Signal Filtering** - Machine learning-based signal filtering
+- ✅ **Multi-Strategy Trading** - 4 different trading strategies
+- ✅ **Risk Management** - Kelly Criterion and correlation analysis
+- ✅ **Multi-Exchange Support** - Bybit, Binance, OKX support
+- ✅ **Backtesting & Optimization** - Parameter optimization
 - ✅ **Paper Trading** - Risk-free testing environment
 - ✅ **Real-time Notifications** - Telegram, Discord, Email
 
@@ -55,75 +55,75 @@
 
 ---
 
-## 🚀 **HIZLI BAŞLANGIÇ**
+## 🚀 **QUICK START**
 
-### 1. **Kurulum**
+### 1. **Installation**
 ```bash
-# Repository'yi klonla
+# Clone the repository
 git clone https://github.com/username/advanced-trading-bot.git
 cd advanced-trading-bot
 
-# Virtual environment oluştur
+# Create virtual environment
 python3 -m venv trading_bot_env
 source trading_bot_env/bin/activate  # Linux/Mac
 # trading_bot_env\Scripts\activate    # Windows
 
-# Dependencies'leri kur
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. **Konfigürasyon**
+### 2. **Configuration**
 ```bash
-# Environment variables oluştur
+# Create environment variables
 cp .env.example .env
 
-# .env dosyasını düzenle (API keys, etc.)
+# Edit .env file with your API keys
 nano .env
 ```
 
-### 3. **Test Et**
+### 3. **Test**
 ```bash
-# Backtesting ile başla
+# Start with backtesting
 python3 backtest_runner.py
 
-# Paper trading test et
+# Test paper trading
 python3 paper_trading.py
 
-# Live trading (dikkatli!)
+# Live trading (be careful!)
 python3 main.py
 ```
 
 ---
 
-## 📊 **TRADING STRATEJİLERİ**
+## 📊 **TRADING STRATEGIES**
 
 ### 🏃‍♂️ **1. Scalping**
-- **Hedef:** Kısa vadeli fiyat hareketleri
-- **Timeframe:** 1-5 dakika
+- **Target:** Short-term price movements
+- **Timeframe:** 1-5 minutes
 - **Risk/Reward:** 1:2 (0.2% risk, 0.4% profit)
-- **Kullanım:** Yüksek volatilite dönemlerinde
+- **Usage:** During high volatility periods
 
 ### 📈 **2. Swing Trading**
-- **Hedef:** Orta vadeli trend takibi
-- **Timeframe:** 4-24 saat
+- **Target:** Medium-term trend following
+- **Timeframe:** 4-24 hours
 - **Risk/Reward:** 1:2 (3% risk, 6% profit)
-- **Kullanım:** Normal piyasa koşullarında
+- **Usage:** Normal market conditions
 
 ### 📊 **3. Trend Following**
-- **Hedef:** Uzun vadeli trend yakalama
-- **Timeframe:** 1-3 gün
+- **Target:** Long-term trend capture
+- **Timeframe:** 1-3 days
 - **Risk/Reward:** 1:2 (5% risk, 10% profit)
-- **Kullanım:** Güçlü trend dönemlerinde
+- **Usage:** Strong trending periods
 
 ### 🔄 **4. Mean Reversion**
-- **Hedef:** Fiyat ortalamaya dönüş
-- **Timeframe:** 2-12 saat
+- **Target:** Price return to mean
+- **Timeframe:** 2-12 hours
 - **Risk/Reward:** 1:0.5 (4% risk, 2% profit)
-- **Kullanım:** Sideways piyasalarda
+- **Usage:** Sideways markets
 
 ---
 
-## 🧠 **AI VE ML ÖZELLİKLERİ**
+## 🧠 **AI & ML FEATURES**
 
 ### 🤖 **Machine Learning Models**
 ```python
@@ -162,7 +162,7 @@ confidence = (
 
 ---
 
-## ⚖️ **RİSK YÖNETİMİ**
+## ⚖️ **RISK MANAGEMENT**
 
 ### 🛡️ **Portfolio Protection**
 - **Max Portfolio Risk:** 2% per trade
@@ -191,7 +191,7 @@ position_size = kelly_fraction * available_capital
 python3 backtest_runner.py
 ```
 
-**Backtesting Özellikleri:**
+**Backtesting Features:**
 - ✅ Historical data (6+ months)
 - ✅ Multiple timeframes (1m, 5m, 1h, 1d)
 - ✅ Commission and slippage modeling
@@ -220,7 +220,7 @@ Final Capital: $12,345.67
 python3 paper_trading.py
 ```
 
-**Paper Trading Özellikleri:**
+**Paper Trading Features:**
 - ✅ Bybit Sandbox Environment
 - ✅ Real-time market data
 - ✅ Virtual order execution
@@ -241,19 +241,19 @@ python3 paper_trading.py
 
 ---
 
-## 🔧 **KURULUM**
+## 🔧 **INSTALLATION**
 
-### 📋 **Gereksinimler**
+### 📋 **Requirements**
 - Python 3.8+
 - 4GB+ RAM
 - Internet connection
-- Bybit API keys (paper/live trading için)
+- Bybit API keys (for paper/live trading)
 
 ### 🔑 **API Setup**
-1. **Bybit hesabı oluştur** - [bybit.com](https://bybit.com)
-2. **API Key oluştur** - Trading permissions ile
-3. **IP Whitelist** - Güvenlik için (opsiyonel)
-4. **.env dosyasına ekle** - API credentials
+1. **Create Bybit account** - [bybit.com](https://bybit.com)
+2. **Generate API Key** - With trading permissions
+3. **IP Whitelist** - For security (optional)
+4. **Add to .env file** - API credentials
 
 ### 📦 **Dependencies**
 ```txt
@@ -270,13 +270,13 @@ python-dotenv>=1.0.0 # Environment variables
 
 ---
 
-## 📚 **DOKÜMANTASYON**
+## 📚 **DOCUMENTATION**
 
-### 📖 **Detaylı Kılavuzlar**
-- 📋 [**Production Ready Checklist**](PRODUCTION_READY_CHECKLIST.md) - Production hazırlık adımları
-- 🎯 [**Promises Verification**](PROMISES_VERIFICATION.md) - Özellik doğrulama
-- 🔧 [**Configuration Guide**](config/config.yaml) - Yapılandırma kılavuzu
-- 🌍 [**English README**](README_EN.md) - English documentation
+### 📖 **Detailed Guides**
+- 📋 [**Production Ready Checklist**](PRODUCTION_READY_CHECKLIST.md) - Production setup steps
+- 🎯 [**Promises Verification**](PROMISES_VERIFICATION.md) - Feature verification
+- 🔧 [**Configuration Guide**](config/config.yaml) - Configuration manual
+- 🇹🇷 [**Turkish README**](README.md) - Turkish documentation
 
 ### 🗂️ **Project Structure**
 ```
@@ -299,7 +299,7 @@ advanced-trading-bot/
 
 ---
 
-## 🛠️ **KULLANIM ÖRNEKLERİ**
+## 🛠️ **USAGE EXAMPLES**
 
 ### 🎯 **Backtesting Example**
 ```python
@@ -351,23 +351,23 @@ async def start_paper_trading():
 
 ---
 
-## 🚨 **UYARILAR**
+## 🚨 **WARNINGS**
 
 ### ⚠️ **Risk Disclaimer**
-- **Finansal Risk:** Trading kayıplara neden olabilir
-- **Sermaye Riski:** Kaybetmeyi göze alabileceğiniz para ile başlayın
-- **Test Önceliği:** Önce paper trading ile test edin
-- **Monitoring:** Canlı trading'i sürekli izleyin
+- **Financial Risk:** Trading can result in losses
+- **Capital Risk:** Only trade with money you can afford to lose
+- **Test First:** Always test with paper trading first
+- **Monitor:** Continuously monitor live trading
 
-### 🛡️ **Güvenlik**
-- **API Keys:** Güvenli saklayın, paylaşmayın
-- **IP Whitelist:** Exchange API için kullanın
-- **2FA:** Hesaplarınızda aktif edin
-- **Log Monitoring:** Anormal aktiviteleri takip edin
+### 🛡️ **Security**
+- **API Keys:** Keep secure, never share
+- **IP Whitelist:** Use for exchange APIs
+- **2FA:** Enable on all accounts
+- **Log Monitoring:** Track unusual activities
 
 ---
 
-## 🤝 **KATKIDA BULUNMA**
+## 🤝 **CONTRIBUTING**
 
 ### 💡 **Contribute**
 ```bash
@@ -387,16 +387,16 @@ git push origin feature/amazing-feature
 ```
 
 ### 🐛 **Bug Reports**
-- GitHub Issues kullanın
-- Detaylı açıklama yazın
-- Log dosyalarını ekleyin
-- Reproduction steps belirtin
+- Use GitHub Issues
+- Provide detailed description
+- Include log files
+- Specify reproduction steps
 
 ---
 
-## 📞 **DESTEK**
+## 📞 **SUPPORT**
 
-### 💬 **İletişim**
+### 💬 **Contact**
 - 📧 Email: support@trading-bot.com
 - 💬 Discord: [Trading Bot Community](https://discord.gg/trading-bot)
 - 📱 Telegram: [@TradingBotSupport](https://t.me/TradingBotSupport)
@@ -408,15 +408,15 @@ git push origin feature/amazing-feature
 
 ---
 
-## 📄 **LİSANS**
+## 📄 **LICENSE**
 
-Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICENSE) dosyasına bakın.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🎊 **TEŞEKKÜRLER**
+## 🎊 **ACKNOWLEDGMENTS**
 
-**Bu bot aşağıdaki açık kaynak projelerden yararlanır:**
+**This bot leverages the following open-source projects:**
 - [CCXT](https://github.com/ccxt/ccxt) - Exchange integration
 - [YFinance](https://github.com/ranaroussi/yfinance) - Market data
 - [Scikit-learn](https://scikit-learn.org/) - Machine learning
@@ -426,8 +426,8 @@ Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICE
 
 <div align="center">
 
-**⭐ Bu projeyi beğendiyseniz star vermeyi unutmayın! ⭐**
+**⭐ If you like this project, don't forget to give it a star! ⭐**
 
 **🚀 Happy Trading! 🚀**
 
-</div> 
+</div>
