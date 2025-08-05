@@ -78,7 +78,7 @@ class AdvancedTradingBot:
             self.config = await self.config_manager.load_config()
             
             # Setup logging
-            setup_logging(self.config.get('logging', {}))
+            setup_logger(self.config.get('logging', {}))
             
             # Initialize database
             self.db_manager = DatabaseManager(self.config.get('database', {}))

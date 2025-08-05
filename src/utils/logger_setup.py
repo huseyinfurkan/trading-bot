@@ -12,7 +12,7 @@ from typing import Dict, Any
 
 def setup_logging(logging_config: Dict[str, Any]) -> None:
     """Logging sistemini kur"""
-try:
+    try:
         # Mevcut logger'ları temizle
         logger.remove()
         
@@ -74,10 +74,21 @@ try:
         
         logger.info(f"✅ Logging sistemi kuruldu - Level: {level}, File: {file_path}")
         
-except Exception as e:
+    except Exception as e:
         print(f"❌ Logging kurulum hatası: {e}")
         # Fallback basic console logging
         logger.add(sys.stdout, level="INFO")
+
+
+def setup_logger(config: Dict[str, Any] = None) -> None:
+    """Alias for setup_logging function"""
+    if config is None:
+        config = {
+            'level': 'INFO',
+            'file_path': 'logs/trading_bot.log',
+            'console_output': True
+        }
+    setup_logging(config)
 
 
 def get_performance_logger():
