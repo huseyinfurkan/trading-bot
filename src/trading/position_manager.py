@@ -395,32 +395,35 @@ class PositionManager:
     
     async def _place_order(self, symbol: str, side: str, size: float, 
                           price: float, order_type: str = 'MARKET') -> Optional[Dict]:
-        """Order placement"""
+        """Gerçek order placement via exchange manager"""
         try:
-            # Simulate order placement
-            order_id = str(uuid.uuid4())
+            # Use exchange manager for real order placement
+            order_result = await self.exchange_manager.place_order(
+                symbol=symbol,
+                side=side,
+                amount=size,
+                price=price if order_type == 'LIMIT' else None,
+                order_type=order_type.lower()
+            )
             
-            logger.info(f"📋 Order placed: {symbol} {side} {size:.6f} @ {price:.4f}")
-            
-            return {
-                'order_id': order_id,
-                'symbol': symbol,
-                'side': side,
-                'size': size,
-                'price': price,
-                'status': 'FILLED'
-            }
+            if order_result:
+                logger.success(f"✅ Real order placed: {symbol} {side} {size:.6f} @ {price:.4f}")
+                return order_result
+            else:
+                logger.error(f"❌ Order placement failed: {symbol}")
+                return None
             
         except Exception as e:
             logger.error(f"❌ Order placement error: {e}")
             return None
     
-    async def _get_current_price(self, symbol: str) -> Optional[float]:
+        async def _get_current_price(self, symbol: str) -> Optional[float]:
         """Güncel fiyat al"""
         try:
+            # Get real-time price from exchange manager
             market_data = await self.exchange_manager.get_real_time_data(symbol)
             return market_data.get('price') if market_data else None
-            
+                
         except Exception as e:
             logger.error(f"❌ Current price error for {symbol}: {e}")
             return None

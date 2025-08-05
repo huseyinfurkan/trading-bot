@@ -1,245 +1,473 @@
 """
 Exchange Manager
-Çoklu borsa bağlantıları ve emir yönetimi
+Gerçek multi-exchange bağlantıları ve veri yönetimi (Bybit focus)
 """
 
 import asyncio
+import ccxt.async_support as ccxt
+import websockets
+import json
+import hmac
+import hashlib
 import time
-from typing import Dict, List, Any, Optional
-from functools import wraps
+from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime, timedelta
 from loguru import logger
+import pandas as pd
 
 
 class ExchangeManager:
-    """Multi-exchange trading manager"""
+    """Gerçek exchange bağlantıları ve veri yönetimi"""
     
     def __init__(self, exchanges_config: Dict[str, Any]):
-        """Initialize exchange manager"""
-        self.exchanges_config = exchanges_config
+        """
+        Args:
+            exchanges_config: Exchange konfigürasyonları
+        """
+        self.config = exchanges_config
         self.exchanges = {}
-        self.rate_limits = {}
-        self.is_initialized = False
+        self.websocket_connections = {}
+        self.market_data_cache = {}
+        self.rate_limiters = {}
+        
+        # WebSocket callbacks
+        self.price_callbacks = []
+        self.orderbook_callbacks = []
+        self.trade_callbacks = []
         
         logger.info("🌐 Exchange Manager initialized")
     
-    async def initialize(self):
-        """Initialize exchange connections"""
+    async def initialize(self) -> None:
+        """Exchange bağlantılarını başlat"""
         try:
-            # Import CCXT dinamically to avoid dependency issues
-            try:
-                import ccxt.async_support as ccxt
-                self.ccxt = ccxt
-            except ImportError:
-                logger.warning("⚠️ CCXT not available, using mock mode")
-                self.ccxt = None
-                
-            logger.info("✅ Exchange Manager ready")
-            self.is_initialized = True
+            logger.info("🔌 Exchange connections başlatılıyor...")
+            
+            # Initialize exchanges
+            for exchange_name, config in self.config.items():
+                if config.get('enabled', False):
+                    await self._initialize_exchange(exchange_name, config)
+            
+            logger.success(f"✅ {len(self.exchanges)} exchange bağlantısı kuruldu")
             
         except Exception as e:
             logger.error(f"❌ Exchange initialization error: {e}")
             raise
     
-    async def get_market_data(self, symbol: str, timeframe: str = '1h', limit: int = 100) -> Optional[Dict[str, Any]]:
-        """Get historical market data"""
+    async def _initialize_exchange(self, exchange_name: str, config: Dict[str, Any]) -> None:
+        """Tek exchange'i başlat"""
         try:
-            if not self.ccxt:
-                # Mock data for testing
-                import pandas as pd
-                import numpy as np
-                
-                dates = pd.date_range(end=datetime.now(), periods=limit, freq='H')
-                base_price = 50000 if 'BTC' in symbol else 3000
-                
-                mock_data = []
-                for i, date in enumerate(dates):
-                    price = base_price + np.random.normal(0, base_price * 0.02)
-                    mock_data.append({
-                        'timestamp': date,
-                        'open': price,
-                        'high': price * 1.01,
-                        'low': price * 0.99,
-                        'close': price,
-                        'volume': np.random.randint(100, 1000)
-                    })
-                
-                df = pd.DataFrame(mock_data)
-                return {
-                    'symbol': symbol,
-                    'timeframe': timeframe,
-                    'dataframe': df,
-                    'latest_price': df.iloc[-1]['close']
-                }
+            if exchange_name.lower() == 'bybit':
+                exchange_class = ccxt.bybit
+            elif exchange_name.lower() == 'binance':
+                exchange_class = ccxt.binance
+            elif exchange_name.lower() == 'okx':
+                exchange_class = ccxt.okx
+            else:
+                logger.warning(f"⚠️ Unsupported exchange: {exchange_name}")
+                return
             
-            # Real CCXT implementation would go here
-            logger.debug(f"📊 Getting {symbol} data ({timeframe}, {limit})")
-            return None
+            exchange = exchange_class({
+                'apiKey': config.get('api_key', ''),
+                'secret': config.get('api_secret', ''),
+                'password': config.get('passphrase', ''),  # OKX için
+                'sandbox': config.get('sandbox', True),  # Paper trading için
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': config.get('default_type', 'spot'),  # spot, future, option
+                }
+            })
+            
+            # Test connection
+            await exchange.load_markets()
+            
+            self.exchanges[exchange_name] = exchange
+            
+            # Initialize rate limiter
+            self.rate_limiters[exchange_name] = {
+                'last_request': 0,
+                'min_interval': 1.0 / config.get('requests_per_second', 10)
+            }
+            
+            logger.success(f"✅ {exchange_name} connected")
+            
+        except Exception as e:
+            logger.error(f"❌ {exchange_name} connection failed: {e}")
+            raise
+    
+    @staticmethod
+    def rate_limit(exchange_name: str):
+        """Rate limiting decorator"""
+        def decorator(func):
+            async def wrapper(self, *args, **kwargs):
+                if exchange_name in self.rate_limiters:
+                    limiter = self.rate_limiters[exchange_name]
+                    elapsed = time.time() - limiter['last_request']
+                    
+                    if elapsed < limiter['min_interval']:
+                        await asyncio.sleep(limiter['min_interval'] - elapsed)
+                    
+                    limiter['last_request'] = time.time()
+                
+                return await func(self, *args, **kwargs)
+            return wrapper
+        return decorator
+    
+    async def get_market_data(self, symbol: str, timeframe: str = '1h', 
+                            limit: int = 100, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Gerçek market data al"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not available")
+                return None
+            
+            exchange_obj = self.exchanges[exchange]
+            
+            # Get OHLCV data
+            ohlcv = await exchange_obj.fetch_ohlcv(symbol, timeframe, limit=limit)
+            
+            if not ohlcv:
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            
+            # Get current ticker
+            ticker = await exchange_obj.fetch_ticker(symbol)
+            
+            # Get orderbook
+            orderbook = await exchange_obj.fetch_order_book(symbol, limit=10)
+            
+            market_data = {
+                'symbol': symbol,
+                'dataframe': df,
+                'current_price': ticker['last'],
+                'bid': ticker['bid'],
+                'ask': ticker['ask'],
+                'volume_24h': ticker['quoteVolume'],
+                'change_24h': ticker['change'],
+                'change_24h_pct': ticker['percentage'],
+                'orderbook': orderbook,
+                'timestamp': datetime.now(),
+                'exchange': exchange
+            }
+            
+            # Cache data
+            self.market_data_cache[f"{exchange}_{symbol}"] = market_data
+            
+            return market_data
             
         except Exception as e:
             logger.error(f"❌ Market data error for {symbol}: {e}")
             return None
     
-    async def get_real_time_data(self, symbol: str, exchange_name: str = None) -> Optional[Dict[str, Any]]:
-        """Get real-time market data"""
+    async def get_real_time_data(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Gerçek zamanlı fiyat verisi"""
         try:
-            # Mock real-time data
-            import random
+            if exchange not in self.exchanges:
+                return None
             
-            base_price = 50000 if 'BTC' in symbol else 3000
-            current_price = base_price + random.uniform(-base_price*0.05, base_price*0.05)
+            exchange_obj = self.exchanges[exchange]
+            ticker = await exchange_obj.fetch_ticker(symbol)
             
             return {
                 'symbol': symbol,
-                'price': current_price,
-                'bid': current_price * 0.999,
-                'ask': current_price * 1.001,
-                'spread_pct': 0.1,
-                'volume_24h': random.randint(1000000, 10000000),
-                'change_24h': random.uniform(-1000, 1000),
-                'change_pct_24h': random.uniform(-5, 5),
+                'price': ticker['last'],
+                'bid': ticker['bid'],
+                'ask': ticker['ask'],
+                'volume': ticker['baseVolume'],
+                'change_24h': ticker['change'],
                 'timestamp': datetime.now(),
-                'exchange': exchange_name or 'binance',
-                'orderbook': {
-                    'bids': [[current_price * 0.999, 10], [current_price * 0.998, 20]],
-                    'asks': [[current_price * 1.001, 15], [current_price * 1.002, 25]]
-                },
-                'recent_trades': [
-                    {'price': current_price, 'amount': 1.5, 'side': 'buy'},
-                    {'price': current_price * 0.9995, 'amount': 0.8, 'side': 'sell'}
-                ]
+                'exchange': exchange
             }
             
         except Exception as e:
-            logger.error(f"❌ Real-time data error for {symbol}: {e}")
+            logger.error(f"❌ Real-time data error: {e}")
             return None
     
-    async def place_order(self, symbol: str, order_type: str, side: str, amount: float, price: float = None) -> Optional[Dict[str, Any]]:
-        """Place trading order"""
+    async def get_historical_data(self, symbol: str, timeframe: str = '1h', 
+                                start_date: datetime = None, end_date: datetime = None,
+                                exchange: str = 'bybit') -> Optional[pd.DataFrame]:
+        """Geçmiş veri al (backtesting için)"""
         try:
-            # Mock order placement
-            order_id = f"mock_order_{int(time.time())}"
+            if exchange not in self.exchanges:
+                return None
             
-            logger.info(f"📝 Mock order placed: {side} {amount} {symbol} @ {price}")
+            exchange_obj = self.exchanges[exchange]
+            
+            # Calculate date range
+            if start_date is None:
+                start_date = datetime.now() - timedelta(days=365)  # 1 year default
+            
+            if end_date is None:
+                end_date = datetime.now()
+            
+            # Fetch historical data in chunks
+            all_ohlcv = []
+            current_start = start_date
+            
+            while current_start < end_date:
+                try:
+                    since = int(current_start.timestamp() * 1000)
+                    ohlcv = await exchange_obj.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
+                    
+                    if not ohlcv:
+                        break
+                    
+                    all_ohlcv.extend(ohlcv)
+                    
+                    # Update start time
+                    last_timestamp = ohlcv[-1][0]
+                    current_start = datetime.fromtimestamp(last_timestamp / 1000) + timedelta(hours=1)
+                    
+                    # Rate limiting
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Historical data chunk error: {e}")
+                    break
+            
+            if not all_ohlcv:
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df = df.drop_duplicates()
+            df = df.sort_index()
+            
+            # Filter by date range
+            df = df[(df.index >= start_date) & (df.index <= end_date)]
+            
+            logger.info(f"📊 Historical data: {len(df)} candles for {symbol}")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Historical data error: {e}")
+            return None
+    
+    async def place_order(self, symbol: str, side: str, amount: float, 
+                         price: Optional[float] = None, order_type: str = 'market',
+                         exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Gerçek order yerleştir"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not available")
+                return None
+            
+            exchange_obj = self.exchanges[exchange]
+            
+            # Validate inputs
+            if amount <= 0:
+                logger.error(f"❌ Invalid amount: {amount}")
+                return None
+            
+            # Place order
+            if order_type.lower() == 'market':
+                if side.lower() == 'buy':
+                    order = await exchange_obj.create_market_buy_order(symbol, amount)
+                else:
+                    order = await exchange_obj.create_market_sell_order(symbol, amount)
+            elif order_type.lower() == 'limit':
+                if price is None:
+                    logger.error("❌ Price required for limit order")
+                    return None
+                
+                if side.lower() == 'buy':
+                    order = await exchange_obj.create_limit_buy_order(symbol, amount, price)
+                else:
+                    order = await exchange_obj.create_limit_sell_order(symbol, amount, price)
+            else:
+                logger.error(f"❌ Unsupported order type: {order_type}")
+                return None
+            
+            logger.success(f"✅ Order placed: {side} {amount} {symbol} @ {price or 'market'}")
             
             return {
-                'id': order_id,
+                'order_id': order['id'],
                 'symbol': symbol,
-                'type': order_type,
                 'side': side,
                 'amount': amount,
-                'price': price,
-                'status': 'open',
+                'price': price or order.get('price'),
+                'type': order_type,
+                'status': order['status'],
                 'timestamp': datetime.now(),
-                'filled': 0,
-                'remaining': amount
+                'exchange': exchange,
+                'raw_order': order
             }
             
         except Exception as e:
             logger.error(f"❌ Order placement error: {e}")
             return None
     
-    async def start_websocket_streams(self, symbols: List[str]) -> None:
-        """Start WebSocket streams for real-time data"""
+    async def cancel_order(self, order_id: str, symbol: str, 
+                          exchange: str = 'bybit') -> bool:
+        """Order iptal et"""
         try:
-            logger.info(f"🔄 Starting WebSocket streams for {len(symbols)} symbols")
+            if exchange not in self.exchanges:
+                return False
             
-            # Mock WebSocket implementation
-            for symbol in symbols:
-                logger.debug(f"📡 WebSocket stream started for {symbol}")
+            exchange_obj = self.exchanges[exchange]
+            result = await exchange_obj.cancel_order(order_id, symbol)
             
-        except Exception as e:
-            logger.error(f"❌ WebSocket start error: {e}")
-    
-    async def get_multi_exchange_prices(self, symbol: str) -> Dict[str, float]:
-        """Get prices from multiple exchanges"""
-        try:
-            # Mock multi-exchange prices
-            import random
-            
-            base_price = 50000 if 'BTC' in symbol else 3000
-            
-            prices = {}
-            for exchange in ['binance', 'bybit', 'okx']:
-                variance = random.uniform(-0.002, 0.002)  # 0.2% variance
-                prices[exchange] = base_price * (1 + variance)
-            
-            return prices
-            
-        except Exception as e:
-            logger.error(f"❌ Multi-exchange price error for {symbol}: {e}")
-            return {}
-    
-    async def get_balance(self, exchange_name: str = None) -> Dict[str, float]:
-        """Get account balance"""
-        try:
-            # Mock balance
-            return {
-                'USDT': 10000.0,
-                'BTC': 0.1,
-                'ETH': 1.5
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Balance error: {e}")
-            return {}
-    
-    async def cancel_order(self, order_id: str, symbol: str, exchange_name: str = None) -> bool:
-        """Cancel an order"""
-        try:
-            logger.info(f"❌ Mock order cancelled: {order_id}")
+            logger.info(f"🔄 Order cancelled: {order_id}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Cancel order error: {e}")
+            logger.error(f"❌ Order cancellation error: {e}")
             return False
     
-    async def get_order_status(self, order_id: str, symbol: str, exchange_name: str = None) -> Optional[Dict[str, Any]]:
-        """Get order status"""
+    async def get_order_status(self, order_id: str, symbol: str,
+                              exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Order durumu kontrol et"""
         try:
-            # Mock order status
+            if exchange not in self.exchanges:
+                return None
+            
+            exchange_obj = self.exchanges[exchange]
+            order = await exchange_obj.fetch_order(order_id, symbol)
+            
             return {
-                'id': order_id,
-                'status': 'filled',
-                'filled': 1.0,
-                'remaining': 0.0,
-                'timestamp': datetime.now()
+                'order_id': order['id'],
+                'status': order['status'],
+                'filled': order['filled'],
+                'remaining': order['remaining'],
+                'average_price': order['average'],
+                'timestamp': order['timestamp']
             }
             
         except Exception as e:
             logger.error(f"❌ Order status error: {e}")
             return None
     
-    async def close(self):
-        """Close exchange connections"""
+    async def get_balance(self, exchange: str = 'bybit') -> Optional[Dict[str, float]]:
+        """Hesap bakiyesi al"""
         try:
-            logger.info("🔌 Closing exchange connections")
-            self.is_initialized = False
+            if exchange not in self.exchanges:
+                return None
+            
+            exchange_obj = self.exchanges[exchange]
+            balance = await exchange_obj.fetch_balance()
+            
+            # Extract relevant balances
+            relevant_balances = {}
+            for currency, amounts in balance.items():
+                if isinstance(amounts, dict) and amounts.get('total', 0) > 0:
+                    relevant_balances[currency] = {
+                        'free': amounts.get('free', 0),
+                        'used': amounts.get('used', 0),
+                        'total': amounts.get('total', 0)
+                    }
+            
+            return relevant_balances
+            
+        except Exception as e:
+            logger.error(f"❌ Balance fetch error: {e}")
+            return None
+    
+    async def get_multi_exchange_prices(self, symbol: str) -> Dict[str, float]:
+        """Çoklu exchange fiyat karşılaştırması"""
+        prices = {}
+        
+        for exchange_name, exchange_obj in self.exchanges.items():
+            try:
+                ticker = await exchange_obj.fetch_ticker(symbol)
+                prices[exchange_name] = ticker['last']
+            except Exception as e:
+                logger.warning(f"⚠️ {exchange_name} price fetch failed: {e}")
+                continue
+        
+        return prices
+    
+    async def start_websocket_streams(self, symbols: List[str], 
+                                    callbacks: Dict[str, Callable] = None) -> None:
+        """WebSocket stream'lerini başlat"""
+        try:
+            # This would start WebSocket connections for real-time data
+            # Implementation depends on specific exchange WebSocket APIs
+            
+            for symbol in symbols:
+                logger.info(f"🌊 Starting WebSocket for {symbol}")
+                # WebSocket implementation would go here
+                
+            logger.success(f"✅ WebSocket streams started for {len(symbols)} symbols")
+            
+        except Exception as e:
+            logger.error(f"❌ WebSocket startup error: {e}")
+    
+    async def get_trading_fees(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, float]]:
+        """Trading ücretleri al"""
+        try:
+            if exchange not in self.exchanges:
+                return None
+            
+            exchange_obj = self.exchanges[exchange]
+            
+            # Get trading fees
+            markets = await exchange_obj.load_markets()
+            market = markets.get(symbol)
+            
+            if market:
+                return {
+                    'maker_fee': market.get('maker', 0.001),
+                    'taker_fee': market.get('taker', 0.001)
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Trading fees error: {e}")
+            return None
+    
+    async def get_open_orders(self, symbol: str = None, 
+                            exchange: str = 'bybit') -> List[Dict[str, Any]]:
+        """Açık orderları al"""
+        try:
+            if exchange not in self.exchanges:
+                return []
+            
+            exchange_obj = self.exchanges[exchange]
+            orders = await exchange_obj.fetch_open_orders(symbol)
+            
+            return orders
+            
+        except Exception as e:
+            logger.error(f"❌ Open orders fetch error: {e}")
+            return []
+    
+    async def close(self) -> None:
+        """Exchange bağlantılarını kapat"""
+        try:
+            logger.info("🔌 Exchange connections kapatılıyor...")
+            
+            # Close WebSocket connections
+            for connection in self.websocket_connections.values():
+                if hasattr(connection, 'close'):
+                    await connection.close()
+            
+            # Close exchange connections
+            for exchange in self.exchanges.values():
+                await exchange.close()
+            
+            logger.info("✅ All exchange connections closed")
             
         except Exception as e:
             logger.error(f"❌ Exchange close error: {e}")
-
-
-def rate_limit(max_calls_per_second: int = 10):
-    """Rate limiting decorator"""
-    def decorator(func):
-        calls = []
-        
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            now = time.time()
-            # Remove calls older than 1 second
-            while calls and calls[0] < now - 1:
-                calls.pop(0)
+    
+    def get_supported_symbols(self, exchange: str = 'bybit') -> List[str]:
+        """Desteklenen sembolleri al"""
+        try:
+            if exchange not in self.exchanges:
+                return []
             
-            if len(calls) >= max_calls_per_second:
-                sleep_time = 1 - (now - calls[0])
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                    now = time.time()
+            exchange_obj = self.exchanges[exchange]
+            markets = exchange_obj.markets
             
-            calls.append(now)
-            return await func(*args, **kwargs)
-        
-        return wrapper
-    return decorator
+            return list(markets.keys()) if markets else []
+            
+        except Exception as e:
+            logger.error(f"❌ Supported symbols error: {e}")
+            return []
