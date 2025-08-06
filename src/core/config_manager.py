@@ -9,8 +9,6 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator
-import json
 
 
 class ConfigManager:
