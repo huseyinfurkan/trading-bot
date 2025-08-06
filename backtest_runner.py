@@ -1,182 +1,127 @@
-#!/usr/bin/env python3
 """
-Backtesting Runner
-Gerçek historical data ile backtesting ve optimizasyon
+Advanced Trading Bot - Backtest Runner
+Research-backed strategy backtesting
 """
 
 import asyncio
-import sys
-import os
-from pathlib import Path
+import traceback
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
+from loguru import logger
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
-
+from src.utils.logger_setup import setup_logging
 from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager
 from src.trading.exchange_manager import ExchangeManager
-from src.trading.strategy_engine import StrategyEngine
-from src.ai.signal_filter import AISignalFilter
 from src.ai.market_analyzer import MarketAnalyzer
+from src.ai.signal_filter import AISignalFilter
 from src.ai.confidence_calculator import ConfidenceCalculator
-from src.utils.logger_setup import setup_logger
-
-# Setup logger
-logger = setup_logger('backtest_runner', 'logs/backtest.log')
+from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
 
 
 class BacktestRunner:
-    """Gerçek data ile backtesting runner"""
+    """Comprehensive backtesting system for research-backed strategies"""
     
     def __init__(self):
-        self.config_manager = None
+        self.config = None
         self.db_manager = None
         self.exchange_manager = None
-        self.strategy_engine = None
-        self.ai_signal_filter = None
         self.market_analyzer = None
+        self.signal_filter = None
         self.confidence_calculator = None
+        self.strategy_engine = None
         
     async def initialize(self):
-        """Initialize all components"""
+        """Initialize all components for backtesting"""
         try:
             logger.info("🚀 Backtesting Runner başlatılıyor...")
             
             # Load configuration
-            self.config_manager = ConfigManager('config/config.yaml')
-            await self.config_manager.load_config()
-            config = self.config_manager.config
+            self.config = ConfigManager()
+            await self.config.load_config()
             
-            # Initialize database
-            self.db_manager = DatabaseManager(config['database'])
+            # Initialize core components
+            self.db_manager = DatabaseManager(self.config.get_database_config())
             await self.db_manager.initialize()
             
             # Initialize exchange manager
-            self.exchange_manager = ExchangeManager(config['exchanges'])
+            self.exchange_manager = ExchangeManager(self.config)
             await self.exchange_manager.initialize()
             
             # Initialize AI components
-            self.market_analyzer = MarketAnalyzer(config['market_analysis'], self.db_manager)
-            self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager, self.exchange_manager)
-            self.confidence_calculator = ConfidenceCalculator(config['ai'], self.db_manager)
+            self.market_analyzer = MarketAnalyzer(self.config, self.exchange_manager)
+            self.signal_filter = AISignalFilter(self.config, self.exchange_manager)
+            self.confidence_calculator = ConfidenceCalculator(self.config)
             
-            # Initialize NEW Adaptive Strategy Engine
-            from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
+            # Initialize strategy engine
             self.strategy_engine = AdaptiveStrategyEngine(
-                config.get('strategies', {}),
-                self.exchange_manager,
-                self.ai_signal_filter
+                self.config.config, 
+                self.exchange_manager, 
+                self.signal_filter
             )
             
             logger.success("✅ Backtesting components initialized")
             
         except Exception as e:
-            logger.error(f"❌ Initialization error: {e}")
+            logger.error(f"❌ Backtest initialization error: {e}")
             raise
     
-    async def run_backtest(self, symbol: str, strategy: str, 
-                          start_date: datetime, end_date: datetime,
-                          initial_capital: float = 10000) -> Dict[str, Any]:
-        """Single backtest execution"""
+    async def run_backtest(self, symbol: str, strategy: str, start_date: datetime, 
+                          end_date: datetime, initial_capital: float = 10000) -> Dict[str, Any]:
+        """Run single strategy backtest"""
         try:
             logger.info(f"📊 Backtesting {strategy} on {symbol}")
-            logger.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
+            logger.info(f"📅 Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             logger.info(f"💰 Initial capital: ${initial_capital:,.2f}")
             
-            # Get historical data
+            # Fetch historical data
             logger.info("📡 Fetching historical data...")
+            
+            # Calculate days between dates
+            days_diff = (end_date - start_date).days
+            timeframe = '1h'
+            limit = min(days_diff * 24, 1000)  # 1000 is typical API limit
+            
             historical_data = await self.exchange_manager.get_historical_data(
                 symbol=symbol,
-                timeframe='1h',
-                start_date=start_date,
-                end_date=end_date
+                timeframe=timeframe,
+                limit=limit
             )
             
-            if historical_data is None or historical_data.empty:
-                logger.error(f"❌ No historical data for {symbol}")
-                return {'error': 'No historical data available'}
+            if historical_data is None or len(historical_data) < 100:
+                return {
+                    'error': 'Insufficient historical data',
+                    'symbol': symbol,
+                    'strategy': strategy,
+                    'initial_capital': initial_capital,
+                    'final_capital': initial_capital,
+                    'total_return': 0.0
+                }
             
             logger.success(f"✅ Historical data: {len(historical_data)} candles")
             
-            # Run backtest
+            # Run backtest using strategy engine
             results = await self.strategy_engine.backtest_strategy(
                 symbol=symbol,
-                strategy=strategy,
+                strategy_name=strategy,
                 historical_data=historical_data,
                 initial_capital=initial_capital
             )
             
-            # Add metadata
-            results.update({
-                'symbol': symbol,
-                'strategy': strategy,
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat(),
-                'initial_capital': initial_capital,
-                'data_points': len(historical_data),
-                'backtest_timestamp': datetime.now().isoformat()
-            })
-            
-            # Save results
-            await self._save_backtest_results(results)
-            
-            logger.success(f"✅ Backtest completed: {results.get('roi', 0):.2f}% ROI")
+            logger.info(f"✅ Backtest completed: {results.get('total_return', 0):.2%} return, {results.get('total_trades', 0)} trades")
             
             return results
             
         except Exception as e:
             logger.error(f"❌ Backtest error: {e}")
-            return {'error': str(e)}
-    
-    async def run_optimization(self, symbol: str, strategy: str,
-                             start_date: datetime, end_date: datetime) -> Dict[str, Any]:
-        """Parameter optimization"""
-        try:
-            logger.info(f"🔧 Optimizing {strategy} parameters for {symbol}")
-            
-            # Get historical data
-            historical_data = await self.exchange_manager.get_historical_data(
-                symbol=symbol,
-                timeframe='1h',
-                start_date=start_date,
-                end_date=end_date
-            )
-            
-            if historical_data is None or historical_data.empty:
-                return {'error': 'No historical data available'}
-            
-            # Run optimization
-            results = await self.strategy_engine.optimize_strategy_parameters(
-                symbol=symbol,
-                strategy=strategy,
-                historical_data=historical_data
-            )
-            
-            # Apply optimized parameters if successful
-            if results and 'best_params' in results:
-                logger.info("🔧 Applying optimized parameters to strategy")
-                self.strategy_engine.apply_optimized_parameters(strategy, results['best_params'])
-                
-                # Run final backtest with optimized parameters
-                logger.info("🧪 Running final backtest with optimized parameters")
-                final_results = await self.strategy_engine.backtest_strategy(
-                    symbol=symbol,
-                    strategy=strategy,
-                    historical_data=historical_data
-                )
-                
-                results['final_backtest'] = final_results
-                logger.success(f"✅ Final optimized performance: {final_results.get('roi', 0):.2%} ROI")
-            
-            logger.success(f"✅ Optimization completed")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"❌ Optimization error: {e}")
-            return {'error': str(e)}
+            return {
+                'error': str(e),
+                'symbol': symbol,
+                'strategy': strategy,
+                'initial_capital': initial_capital,
+                'final_capital': initial_capital,
+                'total_return': 0.0
+            }
     
     async def multi_symbol_backtest(self, symbols: List[str], strategies: List[str],
                                   start_date: datetime, end_date: datetime) -> Dict[str, Any]:
@@ -200,83 +145,82 @@ class BacktestRunner:
                     )
                     
                     symbol_results[strategy] = result
-                    
-                    # Brief pause to avoid overwhelming the system
-                    await asyncio.sleep(0.5)
                 
                 all_results[symbol] = symbol_results
             
-            # Generate summary
-            summary = self._generate_summary(all_results)
+            # Print summary
+            self._print_multi_backtest_summary(all_results)
             
-            logger.success(f"✅ Multi-symbol backtest completed")
-            
-            return {
-                'individual_results': all_results,
-                'summary': summary
-            }
+            return all_results
             
         except Exception as e:
             logger.error(f"❌ Multi-symbol backtest error: {e}")
-            return {'error': str(e)}
+            return {}
     
-    def _generate_summary(self, results: Dict) -> Dict[str, Any]:
-        """Generate summary statistics"""
+    async def parameter_optimization(self, symbol: str, strategy: str, 
+                                   start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Basic parameter optimization"""
         try:
-            total_tests = 0
-            profitable_tests = 0
-            total_roi = 0
-            best_roi = -float('inf')
-            worst_roi = float('inf')
-            best_combo = None
-            worst_combo = None
+            logger.info(f"🔧 Parameter optimization for {strategy} on {symbol}")
             
-            for symbol, strategies in results.items():
-                for strategy, result in strategies.items():
-                    if 'error' not in result:
-                        total_tests += 1
-                        roi = result.get('roi', 0)
-                        total_roi += roi
-                        
-                        if roi > 0:
-                            profitable_tests += 1
-                        
-                        if roi > best_roi:
-                            best_roi = roi
-                            best_combo = f"{symbol} - {strategy}"
-                        
-                        if roi < worst_roi:
-                            worst_roi = roi
-                            worst_combo = f"{symbol} - {strategy}"
+            # Run base strategy
+            base_result = await self.run_backtest(symbol, strategy, start_date, end_date)
+            
+            logger.info(f"📊 Base strategy return: {base_result.get('total_return', 0):.2%}")
             
             return {
-                'total_tests': total_tests,
-                'profitable_tests': profitable_tests,
-                'win_rate': (profitable_tests / total_tests * 100) if total_tests > 0 else 0,
-                'average_roi': total_roi / total_tests if total_tests > 0 else 0,
-                'best_roi': best_roi,
-                'worst_roi': worst_roi,
-                'best_combination': best_combo,
-                'worst_combination': worst_combo
+                'symbol': symbol,
+                'strategy': strategy,
+                'base_return': base_result.get('total_return', 0),
+                'optimized_params': 'No optimization implemented yet'
             }
             
         except Exception as e:
-            logger.error(f"❌ Summary generation error: {e}")
+            logger.error(f"❌ Parameter optimization error: {e}")
             return {}
     
-    async def _save_backtest_results(self, results: Dict[str, Any]):
-        """Save backtest results to database"""
+    def _print_multi_backtest_summary(self, results: Dict[str, Any]):
+        """Print summary of multi-symbol backtest"""
         try:
-            # This would save to a backtest_results table
-            # For now, just log the key metrics
-            logger.info("💾 Saving backtest results...")
-            logger.info(f"📈 ROI: {results.get('roi', 0):.2f}%")
-            logger.info(f"🎯 Win Rate: {results.get('win_rate', 0):.1f}%")
-            logger.info(f"💰 Final Capital: ${results.get('final_capital', 0):,.2f}")
-            logger.info(f"📊 Total Trades: {results.get('total_trades', 0)}")
+            print("\n" + "=" * 60)
+            print("📊 MULTI-SYMBOL BACKTEST SUMMARY")
+            print("=" * 60)
+            
+            total_tests = 0
+            profitable_tests = 0
+            total_return = 0
+            best_combo = ""
+            best_return = -999
+            
+            for symbol, strategies in results.items():
+                print(f"\n📈 {symbol}:")
+                for strategy, result in strategies.items():
+                    if 'error' not in result:
+                        ret = result.get('total_return', 0)
+                        total_return += ret
+                        total_tests += 1
+                        
+                        if ret > 0:
+                            profitable_tests += 1
+                        
+                        if ret > best_return:
+                            best_return = ret
+                            best_combo = f"{symbol}-{strategy}"
+                        
+                        print(f"   {strategy}: {ret:.2%} return, {result.get('total_trades', 0)} trades")
+                    else:
+                        print(f"   {strategy}: ❌ {result['error']}")
+            
+            print(f"\n📊 OVERALL SUMMARY:")
+            print(f"   Total tests: {total_tests}")
+            print(f"   Profitable: {profitable_tests}")
+            print(f"   Win rate: {profitable_tests/total_tests:.1%}" if total_tests > 0 else "   Win rate: 0%")
+            print(f"   Average return: {total_return/total_tests:.2%}" if total_tests > 0 else "   Average return: 0%")
+            print(f"   Best combination: {best_combo} ({best_return:.2%})")
+            print("=" * 60)
             
         except Exception as e:
-            logger.error(f"❌ Save results error: {e}")
+            logger.error(f"❌ Summary print error: {e}")
     
     async def close(self):
         """Close all connections"""
@@ -285,24 +229,34 @@ class BacktestRunner:
                 await self.exchange_manager.close()
             if self.db_manager:
                 await self.db_manager.close()
-            logger.info("✅ Backtesting runner closed")
-            
         except Exception as e:
             logger.error(f"❌ Close error: {e}")
 
 
+# Global variables for main function
+backtest_runner = None
+start_date = datetime.now() - timedelta(days=180)  # 6 months ago
+end_date = datetime.now()
+
+
+async def initialize():
+    """Initialize global backtest runner"""
+    global backtest_runner
+    backtest_runner = BacktestRunner()
+    await backtest_runner.initialize()
+
+
 async def main():
     """Main backtest runner"""
-    from src.utils.logger_setup import setup_logging
     setup_logging('backtest')
     
     try:
         # Initialize backtest runner
         await initialize()
         
-        # NEW: Use adaptive strategies instead of old broken ones
+        # NEW: Use research-backed strategies
         symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
-        strategies = ['volatility_breakout', 'mean_reversion_adaptive']  # Only 2 proven strategies
+        strategies = ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']  # Research-backed strategies
         
         print("🚀 ADVANCED TRADING BOT - BACKTESTING")
         print("=" * 50)
@@ -349,6 +303,7 @@ async def main():
     except Exception as e:
         logger.error(f"❌ Backtest error: {e}")
         traceback.print_exc()
+
 
 def print_backtest_results(result: Dict[str, Any]):
     """Print formatted backtest results"""

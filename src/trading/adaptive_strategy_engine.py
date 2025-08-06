@@ -78,14 +78,18 @@ class AdaptiveStrategyEngine:
         """ENHANCED market regime analysis for strategy selection"""
         try:
             # Get multiple timeframes for comprehensive analysis
+            now = datetime.now()
             data_15m = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='15m', limit=100
+                symbol=symbol, timeframe='15m', 
+                start_date=now - timedelta(days=2), end_date=now
             )
             data_1h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='1h', limit=200
+                symbol=symbol, timeframe='1h', 
+                start_date=now - timedelta(days=7), end_date=now
             )
             data_4h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='4h', limit=150
+                symbol=symbol, timeframe='4h', 
+                start_date=now - timedelta(days=30), end_date=now
             )
             
             if not all([data_15m is not None, data_1h is not None, data_4h is not None]):
@@ -240,8 +244,10 @@ class AdaptiveStrategyEngine:
         """
         try:
             # Get 4h data (research-optimized timeframe)
+            now = datetime.now()
             data_4h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='4h', limit=250
+                symbol=symbol, timeframe='4h', 
+                start_date=now - timedelta(days=45), end_date=now
             )
             
             if data_4h is None or len(data_4h) < 200:
@@ -360,8 +366,10 @@ class AdaptiveStrategyEngine:
         """
         try:
             # Get 15m data (research-optimized timeframe for BTC)
+            now = datetime.now()
             data_15m = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='15m', limit=150
+                symbol=symbol, timeframe='15m', 
+                start_date=now - timedelta(days=3), end_date=now
             )
             
             if data_15m is None or len(data_15m) < 100:

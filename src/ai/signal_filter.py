@@ -671,6 +671,11 @@ class AISignalFilter:
             logger.info("   🎯 Label 1: Both conditions met (BUY signal)")
             logger.info("   🎯 Label 0: Conditions not met (NO BUY)")
             
+            # CALCULATE FUTURE RETURNS FIRST (before any feature engineering)
+            df = df.copy()  # Work with copy to avoid modifying original
+            df['future_return_1h'] = df['close'].shift(-1) / df['close'] - 1
+            df['future_return_4h'] = df['close'].shift(-4) / df['close'] - 1
+            
             # Enhanced feature engineering
             feature_columns = [
                 'rsi_14', 'macd_signal', 'bb_position', 'volume_ma_ratio',
@@ -679,33 +684,65 @@ class AISignalFilter:
                 'volume_trend', 'price_velocity', 'market_pressure'
             ]
             
+            # Calculate basic technical indicators
+            # RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi_14'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            exp1 = df['close'].ewm(span=12).mean()
+            exp2 = df['close'].ewm(span=26).mean()
+            macd = exp1 - exp2
+            df['macd_signal'] = macd.ewm(span=9).mean()
+            
+            # Bollinger Bands position
+            bb_ma = df['close'].rolling(20).mean()
+            bb_std = df['close'].rolling(20).std()
+            bb_upper = bb_ma + (2 * bb_std)
+            bb_lower = bb_ma - (2 * bb_std)
+            df['bb_position'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
+            
+            # Volume ratio
+            volume_ma = df['volume'].rolling(20).mean() if 'volume' in df.columns else pd.Series([1.0] * len(df))
+            df['volume_ma_ratio'] = df['volume'] / volume_ma if 'volume' in df.columns else 1.0
+            
+            # Price change and volatility
+            df['price_change_1h'] = df['close'].pct_change(1)
+            df['volatility'] = df['close'].pct_change().rolling(20).std()
+            df['trend_strength'] = abs(df['close'] - df['close'].rolling(20).mean()) / df['close'].rolling(20).mean()
+            
+            # Simple features for missing ones
+            df['support_distance'] = 0  # Placeholder
+            df['resistance_distance'] = 0  # Placeholder  
+            df['momentum'] = df['close'].pct_change(5)
+            df['volume_trend'] = 0  # Placeholder
+            df['price_velocity'] = df['close'].pct_change(2)
+            df['market_pressure'] = 0  # Placeholder
+            
+            # Fill NaN values with defaults
+            for col in feature_columns:
+                if col in df.columns:
+                    df[col] = df[col].fillna(0)
+                else:
+                    df[col] = 0
+            
             features = []
             labels = []
             
-            for i in range(len(df) - 4):  # Need 4 hours lookahead
-                if i < 24:  # Need 24 periods for indicators
-                    continue
-                
-                # Feature extraction with current market data
+            for i in range(24, len(df) - 4):  # Start after indicators stabilize, end before future period
+                # Feature extraction
                 feature_row = []
                 current_row = df.iloc[i]
                 
-                # Technical indicators
-                feature_row.extend([
-                    current_row.get('rsi_14', 50),
-                    current_row.get('macd_signal', 0),
-                    current_row.get('bb_position', 0.5),
-                    current_row.get('volume_ma_ratio', 1.0),
-                    current_row.get('price_change_1h', 0),
-                    current_row.get('volatility', 0.01),
-                    current_row.get('trend_strength', 0),
-                    current_row.get('support_distance', 0),
-                    current_row.get('resistance_distance', 0),
-                    current_row.get('momentum', 0),
-                    current_row.get('volume_trend', 0),
-                    current_row.get('price_velocity', 0),
-                    current_row.get('market_pressure', 0)
-                ])
+                # Extract features
+                for col in feature_columns:
+                    val = current_row.get(col, 0)
+                    if pd.isna(val) or np.isinf(val):
+                        val = 0
+                    feature_row.append(val)
                 
                 # Target: Future returns (WHAT WE'RE PREDICTING)
                 future_1h = df.iloc[i]['future_return_1h']
@@ -716,7 +753,7 @@ class AISignalFilter:
                 # Label 0: Otherwise (safer approach)
                 label = 1 if (future_1h > 0.002 and future_4h > 0.001) else 0
                 
-                if not np.isnan([future_1h, future_4h]).any():
+                if not pd.isna(future_1h) and not pd.isna(future_4h):
                     features.append(feature_row)
                     labels.append(label)
             

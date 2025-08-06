@@ -272,8 +272,12 @@ class LiveDataEngine:
             recommended_strategy = market_regime.get('best_strategy', 'mean_reversion_adaptive')
             
             # Get actual trading signal from adaptive strategy
-            strategy_signal = await self.strategy_engine.get_strategy_signal(symbol, market_regime)
-            if strategy_signal is None:
+            strategy_signal = await self.strategy_engine.get_entry_signal(
+                symbol=symbol, 
+                market_data={'symbol': symbol, 'price': 0, 'volume': 0, 'timestamp': datetime.now()}, 
+                regime=market_regime.get('regime', 'sideways_market') if isinstance(market_regime, dict) else market_regime
+            )
+            if strategy_signal.get('action') == 'HOLD':
                 logger.debug(f"📊 {symbol} no trading signal from adaptive strategy")
             
             # 4. Risk Assessment

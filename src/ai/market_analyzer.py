@@ -15,14 +15,14 @@ from loguru import logger
 class MarketAnalyzer:
     """Gerçek market durumu analiz motoru"""
     
-    def __init__(self, market_config: Dict[str, Any], db_manager):
+    def __init__(self, config, exchange_manager):
         """
         Args:
-            market_config: Market analiz konfigürasyonu
-            db_manager: Veritabanı yöneticisi
+            config: Market analiz konfigürasyonu
+            exchange_manager: Exchange manager
         """
-        self.config = market_config
-        self.db_manager = db_manager
+        self.config = config
+        self.exchange_manager = exchange_manager
         
         # Major crypto symbols for market analysis
         self.major_symbols = ['BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD']
