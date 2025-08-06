@@ -125,7 +125,10 @@ class ExchangeManager:
             # Get OHLCV data
             ohlcv = await exchange_obj.fetch_ohlcv(symbol, timeframe, limit=limit)
             
+            logger.debug(f"📊 {symbol} OHLCV data: {len(ohlcv) if ohlcv else 0} candles")
+            
             if not ohlcv:
+                logger.warning(f"⚠️ {symbol} için OHLCV data bulunamadı")
                 return None
             
             # Convert to DataFrame

@@ -90,6 +90,8 @@ class LiveDataEngine:
                             symbol, timeframe='1m', limit=200
                         )
                         
+                        logger.debug(f"🕒 {symbol} historical data: {historical_data is not None}, dataframe: {historical_data.get('dataframe') is not None if historical_data else False}")
+                        
                         if historical_data and historical_data.get('dataframe') is not None:
                             # Combine real-time with historical
                             combined_data = {
@@ -117,6 +119,24 @@ class LiveDataEngine:
                                            f"(24h: {market_data.get('change_pct_24h', 0):+.2f}%)")
                         else:
                             logger.warning(f"⚠️ {symbol} için historical data bulunamadı veya dataframe eksik")
+                            # Fallback: cache real-time data without historical
+                            fallback_data = {
+                                'symbol': symbol,
+                                'current_price': market_data['price'],
+                                'bid': market_data.get('bid'),
+                                'ask': market_data.get('ask'),
+                                'spread_pct': self._calculate_spread_pct(market_data),
+                                'volume_24h': market_data.get('volume', 0),
+                                'change_24h': market_data.get('change_24h'),
+                                'change_pct_24h': market_data.get('change_pct_24h'),
+                                'orderbook': market_data.get('orderbook'),
+                                'recent_trades': market_data.get('recent_trades'),
+                                'dataframe': None,  # No historical data available
+                                'timestamp': datetime.now(),
+                                'exchange': market_data.get('exchange', 'bybit')
+                            }
+                            self.live_data_cache[symbol] = fallback_data
+                            logger.debug(f"💾 {symbol} fallback data cached (no historical)")
                     else:
                         logger.warning(f"⚠️ {symbol} için real-time data bulunamadı")
                     
@@ -147,7 +167,11 @@ class LiveDataEngine:
                         if (datetime.now() - last_analysis).seconds < self.analysis_interval:
                             continue
                         
-                        live_data = self.live_data_cache[symbol]
+                        live_data = self.live_data_cache.get(symbol)
+                        
+                        if live_data is None:
+                            logger.warning(f"⚠️ {symbol} için cache'de live data bulunamadı")
+                            continue
                         
                         # Perform comprehensive analysis
                         analysis_result = await self._perform_live_analysis(symbol, live_data)
