@@ -743,8 +743,8 @@ class AISignalFilter:
             
             # Get training data from multiple symbols and timeframes
             symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
-            # Different timeframes for different strategies
-            timeframes = ['15m', '1h']  # Volatility breakout (15m) and Mean reversion (1h)
+            # Updated timeframes to match new strategy configuration
+            timeframes = ['5m', '15m']  # Mean reversion (5m) and Trend following (15m)
             all_features = []
             all_labels = []
             
@@ -755,7 +755,12 @@ class AISignalFilter:
                         from datetime import datetime, timedelta
                         end_date = datetime.now()
                         # Adjust days based on timeframe for similar data points
-                        days = 150 if timeframe == '1h' else 60  # 60 days of 15m = ~5760 candles
+                        if timeframe == '5m':
+                            days = 30  # 30 days of 5m = ~8640 candles (sufficient for 5m scalping)
+                        elif timeframe == '15m':
+                            days = 60  # 60 days of 15m = ~5760 candles (good for trend analysis)
+                        else:
+                            days = 150  # Fallback
                         start_date = end_date - timedelta(days=days)
                         
                         data = await self.exchange_manager.get_historical_data(
@@ -784,23 +789,51 @@ class AISignalFilter:
             self._create_default_models()
     
     def _prepare_training_data(self, df: pd.DataFrame) -> tuple:
-        """Prepare training data with CLEAR TARGET DEFINITION"""
+        """Prepare training data with TIMEFRAME-ADAPTIVE TARGET DEFINITION"""
         try:
             if df.empty:
                 return [], []
             
-            # DEFINE TRAINING TARGET CLEARLY
+            # Detect timeframe from data frequency (approximate)
+            if len(df) > 1:
+                time_diff = (df.index[1] - df.index[0]).total_seconds() / 60  # Minutes
+                if time_diff <= 6:
+                    timeframe_type = '5m'
+                    short_period = 2  # 10 minutes ahead
+                    long_period = 6   # 30 minutes ahead  
+                    short_target = 0.3  # 0.3% in 10 min (scalping)
+                    long_target = 0.15  # 0.15% in 30 min
+                elif time_diff <= 20:
+                    timeframe_type = '15m'
+                    short_period = 2  # 30 minutes ahead
+                    long_period = 4   # 1 hour ahead
+                    short_target = 0.4  # 0.4% in 30 min (trend)
+                    long_target = 0.2   # 0.2% in 1 hour
+                else:
+                    timeframe_type = 'other'
+                    short_period = 1
+                    long_period = 2
+                    short_target = 0.2
+                    long_target = 0.1
+            else:
+                timeframe_type = 'unknown'
+                short_period = 1
+                long_period = 2  
+                short_target = 0.2
+                long_target = 0.1
+            
+            # DEFINE TRAINING TARGET DYNAMICALLY
             logger.info("🎯 ML Training Target Definition:")
             logger.info("   📈 Predicting: Profitable price movements")
-            logger.info("   ⏰ Timeframe: 1h + 4h future returns")
-            logger.info("   💰 Profitability: >0.2% in 1h AND >0.1% in 4h")
+            logger.info(f"   ⏰ Timeframe: {timeframe_type} detected")
+            logger.info(f"   💰 Profitability: >{short_target:.1%} in {short_period} periods AND >{long_target:.1%} in {long_period} periods")
             logger.info("   🎯 Label 1: Both conditions met (BUY signal)")
             logger.info("   🎯 Label 0: Conditions not met (NO BUY)")
             
             # CALCULATE FUTURE RETURNS FIRST (before any feature engineering)
             df = df.copy()  # Work with copy to avoid modifying original
-            df['future_return_1h'] = df['close'].shift(-1) / df['close'] - 1
-            df['future_return_4h'] = df['close'].shift(-4) / df['close'] - 1
+            df['future_return_short'] = df['close'].shift(-short_period) / df['close'] - 1
+            df['future_return_long'] = df['close'].shift(-long_period) / df['close'] - 1
             
             # Enhanced feature engineering
             feature_columns = [
@@ -858,7 +891,7 @@ class AISignalFilter:
             features = []
             labels = []
             
-            for i in range(24, len(df) - 4):  # Start after indicators stabilize, end before future period
+            for i in range(24, len(df) - long_period):  # Start after indicators stabilize, end before future period
                 # Feature extraction
                 feature_row = []
                 current_row = df.iloc[i]
@@ -870,16 +903,16 @@ class AISignalFilter:
                         val = 0
                     feature_row.append(val)
                 
-                # Target: Future returns (WHAT WE'RE PREDICTING)
-                future_1h = df.iloc[i]['future_return_1h']
-                future_4h = df.iloc[i]['future_return_4h']
+                # Target: Future returns (TIMEFRAME-ADAPTIVE)
+                future_short = df.iloc[i]['future_return_short']
+                future_long = df.iloc[i]['future_return_long']
                 
-                # CONSERVATIVE LABELING: Require consistent profitability
-                # Label 1: 1h return > 0.2% AND 4h return > 0.1%
+                # CONSERVATIVE LABELING: Require consistent profitability based on timeframe
+                # Label 1: short_period return > short_target AND long_period return > long_target
                 # Label 0: Otherwise (safer approach)
-                label = 1 if (future_1h > 0.002 and future_4h > 0.001) else 0
+                label = 1 if (future_short > short_target/100 and future_long > long_target/100) else 0
                 
-                if not pd.isna(future_1h) and not pd.isna(future_4h):
+                if not pd.isna(future_short) and not pd.isna(future_long):
                     features.append(feature_row)
                     labels.append(label)
             
