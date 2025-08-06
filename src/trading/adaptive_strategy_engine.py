@@ -215,7 +215,7 @@ class AdaptiveStrategyEngine:
             # Get AI confidence first
             ai_analysis = await self.ai_signal_filter.filter_signal(symbol, market_data, regime)
             
-            if ai_analysis['confidence'] < 0.6:  # Minimum confidence threshold
+            if ai_analysis['confidence'] < 0.7:  # Increased minimum confidence threshold from 0.6 to 0.7
                 return {'action': 'HOLD', 'confidence': ai_analysis['confidence'], 'reason': 'Low AI confidence'}
             
             # Select optimal strategy
@@ -295,10 +295,10 @@ class AdaptiveStrategyEngine:
                     volume_boost = 0.15
             
             if strong_uptrend and sma10_rising:
-                confidence = 0.7 + volume_boost
+                confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
                 return {
                     'action': 'BUY',
-                    'confidence': min(0.95, confidence),
+                    'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
                     'entry_price': current_price,
                     'reasons': [
                         "Strong uptrend: Price > SMA10 > SMA20 > SMA50",
@@ -312,10 +312,10 @@ class AdaptiveStrategyEngine:
                     'research_basis': '15m trend following'
                 }
             elif strong_downtrend and sma10_falling:
-                confidence = 0.7 + volume_boost
+                confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
                 return {
                     'action': 'SELL',
-                    'confidence': min(0.95, confidence),
+                    'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
                     'entry_price': current_price,
                     'reasons': [
                         "Strong downtrend: Price < SMA10 < SMA20 < SMA50",
@@ -398,10 +398,10 @@ class AdaptiveStrategyEngine:
             
             # LONG signal - Mean reversion bounce
             if oversold_rsi and near_lower_bb:
-                confidence = 0.65 + volume_strength
+                confidence = 0.45 + volume_strength  # Reduced from 0.65 to prevent overtrading
                 return {
                     'action': 'BUY',
-                    'confidence': min(0.95, confidence),
+                    'confidence': min(0.8, confidence),  # Reduced max from 0.95 to 0.8
                     'entry_price': current_price,
                     'reasons': [
                         f"RSI oversold: {current_rsi:.1f}",
@@ -418,10 +418,10 @@ class AdaptiveStrategyEngine:
             
             # SHORT signal - Mean reversion rejection
             elif overbought_rsi and near_upper_bb:
-                confidence = 0.65 + volume_strength
+                confidence = 0.45 + volume_strength  # Reduced from 0.65 to prevent overtrading
                 return {
                     'action': 'SELL',
-                    'confidence': min(0.95, confidence),
+                    'confidence': min(0.8, confidence),  # Reduced max from 0.95 to 0.8
                     'entry_price': current_price,
                     'reasons': [
                         f"RSI overbought: {current_rsi:.1f}",
@@ -532,21 +532,45 @@ class AdaptiveStrategyEngine:
                 
                 # Position management
                 if position is None:  # No position
-                    # Check for entry signal using research-backed strategies
-                    # Pass current historical data slice to avoid API calls
-                    current_df_slice = df.iloc[:i+1]  # Up to current point
+                    # CRITICAL FIX: Use same signal generation as LIVE trading
+                    # This ensures backtest results match live performance
                     
-                    # Get confidence threshold from custom params or use default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.6) if custom_params else 0.6
+                    # Analyze market regime first (like in live trading)
+                    regime_data = {
+                        'close': current_price,
+                        'volume': current_row.get('volume', 0),
+                        'volatility': current_row.get('atr', 0.01),
+                        'rsi': current_row.get('rsi_14', 50),
+                        'bb_position': current_row.get('bb_position', 0.5)
+                    }
                     
-                    if actual_strategy == 'alligator_ma_momentum':
-                        signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
-                    elif actual_strategy == 'bollinger_rsi_stochrsi':
-                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
+                    # Determine regime
+                    if current_row.get('atr', 0.01) > 0.02:  # High volatility
+                        regime = 'high_volatility'
+                    elif current_row.get('rsi_14', 50) > 70 or current_row.get('rsi_14', 50) < 30:
+                        regime = 'mean_reversion_conditions'
                     else:
-                        # Default to bollinger strategy
-                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
+                        regime = 'sideways_market'
                     
+                    # Get confidence threshold from custom params or use more conservative default
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.7) if custom_params else 0.7  # Increased from 0.6 to 0.7
+                    
+                    # Use get_entry_signal method (same as live trading) with AI filtering
+                    signal = await self.get_entry_signal(symbol, market_data, regime)
+                    
+                    # FALLBACK: If AI filter not available in backtest, use direct strategy calls
+                    if signal.get('action') == 'HOLD' and signal.get('reason') == 'Low AI confidence':
+                        # Pass current historical data slice to avoid API calls
+                        current_df_slice = df.iloc[:i+1]  # Up to current point
+                        
+                        if actual_strategy == 'alligator_ma_momentum':
+                            signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
+                        elif actual_strategy == 'bollinger_rsi_stochrsi':
+                            signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
+                        else:
+                            # Default to bollinger strategy
+                            signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
+                
                     if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal['confidence'] > confidence_threshold:
                         # Enter position with strategy-specific sizing for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
