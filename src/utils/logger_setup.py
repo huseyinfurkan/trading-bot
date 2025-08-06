@@ -80,14 +80,16 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         logger.add(sys.stdout, level="INFO")
 
 
-def setup_logger(config: Dict[str, Any] = None) -> None:
-    """Alias for setup_logging function"""
-    if config is None:
-        config = {
-            'level': 'INFO',
-            'file_path': 'logs/trading_bot.log',
-            'console_output': True
-        }
+def setup_logger(name: str = None, file_path: str = None, level: str = 'INFO') -> None:
+    """Setup logger with name and file path for backwards compatibility"""
+    if file_path is None:
+        file_path = 'logs/trading_bot.log'
+    
+    config = {
+        'level': level,
+        'file_path': file_path,
+        'console_output': True
+    }
     setup_logging(config)
 
 

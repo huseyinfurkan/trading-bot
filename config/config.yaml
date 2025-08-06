@@ -9,7 +9,7 @@ exchanges:
     enabled: true
     api_key: ""  # Will be loaded from .env file (BYBIT_API_KEY)
     secret: ""  # Will be loaded from .env file (BYBIT_SECRET)
-    sandbox: true  # Paper trading için true, live için false
+    sandbox: false  # Paper trading için true, live için false
     default_type: "spot"  # spot, future, option
     requests_per_second: 10
     timeout: 30
@@ -18,7 +18,7 @@ exchanges:
     enabled: false
     api_key: ""
     secret: ""
-    sandbox: true
+    sandbox: false
     default_type: "spot"
     requests_per_second: 10
     timeout: 30
@@ -28,7 +28,7 @@ exchanges:
     api_key: ""
     secret: ""
     passphrase: ""
-    sandbox: true
+    sandbox: false
     default_type: "spot"
     requests_per_second: 10
     timeout: 30
