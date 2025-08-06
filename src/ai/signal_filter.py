@@ -618,10 +618,10 @@ class AISignalFilter:
             
             for symbol in symbols:
                 try:
-                    # Get historical data for training (last 30 days)
+                    # Get historical data for training (last 150 days = ~5 months)
                     from datetime import datetime, timedelta
                     end_date = datetime.now()
-                    start_date = end_date - timedelta(days=30)
+                    start_date = end_date - timedelta(days=150)
                     
                     data = await self.exchange_manager.get_historical_data(
                         symbol, '1h', start_date, end_date

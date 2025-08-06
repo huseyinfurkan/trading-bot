@@ -5,6 +5,7 @@ Multi-strateji trading motoru
 
 import numpy as np
 import pandas as pd
+import traceback
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
@@ -67,15 +68,24 @@ class StrategyEngine:
         
         logger.info("🎯 Strategy Engine initialized")
     
-    def _load_active_strategies(self) -> None:
+    def _load_active_strategies(self) -> List[str]:
         """Aktif stratejileri yükle"""
-        self.active_strategies = []
+        active_strategies = []
         
-        for strategy_name, config in self.config.items():
-            if config.get('enabled', False):
-                self.active_strategies.append(strategy_name)
+        # If config is None or empty, use all strategies as default
+        if not self.config:
+            active_strategies = ['scalping', 'swing_trading', 'trend_following', 'mean_reversion']
+        else:
+            for strategy_name, config in self.config.items():
+                if config.get('enabled', False):
+                    active_strategies.append(strategy_name)
         
-        logger.info(f"🎯 Aktif stratejiler: {self.active_strategies}")
+        # If no strategies enabled, enable all as fallback
+        if not active_strategies:
+            active_strategies = ['scalping', 'swing_trading', 'trend_following', 'mean_reversion']
+        
+        logger.info(f"🎯 Aktif stratejiler: {active_strategies}")
+        return active_strategies
     
     async def select_strategy(self, symbol: str, market_condition: Dict[str, Any], 
                              confidence: float) -> Optional[str]:
@@ -135,6 +145,11 @@ class StrategyEngine:
             # Select best strategy from active ones
             best_strategy = None
             best_score = 0
+            
+            # Safety check for active_strategies
+            if not self.active_strategies:
+                logger.warning("⚠️ No active strategies found, using default")
+                self.active_strategies = ['scalping', 'swing_trading', 'trend_following', 'mean_reversion']
             
             for strategy in self.active_strategies:
                 if strategy in strategy_scores:
@@ -212,13 +227,13 @@ class StrategyEngine:
             sell_signals = 0
             signal_strength = 0
             
-            # Get strategy parameters (optimized or default)
+            # Get strategy parameters (MUCH MORE CONSERVATIVE)
             params = self.strategy_params.get('scalping', {})
-            rsi_oversold = params.get('rsi_oversold', 30)
-            rsi_overbought = params.get('rsi_overbought', 70)
-            volume_threshold = params.get('volume_threshold', 1.5)
-            min_signals = params.get('min_signals', 3)
-            min_strength = params.get('min_strength', 0.7)
+            rsi_oversold = params.get('rsi_oversold', 20)  # More extreme
+            rsi_overbought = params.get('rsi_overbought', 80)  # More extreme
+            volume_threshold = params.get('volume_threshold', 2.5)  # Much higher volume needed
+            min_signals = params.get('min_signals', 5)  # MORE confirmation needed
+            min_strength = params.get('min_strength', 0.85)  # MUCH higher strength needed
             
             # 1. RSI Mean Reversion (Scalping favors quick reversals)
             rsi = indicators['rsi'].iloc[-1]
@@ -273,7 +288,7 @@ class StrategyEngine:
             
             # Decision logic - require strong multi-factor confirmation (optimized)
             
-            if buy_signals >= min_signals and signal_strength >= min_strength and buy_signals > sell_signals:
+            if buy_signals >= min_signals and signal_strength >= min_strength and buy_signals > (sell_signals + 2):
                 # Dynamic stop loss based on volatility
                 atr = indicators['atr'].iloc[-1]
                 volatility_factor = min(atr / current_price, 0.01)  # Cap at 1%
@@ -287,7 +302,7 @@ class StrategyEngine:
                     'reason': f'Scalping: {buy_signals} buy signals, strength {signal_strength:.2f}',
                     'signals_count': buy_signals
                 }
-            elif sell_signals >= min_signals and signal_strength >= min_strength and sell_signals > buy_signals:
+            elif sell_signals >= min_signals and signal_strength >= min_strength and sell_signals > (buy_signals + 2):
                 atr = indicators['atr'].iloc[-1]
                 volatility_factor = min(atr / current_price, 0.01)
                 
@@ -666,10 +681,10 @@ class StrategyEngine:
             # Define parameter ranges for optimization
             param_ranges = {
                 'scalping': {
-                    'rsi_oversold': [25, 30, 35],
-                    'rsi_overbought': [65, 70, 75],
-                    'volume_threshold': [1.3, 1.5, 2.0],
-                    'min_signals': [2, 3, 4]
+                    'rsi_oversold': [15, 20, 25],  # More extreme
+                    'rsi_overbought': [75, 80, 85],  # More extreme  
+                    'volume_threshold': [2.0, 2.5, 3.0],  # Higher volume
+                    'min_signals': [4, 5, 6]  # More confirmation
                 },
                 'swing_trading': {
                     'sma_short': [15, 20, 25],
