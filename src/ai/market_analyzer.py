@@ -42,38 +42,81 @@ class MarketAnalyzer:
         
         logger.info("📊 Market Analyzer initialized")
     
-    async def analyze_current_market(self) -> Dict[str, Any]:
-        """Mevcut piyasa koşullarını analiz et"""
+    async def analyze_current_market(self) -> str:
+        """
+        ENHANCED REAL MARKET ANALYSIS
+        Instead of fake analysis, perform comprehensive market assessment
+        """
         try:
-            logger.info("📊 Piyasa durumu analizi başlatılıyor...")
+            logger.info("📊 Comprehensive market regime analysis başlatılıyor...")
             
-            # Check cache
-            if self._is_cache_valid():
-                logger.debug("📋 Cache'den piyasa verisi kullanılıyor")
-                return self.market_cache.get('analysis', {})
+            # Get market data for multiple symbols
+            symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT']
+            market_data = {}
             
-            # Get real market data
-            market_data = await self._fetch_real_market_data()
+            for symbol in symbols:
+                try:
+                    # Get 1h data for trend analysis
+                    data_1h = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe='1h',
+                        limit=50
+                    )
+                    
+                    # Get 15m data for short-term analysis  
+                    data_15m = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe='15m',
+                        limit=100
+                    )
+                    
+                    if data_1h is not None and len(data_1h) > 20 and data_15m is not None and len(data_15m) > 50:
+                        market_data[symbol] = {
+                            'data_1h': data_1h,
+                            'data_15m': data_15m
+                        }
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not get data for {symbol}: {e}")
+                    continue
             
             if not market_data:
-                logger.warning("⚠️ Market data alınamadı, varsayılan analiz döndürülüyor")
-                return self._get_default_analysis()
+                logger.warning("⚠️ No market data available, defaulting to sideways")
+                return 'sideways_market'
             
-            # Analyze market conditions
-            analysis = await self._perform_comprehensive_analysis(market_data)
+            # Analyze multiple market characteristics
+            market_metrics = []
             
-            # Cache the results
-            self.market_cache['analysis'] = analysis
-            self.market_cache['timestamp'] = datetime.now()
-            self.last_update = datetime.now()
-            
-            logger.success(f"✅ Market analizi tamamlandı: {analysis['condition']}")
-            
-            return analysis
+            for symbol, data in market_data.items():
+                metrics = await self._analyze_symbol_regime(symbol, data['data_1h'], data['data_15m'])
+                market_metrics.append(metrics)
                 
+                logger.info(f"📈 {symbol} Analysis:")
+                logger.info(f"   💨 Volatility: {metrics['volatility']:.1%} ({metrics['volatility_regime']})")
+                logger.info(f"   📊 Trend: {metrics['trend_strength']:.1%} ({metrics['trend_direction']})")
+                logger.info(f"   📉 Range: {metrics['range_pct']:.1%} ({metrics['range_regime']})")
+                logger.info(f"   🔄 Regime: {metrics['local_regime']}")
+            
+            # Aggregate market analysis
+            avg_volatility = np.mean([m['volatility'] for m in market_metrics])
+            avg_trend_strength = np.mean([abs(m['trend_strength']) for m in market_metrics])
+            avg_range = np.mean([m['range_pct'] for m in market_metrics])
+            
+            # Determine overall market regime
+            market_regime = self._determine_market_regime(avg_volatility, avg_trend_strength, avg_range, market_metrics)
+            
+            logger.info(f"🌍 OVERALL MARKET ANALYSIS:")
+            logger.info(f"   📊 Average Volatility: {avg_volatility:.1%}")
+            logger.info(f"   📈 Average Trend Strength: {avg_trend_strength:.1%}")
+            logger.info(f"   📉 Average Range: {avg_range:.1%}")
+            logger.info(f"   🎯 Market Regime: {market_regime}")
+            
+            logger.success(f"✅ Market analizi tamamlandı: {market_regime}")
+            return market_regime
+            
         except Exception as e:
-            logger.error(f"❌ Market analiz hatası: {e}")
-            return self._get_default_analysis()
+            logger.error(f"❌ Market analysis error: {e}")
+            return 'sideways_market'
     
     async def analyze_market_condition(self, symbol: str) -> Dict[str, Any]:
         """Belirli bir sembol için market koşulunu analiz et"""
@@ -546,3 +589,140 @@ class MarketAnalyzer:
         except Exception as e:
             logger.error(f"❌ Market dominance error: {e}")
             return {'BTC': 45.0, 'ETH': 20.0, 'Others': 35.0}
+
+    async def _analyze_symbol_regime(self, symbol: str, data_1h: pd.DataFrame, data_15m: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze individual symbol for market regime characteristics"""
+        try:
+            # Calculate volatility (15m data for precision)
+            returns_15m = data_15m['close'].pct_change().dropna()
+            volatility = returns_15m.std() * np.sqrt(96)  # Annualized from 15m
+            
+            # Calculate trend strength (1h data for stability)
+            closes_1h = data_1h['close'].values
+            sma_20 = pd.Series(closes_1h).rolling(20).mean().iloc[-1]
+            current_price = closes_1h[-1]
+            trend_strength = (current_price - sma_20) / sma_20
+            
+            # Calculate recent range
+            recent_high = data_1h['high'].tail(24).max()  # Last 24 hours
+            recent_low = data_1h['low'].tail(24).min()
+            range_pct = (recent_high - recent_low) / current_price
+            
+            # Calculate momentum
+            momentum_3h = (closes_1h[-1] - closes_1h[-4]) / closes_1h[-4] if len(closes_1h) >= 4 else 0
+            momentum_12h = (closes_1h[-1] - closes_1h[-13]) / closes_1h[-13] if len(closes_1h) >= 13 else 0
+            
+            # Volume analysis
+            volume_avg = data_1h['volume'].tail(24).mean()
+            volume_current = data_1h['volume'].iloc[-1]
+            volume_ratio = volume_current / volume_avg if volume_avg > 0 else 1
+            
+            # Classify regimes
+            if volatility > 0.04:  # >4% daily volatility
+                volatility_regime = "high"
+            elif volatility > 0.02:  # >2% daily volatility
+                volatility_regime = "medium"
+            else:
+                volatility_regime = "low"
+            
+            if abs(trend_strength) > 0.05:  # >5% from MA
+                trend_direction = "bullish" if trend_strength > 0 else "bearish"
+            elif abs(trend_strength) > 0.02:  # >2% from MA
+                trend_direction = "weak_bullish" if trend_strength > 0 else "weak_bearish"
+            else:
+                trend_direction = "neutral"
+            
+            if range_pct > 0.08:  # >8% range
+                range_regime = "wide"
+            elif range_pct > 0.04:  # >4% range
+                range_regime = "normal"
+            else:
+                range_regime = "tight"
+            
+            # Determine local regime
+            if volatility_regime == "high" and abs(trend_strength) > 0.03:
+                local_regime = "breakout_trending"
+            elif volatility_regime == "high" and range_regime == "wide":
+                local_regime = "high_volatility_ranging"
+            elif volatility_regime == "low" and range_regime == "tight":
+                local_regime = "low_volatility_consolidation"
+            elif abs(trend_strength) > 0.05:
+                local_regime = "trending"
+            elif range_regime == "wide":
+                local_regime = "ranging"
+            else:
+                local_regime = "sideways"
+            
+            return {
+                'volatility': volatility,
+                'volatility_regime': volatility_regime,
+                'trend_strength': trend_strength,
+                'trend_direction': trend_direction,
+                'range_pct': range_pct,
+                'range_regime': range_regime,
+                'momentum_3h': momentum_3h,
+                'momentum_12h': momentum_12h,
+                'volume_ratio': volume_ratio,
+                'local_regime': local_regime
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Symbol analysis error for {symbol}: {e}")
+            return {
+                'volatility': 0.02,
+                'volatility_regime': 'medium',
+                'trend_strength': 0.0,
+                'trend_direction': 'neutral',
+                'range_pct': 0.05,
+                'range_regime': 'normal',
+                'momentum_3h': 0.0,
+                'momentum_12h': 0.0,
+                'volume_ratio': 1.0,
+                'local_regime': 'sideways'
+            }
+    
+    def _determine_market_regime(self, avg_volatility: float, avg_trend_strength: float, 
+                               avg_range: float, individual_metrics: List[Dict]) -> str:
+        """Determine overall market regime from aggregated metrics"""
+        try:
+            # Count regime types across symbols
+            regime_counts = {}
+            for metrics in individual_metrics:
+                regime = metrics['local_regime']
+                regime_counts[regime] = regime_counts.get(regime, 0) + 1
+            
+            # Get most common regime
+            dominant_regime = max(regime_counts.items(), key=lambda x: x[1])[0] if regime_counts else 'sideways'
+            
+            # Override with market-wide conditions
+            if avg_volatility > 0.05:  # Very high volatility across market
+                if avg_trend_strength > 0.04:
+                    return 'market_breakout'
+                else:
+                    return 'high_volatility_market'
+                    
+            elif avg_volatility < 0.015:  # Very low volatility
+                if avg_range < 0.03:
+                    return 'low_volatility_consolidation'
+                else:
+                    return 'sideways_market'
+                    
+            elif avg_trend_strength > 0.06:  # Strong trend across market
+                return 'trending_market'
+                
+            else:
+                # Use dominant regime from individual analysis
+                regime_mapping = {
+                    'breakout_trending': 'breakout_market',
+                    'high_volatility_ranging': 'volatile_ranging_market',
+                    'low_volatility_consolidation': 'consolidation_market',
+                    'trending': 'trending_market',
+                    'ranging': 'ranging_market',
+                    'sideways': 'sideways_market'
+                }
+                
+                return regime_mapping.get(dominant_regime, 'sideways_market')
+                
+        except Exception as e:
+            logger.error(f"❌ Regime determination error: {e}")
+            return 'sideways_market'

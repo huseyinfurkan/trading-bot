@@ -374,3 +374,287 @@ class AdaptiveStrategyEngine:
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         rs = gain / loss
         return 100 - (100 / (1 + rs))
+
+    async def get_entry_signal(self, symbol: str, market_data: Dict, regime: str) -> Dict[str, Any]:
+        """Get entry signal for given symbol and market regime"""
+        try:
+            # Get AI confidence first
+            ai_analysis = await self.ai_signal_filter.filter_signal(symbol, market_data, regime)
+            
+            if ai_analysis['confidence'] < 0.6:  # Minimum confidence threshold
+                return {'action': 'HOLD', 'confidence': ai_analysis['confidence'], 'reason': 'Low AI confidence'}
+            
+            # Route to appropriate strategy based on regime
+            if regime in ['high_volatility', 'breakout_forming']:
+                signal = await self._volatility_breakout_signal(symbol, market_data, ai_analysis)
+            elif regime in ['mean_reversion_conditions', 'sideways_market', 'ranging']:
+                signal = await self._mean_reversion_adaptive_signal(symbol, market_data, ai_analysis)
+            else:
+                return {'action': 'HOLD', 'confidence': 0.5, 'reason': f'Unknown regime: {regime}'}
+            
+            # Apply AI filter to final signal
+            if signal['action'] != 'HOLD':
+                signal['ai_confidence'] = ai_analysis['confidence']
+                signal['combined_confidence'] = (signal['confidence'] + ai_analysis['confidence']) / 2
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting entry signal: {e}")
+            return {'action': 'HOLD', 'confidence': 0.0, 'reason': f'Error: {str(e)}'}
+
+    async def backtest_strategy(self, symbol: str, strategy_name: str, historical_data: pd.DataFrame, 
+                              initial_capital: float = 10000) -> Dict[str, Any]:
+        """
+        Backtest a strategy on historical data
+        NEW METHOD - Required by backtest_runner
+        """
+        try:
+            # Map old strategy names to new adaptive ones
+            strategy_mapping = {
+                'scalping': 'volatility_breakout',
+                'swing_trading': 'mean_reversion_adaptive', 
+                'trend_following': 'volatility_breakout',
+                'mean_reversion': 'mean_reversion_adaptive',
+                # Direct new names
+                'volatility_breakout': 'volatility_breakout',
+                'mean_reversion_adaptive': 'mean_reversion_adaptive'
+            }
+            
+            actual_strategy = strategy_mapping.get(strategy_name, 'mean_reversion_adaptive')
+            
+            logger.info(f"🔄 Backtesting {strategy_name} → {actual_strategy} on {symbol}")
+            logger.info(f"📊 Data: {len(historical_data)} candles, Capital: ${initial_capital:,.2f}")
+            
+            # Initialize backtest variables
+            capital = initial_capital
+            position = None
+            position_size = 0
+            entry_price = 0
+            trades = []
+            equity_curve = []
+            
+            # Strategy-specific parameters
+            if actual_strategy == 'volatility_breakout':
+                params = self.adaptive_params['volatility_breakout']
+            else:
+                params = self.adaptive_params['mean_reversion_adaptive']
+            
+            # Ensure we have required indicators
+            df = historical_data.copy()
+            df = await self._add_indicators(df)
+            
+            # Simulate trading
+            for i in range(50, len(df)):  # Start after indicators stabilize
+                current_row = df.iloc[i]
+                current_price = current_row['close']
+                
+                # Analyze market regime
+                regime_data = {
+                    'close': current_price,
+                    'volume': current_row.get('volume', 0),
+                    'volatility': current_row.get('atr', 0.01),
+                    'rsi': current_row.get('rsi_14', 50),
+                    'bb_position': current_row.get('bb_position', 0.5)
+                }
+                
+                # Determine regime
+                if current_row.get('atr', 0.01) > 0.02:  # High volatility
+                    regime = 'high_volatility'
+                elif current_row.get('rsi_14', 50) > 70 or current_row.get('rsi_14', 50) < 30:
+                    regime = 'mean_reversion_conditions'
+                else:
+                    regime = 'sideways_market'
+                
+                # Get signal
+                market_data = {
+                    'symbol': symbol,
+                    'price': current_price,
+                    'volume': current_row.get('volume', 0),
+                    'timestamp': current_row.get('timestamp', i),
+                    'indicators': {
+                        'rsi_14': current_row.get('rsi_14', 50),
+                        'macd_signal': current_row.get('macd_signal', 0),
+                        'bb_position': current_row.get('bb_position', 0.5),
+                        'atr': current_row.get('atr', 0.01)
+                    }
+                }
+                
+                # Position management
+                if position is None:  # No position
+                    # Check for entry signal
+                    if actual_strategy == 'volatility_breakout':
+                        signal = await self._volatility_breakout_signal(symbol, market_data, {'confidence': 0.8})
+                    else:
+                        signal = await self._mean_reversion_adaptive_signal(symbol, market_data, {'confidence': 0.8})
+                    
+                    if signal['action'] == 'BUY' and signal['confidence'] > 0.7:
+                        # Enter position
+                        risk_per_trade = 0.02  # 2% risk per trade
+                        position_value = capital * risk_per_trade * 5  # 5x leverage simulation
+                        position_size = position_value / current_price
+                        position = 'LONG'
+                        entry_price = current_price
+                        
+                        logger.debug(f"📈 Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
+                
+                else:  # Have position
+                    # Check exit conditions
+                    pnl_pct = (current_price - entry_price) / entry_price
+                    
+                    should_exit = False
+                    exit_reason = ""
+                    
+                    # Profit target
+                    if pnl_pct > 0.03:  # 3% profit
+                        should_exit = True
+                        exit_reason = "Profit target"
+                    
+                    # Stop loss
+                    elif pnl_pct < -0.015:  # 1.5% loss
+                        should_exit = True
+                        exit_reason = "Stop loss"
+                    
+                    # Time-based exit
+                    elif i - len([t for t in trades if t['exit_price'] == 0]) > params['max_hold_hours']:
+                        should_exit = True
+                        exit_reason = "Time limit"
+                    
+                    if should_exit:
+                        # Exit position
+                        pnl = position_size * (current_price - entry_price)
+                        capital += pnl
+                        
+                        trade = {
+                            'entry_price': entry_price,
+                            'exit_price': current_price,
+                            'pnl': pnl,
+                            'pnl_pct': pnl_pct,
+                            'reason': exit_reason,
+                            'duration': i - len([t for t in trades if t['exit_price'] == 0])
+                        }
+                        trades.append(trade)
+                        
+                        logger.debug(f"📉 Exit: {symbol} @ ${current_price:.4f}, PnL: ${pnl:.2f} ({pnl_pct:.2%})")
+                        
+                        position = None
+                        position_size = 0
+                        entry_price = 0
+                
+                # Track equity
+                current_equity = capital
+                if position:
+                    unrealized_pnl = position_size * (current_price - entry_price)
+                    current_equity += unrealized_pnl
+                
+                equity_curve.append(current_equity)
+            
+            # Calculate performance metrics
+            total_return = (capital - initial_capital) / initial_capital
+            max_equity = max(equity_curve) if equity_curve else initial_capital
+            max_drawdown = (max_equity - min(equity_curve)) / max_equity if equity_curve else 0
+            
+            winning_trades = [t for t in trades if t['pnl'] > 0]
+            losing_trades = [t for t in trades if t['pnl'] <= 0]
+            
+            win_rate = len(winning_trades) / len(trades) if trades else 0
+            avg_win = np.mean([t['pnl'] for t in winning_trades]) if winning_trades else 0
+            avg_loss = np.mean([t['pnl'] for t in losing_trades]) if losing_trades else 0
+            
+            profit_factor = abs(sum([t['pnl'] for t in winning_trades]) / sum([t['pnl'] for t in losing_trades])) if losing_trades else float('inf')
+            
+            # Calculate Sharpe ratio (simplified)
+            returns = np.diff(equity_curve) / equity_curve[:-1] if len(equity_curve) > 1 else [0]
+            sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+            
+            results = {
+                'initial_capital': initial_capital,
+                'final_capital': capital,
+                'total_return': total_return,
+                'total_trades': len(trades),
+                'winning_trades': len(winning_trades),
+                'losing_trades': len(losing_trades),
+                'win_rate': win_rate,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'profit_factor': profit_factor,
+                'max_drawdown': max_drawdown,
+                'sharpe_ratio': sharpe_ratio,
+                'strategy': actual_strategy,
+                'symbol': symbol
+            }
+            
+            logger.info(f"✅ Backtest completed: {total_return:.2%} return, {len(trades)} trades")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Backtest error: {e}")
+            traceback.print_exc()
+            return {
+                'error': str(e),
+                'initial_capital': initial_capital,
+                'final_capital': initial_capital,
+                'total_return': 0.0,
+                'strategy': strategy_name,
+                'symbol': symbol
+            }
+
+    async def _add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add technical indicators to dataframe"""
+        try:
+            # RSI
+            df['rsi_14'] = self._calculate_rsi(df['close'].values, 14)
+            
+            # MACD
+            exp1 = df['close'].ewm(span=12).mean()
+            exp2 = df['close'].ewm(span=26).mean()
+            df['macd'] = exp1 - exp2
+            df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            
+            # Bollinger Bands
+            bb_period = 20
+            bb_std = 2
+            bb_ma = df['close'].rolling(bb_period).mean()
+            bb_std_val = df['close'].rolling(bb_period).std()
+            df['bb_upper'] = bb_ma + (bb_std_val * bb_std)
+            df['bb_lower'] = bb_ma - (bb_std_val * bb_std)
+            df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            
+            # ATR
+            df['high_low'] = df['high'] - df['low']
+            df['high_close'] = np.abs(df['high'] - df['close'].shift())
+            df['low_close'] = np.abs(df['low'] - df['close'].shift())
+            df['tr'] = df[['high_low', 'high_close', 'low_close']].max(axis=1)
+            df['atr'] = df['tr'].rolling(14).mean()
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Error adding indicators: {e}")
+            return df
+
+    def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate RSI"""
+        deltas = np.diff(prices)
+        seed = deltas[:period+1]
+        up = seed[seed >= 0].sum() / period
+        down = -seed[seed < 0].sum() / period
+        rs = up / down if down != 0 else 0
+        rsi = np.zeros_like(prices)
+        rsi[:period] = 100. - 100. / (1. + rs)
+
+        for i in range(period, len(prices)):
+            delta = deltas[i-1]
+            if delta > 0:
+                upval = delta
+                downval = 0.
+            else:
+                upval = 0.
+                downval = -delta
+
+            up = (up * (period - 1) + upval) / period
+            down = (down * (period - 1) + downval) / period
+            rs = up / down if down != 0 else 0
+            rsi[i] = 100. - 100. / (1. + rs)
+
+        return rsi

@@ -292,82 +292,90 @@ class BacktestRunner:
 
 
 async def main():
-    """Main backtesting function"""
-    runner = BacktestRunner()
+    """Main backtest runner"""
+    setup_logging('backtest')
     
     try:
-        await runner.initialize()
+        # Initialize backtest runner
+        await initialize()
         
-        # Define test parameters
+        # NEW: Use adaptive strategies instead of old broken ones
         symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
-        strategies = ['scalping', 'swing_trading', 'trend_following', 'mean_reversion']
-        
-        # Date range (last 6 months)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=180)
+        strategies = ['volatility_breakout', 'mean_reversion_adaptive']  # Only 2 proven strategies
         
         print("🚀 ADVANCED TRADING BOT - BACKTESTING")
         print("=" * 50)
-        print(f"📅 Period: {start_date.date()} to {end_date.date()}")
+        print(f"📅 Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         print(f"📊 Symbols: {', '.join(symbols)}")
         print(f"🎯 Strategies: {', '.join(strategies)}")
         print()
-        
-        # Option 1: Single backtest
         print("1. Single Symbol Backtest")
-        print("2. Multi-Symbol Backtest")
+        print("2. Multi-Symbol Backtest") 
         print("3. Parameter Optimization")
+        print()
         
-        choice = input("\nSelect option (1-3): ").strip()
+        choice = input("Select option (1-3): ")
         
-        if choice == '1':
-            symbol = input("Enter symbol (e.g., BTCUSDT): ").strip().upper()
-            strategy = input("Enter strategy (scalping/swing_trading/trend_following/mean_reversion): ").strip()
+        if choice == "1":
+            symbol = input(f"Enter symbol ({'/'.join(symbols)}): ").upper()
+            if symbol not in symbols:
+                symbol = symbols[0]
             
-            if symbol and strategy in strategies:
-                results = await runner.run_backtest(symbol, strategy, start_date, end_date)
+            strategy = input(f"Enter strategy ({'/'.join(strategies)}): ").lower()
+            if strategy not in strategies:
+                strategy = strategies[0]
                 
-                print(f"\n📊 BACKTEST RESULTS - {symbol} {strategy}")
-                print("=" * 40)
-                print(f"ROI: {results.get('roi', 0):.2f}%")
-                print(f"Win Rate: {results.get('win_rate', 0):.1f}%")
-                print(f"Total Trades: {results.get('total_trades', 0)}")
-                print(f"Final Capital: ${results.get('final_capital', 0):,.2f}")
-        
-        elif choice == '2':
-            results = await runner.multi_symbol_backtest(symbols, strategies, start_date, end_date)
+            result = await backtest_runner.run_backtest(
+                symbol=symbol,
+                strategy=strategy,
+                start_date=start_date,
+                end_date=end_date
+            )
             
-            summary = results.get('summary', {})
-            print(f"\n📊 MULTI-SYMBOL BACKTEST SUMMARY")
-            print("=" * 40)
-            print(f"Total Tests: {summary.get('total_tests', 0)}")
-            print(f"Profitable: {summary.get('profitable_tests', 0)}")
-            print(f"Win Rate: {summary.get('win_rate', 0):.1f}%")
-            print(f"Average ROI: {summary.get('average_roi', 0):.2f}%")
-            print(f"Best: {summary.get('best_combination', 'N/A')} ({summary.get('best_roi', 0):.2f}%)")
-            print(f"Worst: {summary.get('worst_combination', 'N/A')} ({summary.get('worst_roi', 0):.2f}%)")
-        
-        elif choice == '3':
-            symbol = input("Enter symbol for optimization (e.g., BTCUSDT): ").strip().upper()
-            strategy = input("Enter strategy to optimize: ").strip()
+            print_backtest_results(result)
             
-            if symbol and strategy in strategies:
-                results = await runner.run_optimization(symbol, strategy, start_date, end_date)
-                
-                print(f"\n🔧 OPTIMIZATION RESULTS - {symbol} {strategy}")
-                print("=" * 40)
-                print(f"Best ROI: {results.get('roi', 0):.2f}%")
-                print(f"Tested Combinations: {results.get('tested_combinations', 0)}")
-        
+        elif choice == "2":
+            await backtest_runner.multi_symbol_backtest(symbols, strategies, start_date, end_date)
+            
+        elif choice == "3":
+            await backtest_runner.parameter_optimization(symbols[0], strategies[0], start_date, end_date)
+            
         else:
             print("❌ Invalid choice")
-        
+            
     except KeyboardInterrupt:
-        print("\n🛑 Backtesting interrupted by user")
+        logger.info("👋 Backtest interrupted by user")
     except Exception as e:
-        print(f"\n❌ Backtesting error: {e}")
-    finally:
-        await runner.close()
+        logger.error(f"❌ Backtest error: {e}")
+        traceback.print_exc()
+
+def print_backtest_results(result: Dict[str, Any]):
+    """Print formatted backtest results"""
+    print("\n" + "=" * 50)
+    print("📊 BACKTEST RESULTS")
+    print("=" * 50)
+    
+    if 'error' in result:
+        print(f"❌ Error: {result['error']}")
+        return
+    
+    print(f"💰 Initial Capital: ${result['initial_capital']:,.2f}")
+    print(f"💰 Final Capital: ${result['final_capital']:,.2f}")
+    print(f"📈 Total Return: {result['total_return']:.2%}")
+    print(f"🎯 Strategy: {result['strategy']}")
+    print(f"📊 Symbol: {result['symbol']}")
+    print()
+    print(f"📈 Total Trades: {result['total_trades']}")
+    print(f"✅ Winning Trades: {result['winning_trades']}")
+    print(f"❌ Losing Trades: {result['losing_trades']}")
+    print(f"🎯 Win Rate: {result['win_rate']:.1%}")
+    print()
+    print(f"💰 Average Win: ${result['avg_win']:.2f}")
+    print(f"💸 Average Loss: ${result['avg_loss']:.2f}")
+    print(f"⚖️ Profit Factor: {result['profit_factor']:.2f}")
+    print(f"📉 Max Drawdown: {result['max_drawdown']:.2%}")
+    print(f"📊 Sharpe Ratio: {result['sharpe_ratio']:.2f}")
+    print("=" * 50)
 
 
 if __name__ == "__main__":

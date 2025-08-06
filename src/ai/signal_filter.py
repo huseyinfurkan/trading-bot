@@ -657,106 +657,80 @@ class AISignalFilter:
             logger.error(f"❌ Model training error: {e}")
             self._create_default_models()
     
-    def _prepare_training_data(self, data):
-        """Enhanced feature engineering with overfitting prevention"""
-        import pandas as pd
-        import numpy as np
-        
+    async def _prepare_training_data(self, df: pd.DataFrame) -> tuple:
+        """Prepare training data with CLEAR TARGET DEFINITION"""
         try:
-            if len(data) < 100:  # Need more data for robust training
+            if df.empty:
                 return [], []
             
-            # Copy data to prevent modification
-            df = data.copy()
+            # DEFINE TRAINING TARGET CLEARLY
+            logger.info("🎯 ML Training Target Definition:")
+            logger.info("   📈 Predicting: Profitable price movements")
+            logger.info("   ⏰ Timeframe: 1h + 4h future returns")
+            logger.info("   💰 Profitability: >0.2% in 1h AND >0.1% in 4h")
+            logger.info("   🎯 Label 1: Both conditions met (BUY signal)")
+            logger.info("   🎯 Label 0: Conditions not met (NO BUY)")
             
-            # ANTI-DATA-LEAKAGE: Calculate future returns FIRST, before any other calculations
-            df['future_return_1h'] = df['close'].shift(-1) / df['close'] - 1
-            df['future_return_4h'] = df['close'].shift(-4) / df['close'] - 1
-            
-            # Enhanced technical indicators (using only past data)
-            df['sma_10'] = df['close'].rolling(10).mean()
-            df['sma_20'] = df['close'].rolling(20).mean()
-            df['sma_50'] = df['close'].rolling(50).mean()
-            df['ema_12'] = df['close'].ewm(span=12).mean()
-            df['ema_26'] = df['close'].ewm(span=26).mean()
-            
-            # RSI
-            df['rsi'] = self._calculate_rsi(df['close'])
-            df['rsi_sma'] = df['rsi'].rolling(5).mean()
-            
-            # MACD
-            df['macd'] = df['ema_12'] - df['ema_26']
-            df['macd_signal'] = df['macd'].ewm(span=9).mean()
-            df['macd_histogram'] = df['macd'] - df['macd_signal']
-            
-            # Bollinger Bands
-            df['bb_upper'], df['bb_lower'] = self._calculate_bollinger_bands(df['close'])
-            df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['close']
-            
-            # Volume indicators
-            df['volume_sma'] = df['volume'].rolling(20).mean()
-            df['volume_ratio'] = df['volume'] / df['volume_sma']
-            df['volume_roc'] = df['volume'].pct_change(5)
-            
-            # Price momentum features
-            df['price_roc_1'] = df['close'].pct_change(1)
-            df['price_roc_5'] = df['close'].pct_change(5)
-            df['price_roc_20'] = df['close'].pct_change(20)
-            
-            # Volatility features
-            df['returns'] = df['close'].pct_change()
-            df['volatility_5'] = df['returns'].rolling(5).std()
-            df['volatility_20'] = df['returns'].rolling(20).std()
-            
-            # Market structure features
-            df['high_low_ratio'] = (df['high'] - df['low']) / df['close']
-            df['close_position'] = (df['close'] - df['low']) / (df['high'] - df['low'])
-            
-            # Trend strength
-            df['trend_strength'] = np.abs(df['close'] - df['sma_20']) / df['sma_20']
-            
-            # ANTI-OVERFITTING: Remove last 10% of data to prevent lookahead
-            cutoff = int(len(df) * 0.9)
-            df = df.iloc[:cutoff]
-            
-            # Remove NaN values
-            df = df.dropna()
-            
-            if len(df) < 50:
-                return [], []
-            
-            # Feature selection (prevent overfitting with too many features)
+            # Enhanced feature engineering
             feature_columns = [
-                'rsi', 'rsi_sma', 'macd_histogram', 'bb_position', 'bb_width',
-                'volume_ratio', 'volume_roc', 'price_roc_1', 'price_roc_5',
-                'volatility_5', 'high_low_ratio', 'close_position', 'trend_strength'
+                'rsi_14', 'macd_signal', 'bb_position', 'volume_ma_ratio',
+                'price_change_1h', 'volatility', 'trend_strength',
+                'support_distance', 'resistance_distance', 'momentum',
+                'volume_trend', 'price_velocity', 'market_pressure'
             ]
             
             features = []
             labels = []
             
-            # Use multiple prediction horizons for robustness
-            for i in range(len(df)):
-                feature_row = []
-                for col in feature_columns:
-                    val = df.iloc[i][col]
-                    if np.isnan(val) or np.isinf(val):
-                        val = 0  # Handle edge cases
-                    feature_row.append(val)
+            for i in range(len(df) - 4):  # Need 4 hours lookahead
+                if i < 24:  # Need 24 periods for indicators
+                    continue
                 
-                # Multi-target labeling for robustness
+                # Feature extraction with current market data
+                feature_row = []
+                current_row = df.iloc[i]
+                
+                # Technical indicators
+                feature_row.extend([
+                    current_row.get('rsi_14', 50),
+                    current_row.get('macd_signal', 0),
+                    current_row.get('bb_position', 0.5),
+                    current_row.get('volume_ma_ratio', 1.0),
+                    current_row.get('price_change_1h', 0),
+                    current_row.get('volatility', 0.01),
+                    current_row.get('trend_strength', 0),
+                    current_row.get('support_distance', 0),
+                    current_row.get('resistance_distance', 0),
+                    current_row.get('momentum', 0),
+                    current_row.get('volume_trend', 0),
+                    current_row.get('price_velocity', 0),
+                    current_row.get('market_pressure', 0)
+                ])
+                
+                # Target: Future returns (WHAT WE'RE PREDICTING)
                 future_1h = df.iloc[i]['future_return_1h']
                 future_4h = df.iloc[i]['future_return_4h']
                 
-                # Conservative labeling: require consistent profitability
-                label = 1 if (future_1h > 0.002 and future_4h > 0.001) else 0  # 0.2% and 0.1% thresholds
+                # CONSERVATIVE LABELING: Require consistent profitability
+                # Label 1: 1h return > 0.2% AND 4h return > 0.1%
+                # Label 0: Otherwise (safer approach)
+                label = 1 if (future_1h > 0.002 and future_4h > 0.001) else 0
                 
                 if not np.isnan([future_1h, future_4h]).any():
                     features.append(feature_row)
                     labels.append(label)
             
-            logger.info(f"📊 Prepared {len(features)} samples with {len(feature_columns)} features")
+            # Log training statistics
+            positive_signals = sum(labels)
+            total_samples = len(labels)
+            positive_ratio = positive_signals / total_samples if total_samples > 0 else 0
+            
+            logger.info(f"📊 Training Data Prepared:")
+            logger.info(f"   📈 Total samples: {total_samples}")
+            logger.info(f"   💰 Positive signals (profitable): {positive_signals} ({positive_ratio:.1%})")
+            logger.info(f"   📉 Negative signals (avoid): {total_samples - positive_signals}")
+            logger.info(f"   🔧 Features: {len(feature_columns)} technical indicators")
+            
             return features, labels
             
         except Exception as e:
