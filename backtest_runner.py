@@ -90,6 +90,14 @@ class BacktestRunner:
             logger.info(f"📅 Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             logger.info(f"💰 Initial capital: ${initial_capital:,.2f}")
             
+            # CRITICAL: Train AI models before backtesting (if not already trained)
+            logger.info("🤖 Initializing AI models for backtesting...")
+            try:
+                await self.signal_filter.initialize()
+                logger.success("✅ AI models ready for backtesting")
+            except Exception as e:
+                logger.warning(f"⚠️ AI model initialization failed: {e}, continuing without AI filtering")
+            
             # Fetch historical data
             logger.info("📡 Fetching historical data...")
             

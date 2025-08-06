@@ -212,11 +212,21 @@ class AdaptiveStrategyEngine:
     async def get_entry_signal(self, symbol: str, market_data: Dict, regime: str) -> Dict[str, Any]:
         """Get entry signal using research-optimized strategies"""
         try:
-            # Get AI confidence first
-            ai_analysis = await self.ai_signal_filter.filter_signal(symbol, market_data, regime)
-            
-            if ai_analysis['confidence'] < 0.7:  # Increased minimum confidence threshold from 0.6 to 0.7
-                return {'action': 'HOLD', 'confidence': ai_analysis['confidence'], 'reason': 'Low AI confidence'}
+            # Try to get AI confidence first
+            ai_analysis = None
+            try:
+                ai_analysis = await self.ai_signal_filter.filter_signal(symbol, market_data, regime)
+                
+                # Use more moderate AI confidence threshold for better signal generation
+                if ai_analysis['confidence'] < 0.5:  # Reduced from 0.7 to 0.5 for more signals
+                    logger.debug(f"📉 AI confidence too low: {ai_analysis['confidence']:.2f}")
+                    # Don't return immediately - try direct strategy as fallback
+                else:
+                    logger.debug(f"🤖 AI confidence good: {ai_analysis['confidence']:.2f}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ AI filter error: {e}, using direct strategy signals")
+                ai_analysis = None
             
             # Select optimal strategy
             regime_analysis = await self.analyze_market_regime(symbol)
@@ -224,16 +234,29 @@ class AdaptiveStrategyEngine:
             
             # Route to appropriate research-backed strategy
             if recommended_strategy == 'alligator_ma_momentum':
-                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis)
+                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8})
             else:
-                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis)
+                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8})
             
-            # Apply AI filter to final signal
-            if signal['action'] != 'HOLD':
-                signal['ai_confidence'] = ai_analysis['confidence']
-                signal['combined_confidence'] = (signal['confidence'] + ai_analysis['confidence']) / 2
+            # Apply AI filter to final signal (only if AI analysis succeeded)
+            if signal['action'] != 'HOLD' and ai_analysis is not None:
+                # Apply AI confidence boost/penalty
+                if ai_analysis['confidence'] >= 0.5:
+                    signal['ai_confidence'] = ai_analysis['confidence']
+                    signal['combined_confidence'] = (signal['confidence'] + ai_analysis['confidence']) / 2
+                    signal['strategy_used'] = recommended_strategy
+                    signal['research_basis'] = self.strategies[recommended_strategy]['proven_performance']
+                else:
+                    # Reduce confidence if AI is not confident
+                    signal['confidence'] *= 0.8  # 20% penalty
+                    signal['ai_confidence'] = ai_analysis['confidence']
+                    signal['combined_confidence'] = signal['confidence']
+            elif signal['action'] != 'HOLD':
+                # No AI analysis available - use raw strategy signal
+                signal['ai_confidence'] = 0.0
+                signal['combined_confidence'] = signal['confidence']
                 signal['strategy_used'] = recommended_strategy
-                signal['research_basis'] = self.strategies[recommended_strategy]['proven_performance']
+                signal['research_basis'] = 'Direct strategy signal (no AI filter)'
             
             return signal
             
@@ -552,14 +575,14 @@ class AdaptiveStrategyEngine:
                     else:
                         regime = 'sideways_market'
                     
-                    # Get confidence threshold from custom params or use more conservative default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.7) if custom_params else 0.7  # Increased from 0.6 to 0.7
+                    # Get confidence threshold from custom params or use moderate default
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.5) if custom_params else 0.5  # Reduced from 0.7 to 0.5 for better signal generation
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
                     signal = await self.get_entry_signal(symbol, market_data, regime)
                     
-                    # FALLBACK: If AI filter not available in backtest, use direct strategy calls
-                    if signal.get('action') == 'HOLD' and signal.get('reason') == 'Low AI confidence':
+                    # IMPROVED FALLBACK: Always ensure we have a signal, even if AI is not working
+                    if signal.get('action') == 'HOLD':
                         # Pass current historical data slice to avoid API calls
                         current_df_slice = df.iloc[:i+1]  # Up to current point
                         
@@ -571,7 +594,10 @@ class AdaptiveStrategyEngine:
                             # Default to bollinger strategy
                             signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                 
-                    if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal['confidence'] > confidence_threshold:
+                    # Use combined_confidence if available, otherwise use raw confidence
+                    signal_confidence = signal.get('combined_confidence', signal.get('confidence', 0.0))
+                    
+                    if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold:
                         # Enter position with strategy-specific sizing for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
                             # Moderate sizing for 15m trend following (less aggressive than before)
