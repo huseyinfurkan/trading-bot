@@ -93,15 +93,14 @@ class BacktestRunner:
             # Fetch historical data
             logger.info("📡 Fetching historical data...")
             
-            # Calculate days between dates
-            days_diff = (end_date - start_date).days
+            # Fetch historical data with proper date range
             timeframe = '1h'
-            limit = min(days_diff * 24, 1000)  # 1000 is typical API limit
             
             historical_data = await self.exchange_manager.get_historical_data(
                 symbol=symbol,
                 timeframe=timeframe,
-                limit=limit
+                start_date=start_date,
+                end_date=end_date
             )
             
             if historical_data is None or len(historical_data) < 100:
