@@ -70,6 +70,8 @@ class ExchangeManager:
             api_key = config.get('api_key', '')
             secret = config.get('secret', '')
             logger.debug(f"🔐 {exchange_name} credentials: apiKey={bool(api_key)}, secret={bool(secret)}")
+            logger.debug(f"🔍 {exchange_name} API key first 8 chars: {api_key[:8] if api_key else 'EMPTY'}")
+            logger.debug(f"🔍 {exchange_name} Secret first 8 chars: {secret[:8] if secret else 'EMPTY'}")
             
             exchange = exchange_class({
                 'apiKey': api_key,
@@ -82,34 +84,36 @@ class ExchangeManager:
                 }
             })
             
-            # Test connection with minimal API call
+            # Test connection - PUBLIC FIRST, then private if needed
             try:
-                # First try public endpoint
-                await exchange.load_markets()
-                logger.success(f"✅ {exchange_name} markets loaded successfully")
+                # Use public ticker endpoint for initial test (no API key needed)
+                ticker = await exchange.fetch_ticker('BTC/USDT')
+                logger.success(f"✅ {exchange_name} public connection verified")
                 
-                # Then test private API with minimal call
+                # Now test private API with balance check
                 try:
                     balance = await exchange.fetch_balance()
-                    logger.success(f"✅ {exchange_name} API connection verified")
+                    logger.success(f"✅ {exchange_name} private API verified")
+                    # Load markets AFTER API verification
+                    await exchange.load_markets()
+                    logger.success(f"✅ {exchange_name} markets loaded")
                 except Exception as private_error:
                     if "10003" in str(private_error) or "invalid" in str(private_error).lower():
                         logger.error(f"❌ {exchange_name} API credentials invalid: {private_error}")
                         logger.error(f"🔑 Please check your API keys in .env file")
-                        logger.error(f"💡 Make sure API keys have proper permissions (spot trading)")
                         raise
                     else:
-                        logger.warning(f"⚠️ {exchange_name} API connection issue: {private_error}")
+                        logger.warning(f"⚠️ {exchange_name} private API issue: {private_error}")
                         logger.info(f"📊 Continuing with public data only...")
-                        # Mark exchange as public-only
+                        # Load markets with public access only
+                        exchange.apiKey = ''
+                        exchange.secret = ''
+                        await exchange.load_markets()
                         exchange._public_only = True
                         
             except Exception as e:
-                if "load_markets" in str(e).lower():
-                    logger.error(f"❌ {exchange_name} markets loading failed: {e}")
-                    logger.error(f"🌐 Check your internet connection")
-                else:
-                    logger.error(f"❌ {exchange_name} connection failed: {e}")
+                logger.error(f"❌ {exchange_name} connection failed: {e}")
+                logger.error(f"🌐 Check your internet connection and API credentials")
                 raise
             
             self.exchanges[exchange_name] = exchange
