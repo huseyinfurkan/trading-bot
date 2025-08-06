@@ -83,7 +83,7 @@ class BacktestRunner:
             raise
     
     async def run_backtest(self, symbol: str, strategy: str, start_date: datetime, 
-                          end_date: datetime, initial_capital: float = 10000) -> Dict[str, Any]:
+                          end_date: datetime, initial_capital: float = 10000, custom_params: Dict = None) -> Dict[str, Any]:
         """Run single strategy backtest"""
         try:
             logger.info(f"📊 Backtesting {strategy} on {symbol}")
@@ -122,12 +122,13 @@ class BacktestRunner:
             
             logger.success(f"✅ Historical data: {len(historical_data)} candles")
             
-            # Run backtest using strategy engine
+            # Run backtest using strategy engine with custom params
             results = await self.strategy_engine.backtest_strategy(
-                symbol=symbol,
                 strategy_name=strategy,
+                symbol=symbol,
                 historical_data=historical_data,
-                initial_capital=initial_capital
+                initial_capital=initial_capital,
+                custom_params=custom_params
             )
             
             logger.info(f"✅ Backtest completed: {results.get('total_return', 0):.2%} return, {results.get('total_trades', 0)} trades")
@@ -218,12 +219,8 @@ class BacktestRunner:
             for i, params in enumerate(param_variations):
                 logger.info(f"📊 Testing variation {i+1}/{len(param_variations)}: {params}")
                 
-                # Temporarily modify strategy engine parameters
-                # Note: This is a simplified approach - in production, 
-                # you'd want to pass parameters to the strategy
-                
-                # For now, just run base strategy and log the intended changes
-                result = await self.run_backtest(symbol, strategy, start_date, end_date)
+                # Run backtest with custom parameters
+                result = await self.run_backtest(symbol, strategy, start_date, end_date, 10000, params)
                 current_return = result.get('total_return', 0)
                 
                 logger.info(f"   Result: {current_return:.2%} return")

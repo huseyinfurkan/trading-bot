@@ -297,44 +297,45 @@ class AdaptiveStrategyEngine:
             current_fast_sma = fast_sma.iloc[-1] if not pd.isna(fast_sma.iloc[-1]) else current_price
             current_slow_sma = slow_sma.iloc[-1] if not pd.isna(slow_sma.iloc[-1]) else current_price
             
-            # RESEARCH-BASED ENTRY CONDITIONS
-            # Long conditions (exact research criteria):
-            # 1. Price above 200 SMA (trend filter)
-            # 2. Alligator lines stacked: fast_sma > slow_sma > lips > teeth > jaw
-            # 3. All lines trending upward
+            # SIMPLIFIED RESEARCH-BASED ENTRY CONDITIONS
+            # Focus on the most important signals for better performance
             
             above_sma200 = current_price > current_sma200
-            alligator_bullish_stack = (current_fast_sma > current_slow_sma > 
-                                     current_lips > current_teeth > current_jaw)
             
-            # Calculate line directions (momentum)
-            jaw_direction = (jaw.iloc[-1] - jaw.iloc[-2]) if len(jaw) >= 2 else 0
-            teeth_direction = (teeth.iloc[-1] - teeth.iloc[-2]) if len(teeth) >= 2 else 0
-            lips_direction = (lips.iloc[-1] - lips.iloc[-2]) if len(lips) >= 2 else 0
+            # Simplified alligator condition: just lips > teeth > jaw (main trend indicator)
+            alligator_aligned = current_lips > current_teeth > current_jaw
             
-            lines_trending_up = jaw_direction > 0 and teeth_direction > 0 and lips_direction > 0
+            # Price momentum: fast MA above slow MA
+            ma_bullish = current_fast_sma > current_slow_sma
             
-            # Entry signal strength
+            # Calculate line directions (momentum) - simplified
+            lips_trending_up = (lips.iloc[-1] - lips.iloc[-2]) if len(lips) >= 2 else 0
+            
+            # Entry signal strength - more achievable conditions
             entry_strength = 0.0
             reasons = []
             
             if above_sma200:
-                entry_strength += 0.3
+                entry_strength += 0.4  # Main trend filter
                 reasons.append("Above 200 SMA")
             
-            if alligator_bullish_stack:
-                entry_strength += 0.4
-                reasons.append("Alligator bullish stack")
+            if alligator_aligned:
+                entry_strength += 0.3  # Alligator alignment
+                reasons.append("Alligator aligned")
             
-            if lines_trending_up:
-                entry_strength += 0.3
-                reasons.append("Lines trending up")
+            if ma_bullish:
+                entry_strength += 0.2  # MA momentum
+                reasons.append("MA bullish")
+            
+            if lips_trending_up > 0:
+                entry_strength += 0.1  # Trending momentum
+                reasons.append("Upward momentum")
             
             # Volume confirmation (if available)
-            if 'volume' in data_4h.columns:
+            if 'volume' in data_4h.columns and len(data_4h) > 20:
                 vol_ma = data_4h['volume'].rolling(20).mean()
                 current_vol = data_4h['volume'].iloc[-1]
-                if current_vol > vol_ma.iloc[-1] * 1.2:
+                if current_vol > vol_ma.iloc[-1] * 1.1:  # Lowered threshold
                     entry_strength += 0.1
                     reasons.append("Volume confirmation")
             
@@ -344,7 +345,7 @@ class AdaptiveStrategyEngine:
             exit_condition = ((current_fast_sma < current_slow_sma and current_price < current_teeth) or 
                             current_price < current_sma200)
             
-            if entry_strength >= 0.6:  # Strong bullish signal (lowered from 0.7)
+            if entry_strength >= 0.5:  # Lowered from 0.6 for more signals
                 return {
                     'action': 'BUY',
                     'confidence': min(0.95, entry_strength),
@@ -433,12 +434,12 @@ class AdaptiveStrategyEngine:
                 if volume_ratio > 1.5:  # Above average volume
                     volume_strength = 0.15
             
-            # Signal strength calculation
+            # Signal strength calculation - LONG ONLY for backtesting
             if long_rsi_condition and long_stochrsi_condition and long_bb_condition:
-                confidence = 0.7 + volume_strength
+                confidence = 0.6 + volume_strength  # Lowered base confidence
                 # Additional confluence factors
                 if bb_position < 0.1:  # Very close to lower band
-                    confidence += 0.1
+                    confidence += 0.15
                 if current_rsi < 25:  # Extremely oversold
                     confidence += 0.1
                 
@@ -450,55 +451,31 @@ class AdaptiveStrategyEngine:
                         f"RSI oversold: {current_rsi:.1f}",
                         f"StochRSI oversold: {current_stoch_rsi:.1f}",
                         f"At lower BB: {bb_position:.2f}",
-                        "Research-backed confluence"
+                        "Mean reversion opportunity"
                     ],
                     'strategy': 'BB + RSI + Stochastic RSI (Research)',
                     'timeframe': '15m',
                     'stop_loss': current_price * 0.995,  # 0.5% stop
-                    'take_profit': current_price * 1.02,  # 2% target (research-optimized)
+                    'take_profit': current_price * 1.025,  # 2.5% target
                     'research_basis': 'Sharpe 13.5 on BTC 15min'
                 }
             
-            elif short_rsi_condition and short_stochrsi_condition and short_bb_condition:
-                confidence = 0.7 + volume_strength
-                # Additional confluence factors  
-                if bb_position > 0.9:  # Very close to upper band
-                    confidence += 0.1
-                if current_rsi > 75:  # Extremely overbought
-                    confidence += 0.1
-                
-                return {
-                    'action': 'SELL',
-                    'confidence': min(0.95, confidence),
-                    'entry_price': current_price,
-                    'reasons': [
-                        f"RSI overbought: {current_rsi:.1f}",
-                        f"StochRSI overbought: {current_stoch_rsi:.1f}",
-                        f"At upper BB: {bb_position:.2f}",
-                        "Research-backed confluence"
-                    ],
-                    'strategy': 'BB + RSI + Stochastic RSI (Research)',
-                    'timeframe': '15m',
-                    'stop_loss': current_price * 1.005,  # 0.5% stop
-                    'take_profit': current_price * 0.98,  # 2% target
-                    'research_basis': 'Sharpe 13.5 on BTC 15min'
-                }
-            
+            # Removed SELL signals for LONG-only backtesting
             else:
                 return {
                     'action': 'HOLD',
-                    'confidence': 0.4,
-                    'reason': f"No confluence: RSI={current_rsi:.1f}, StochRSI={current_stoch_rsi:.1f}, BB_pos={bb_position:.2f}"
+                    'confidence': 0.0,
+                    'reason': 'No long opportunity found'
                 }
                 
         except Exception as e:
             logger.error(f"❌ BB+RSI+StochRSI signal error: {e}")
             return {'action': 'HOLD', 'confidence': 0.0, 'reason': f'Signal error: {str(e)}'}
 
-    async def backtest_strategy(self, symbol: str, strategy_name: str, historical_data: pd.DataFrame, 
-                              initial_capital: float = 10000) -> Dict[str, Any]:
+    async def backtest_strategy(self, strategy_name: str, symbol: str, historical_data: pd.DataFrame, 
+                               initial_capital: float = 10000, custom_params: Dict = None) -> Dict[str, Any]:
         """
-        Backtest a strategy on historical data
+        Backtest a single strategy on historical data
         NEW METHOD - Required by backtest_runner
         """
         try:
@@ -584,6 +561,9 @@ class AdaptiveStrategyEngine:
                     # Pass current historical data slice to avoid API calls
                     current_df_slice = df.iloc[:i+1]  # Up to current point
                     
+                    # Get confidence threshold from custom params or use default
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.6) if custom_params else 0.6
+                    
                     if actual_strategy == 'alligator_ma_momentum':
                         signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     elif actual_strategy == 'bollinger_rsi_stochrsi':
@@ -592,7 +572,7 @@ class AdaptiveStrategyEngine:
                         # Default to bollinger strategy
                         signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     
-                    if signal['action'] == 'BUY' and signal['confidence'] > 0.6:
+                    if signal['action'] == 'BUY' and signal['confidence'] > confidence_threshold:
                         # Enter position with strategy-specific sizing
                         if actual_strategy == 'alligator_ma_momentum':
                             # Conservative sizing for 4h trend following
@@ -615,46 +595,39 @@ class AdaptiveStrategyEngine:
                         logger.debug(f"📈 Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
                 
                 else:  # Have position
-                    # Check exit conditions - Strategy-specific logic
+                    # Check exit conditions - Strategy-specific logic with custom params support
                     pnl_pct = (current_price - entry_price) / entry_price
                     
                     should_exit = False
                     exit_reason = ""
                     
-                    # Strategy-specific exit conditions
-                    if actual_strategy == 'alligator_ma_momentum':
-                        # Alligator strategy: longer holds, wider targets
-                        if pnl_pct > 0.06:  # 6% profit target (research-based)
-                            should_exit = True
-                            exit_reason = "Profit target"
-                        elif pnl_pct < -0.03:  # 3% stop loss
-                            should_exit = True
-                            exit_reason = "Stop loss"
-                        elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
-                            should_exit = True
-                            exit_reason = "Time limit"
-                    
-                    elif actual_strategy == 'bollinger_rsi_stochrsi':
-                        # Bollinger strategy: quicker exits, tighter targets
-                        if pnl_pct > 0.025:  # 2.5% profit target
-                            should_exit = True
-                            exit_reason = "Profit target"
-                        elif pnl_pct < -0.015:  # 1.5% stop loss
-                            should_exit = True
-                            exit_reason = "Stop loss"
-                        elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
-                            should_exit = True
-                            exit_reason = "Time limit"
-                    
+                    # Use custom parameters if provided, otherwise use defaults
+                    if custom_params:
+                        profit_target = custom_params.get('profit_target', 0.04)
+                        stop_loss = custom_params.get('stop_loss', 0.02)
                     else:
-                        # Default exit conditions
-                        if pnl_pct > 0.04:  # 4% profit
-                            should_exit = True
-                            exit_reason = "Profit target"
-                        elif pnl_pct < -0.02:  # 2% loss
-                            should_exit = True
-                            exit_reason = "Stop loss"
+                        # Strategy-specific exit conditions
+                        if actual_strategy == 'alligator_ma_momentum':
+                            profit_target = 0.06  # 6% profit target (research-based)
+                            stop_loss = 0.03      # 3% stop loss
+                        elif actual_strategy == 'bollinger_rsi_stochrsi':
+                            profit_target = 0.025  # 2.5% profit target
+                            stop_loss = 0.015      # 1.5% stop loss
+                        else:
+                            profit_target = 0.04   # 4% default
+                            stop_loss = 0.02       # 2% default
                     
+                    # Apply exit conditions
+                    if pnl_pct > profit_target:
+                        should_exit = True
+                        exit_reason = "Profit target"
+                    elif pnl_pct < -stop_loss:
+                        should_exit = True
+                        exit_reason = "Stop loss"
+                    elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
+                        should_exit = True
+                        exit_reason = "Time limit"
+                
                     if should_exit:
                         # Exit position
                         pnl = position_size * (current_price - entry_price)
