@@ -628,16 +628,16 @@ class AISignalFilter:
                         days = 150 if timeframe == '1h' else 60  # 60 days of 15m = ~5760 candles
                         start_date = end_date - timedelta(days=days)
                         
-                         data = await self.exchange_manager.get_historical_data(
-                             symbol, timeframe, start_date, end_date
-                         )
-                         
-                         if data is not None and len(data) > 50:
-                        features, labels = self._prepare_training_data(data)
-                        if len(features) > 0:
-                            all_features.extend(features)
-                            all_labels.extend(labels)
-                            logger.info(f"📊 {symbol}-{timeframe}: {len(features)} training samples")
+                        data = await self.exchange_manager.get_historical_data(
+                            symbol, timeframe, start_date, end_date
+                        )
+                        
+                        if data is not None and len(data) > 50:
+                            features, labels = self._prepare_training_data(data)
+                            if len(features) > 0:
+                                all_features.extend(features)
+                                all_labels.extend(labels)
+                                logger.info(f"📊 {symbol}-{timeframe}: {len(features)} training samples")
                     
                     except Exception as e:
                         logger.warning(f"⚠️ Training data error for {symbol}-{timeframe}: {e}")
