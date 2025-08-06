@@ -44,8 +44,17 @@ class BacktestRunner:
             self.db_manager = DatabaseManager(self.config.config.get('database', {}))
             await self.db_manager.initialize()
             
-            # Initialize exchange manager
-            self.exchange_manager = ExchangeManager(self.config.config.get('exchanges', {}))
+            # Initialize exchange manager with proper config dict
+            exchanges_config = self.config.config.get('exchanges', {
+                'bybit': {
+                    'enabled': True,
+                    'testnet': False,
+                    'api_key': '',
+                    'secret': ''
+                }
+            })
+            logger.info(f"🔧 Exchange config type: {type(exchanges_config)}")
+            self.exchange_manager = ExchangeManager(exchanges_config)
             await self.exchange_manager.initialize()
             
             # Initialize AI components
