@@ -66,9 +66,14 @@ class ExchangeManager:
                 logger.warning(f"⚠️ Unsupported exchange: {exchange_name}")
                 return
             
+            # Debug API credentials
+            api_key = config.get('api_key', '')
+            secret = config.get('secret', '')
+            logger.debug(f"🔐 {exchange_name} credentials: apiKey={bool(api_key)}, secret={bool(secret)}")
+            
             exchange = exchange_class({
-                'apiKey': config.get('api_key', ''),
-                'secret': config.get('api_secret', ''),
+                'apiKey': api_key,
+                'secret': secret,
                 'password': config.get('passphrase', ''),  # OKX için
                 'sandbox': config.get('sandbox', True),  # Paper trading için
                 'enableRateLimit': True,
