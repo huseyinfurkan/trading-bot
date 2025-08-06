@@ -308,8 +308,8 @@ class LiveDataEngine:
                 'data_quality': {
                     'data_points': len(dataframe) if dataframe is not None else 0,
                     'spread_pct': live_data.get('spread_pct', 0) if live_data else 0,
-                    'orderbook_depth': len(live_data.get('orderbook', {}).get('bids', [])) if live_data else 0,
-                    'recent_trades_count': len(live_data.get('recent_trades', [])) if live_data else 0
+                    'orderbook_depth': len((live_data.get('orderbook') or {}).get('bids', [])) if live_data else 0,
+                    'recent_trades_count': len(live_data.get('recent_trades') or []) if live_data else 0
                 }
             }
             
