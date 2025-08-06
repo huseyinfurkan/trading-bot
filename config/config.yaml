@@ -7,8 +7,8 @@
 exchanges:
   bybit:
     enabled: true
-    api_key: ""  # .env dosyasından alınacak
-    api_secret: ""  # .env dosyasından alınacak
+    api_key: "YOUR_BYBIT_API_KEY"  # Replace with your actual API key
+    secret: "YOUR_BYBIT_SECRET"  # Replace with your actual secret
     sandbox: true  # Paper trading için true, live için false
     default_type: "spot"  # spot, future, option
     requests_per_second: 10
@@ -17,7 +17,7 @@ exchanges:
   binance:
     enabled: false
     api_key: ""
-    api_secret: ""
+    secret: ""
     sandbox: true
     default_type: "spot"
     requests_per_second: 10
@@ -26,7 +26,7 @@ exchanges:
   okx:
     enabled: false
     api_key: ""
-    api_secret: ""
+    secret: ""
     passphrase: ""
     sandbox: true
     default_type: "spot"

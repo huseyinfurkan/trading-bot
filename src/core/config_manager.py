@@ -117,11 +117,18 @@ class ConfigManager:
                 secret_env = f"{exchange_name.upper()}_SECRET"
                 sandbox_env = f"{exchange_name.upper()}_SANDBOX"
                 
-                if os.getenv(api_key_env):
-                    exchange_config['api_key'] = os.getenv(api_key_env)
+                # Debug API key loading
+                api_key_value = os.getenv(api_key_env)
+                secret_value = os.getenv(secret_env)
+                logger.debug(f"🔍 {exchange_name}: {api_key_env}={bool(api_key_value)}, {secret_env}={bool(secret_value)}")
                 
-                if os.getenv(secret_env):
-                    exchange_config['secret'] = os.getenv(secret_env)
+                if api_key_value:
+                    exchange_config['api_key'] = api_key_value
+                    logger.debug(f"✅ {exchange_name} API key loaded")
+                
+                if secret_value:
+                    exchange_config['secret'] = secret_value
+                    logger.debug(f"✅ {exchange_name} secret loaded")
                 
                 if os.getenv(sandbox_env):
                     exchange_config['sandbox'] = os.getenv(sandbox_env).lower() == 'true'
