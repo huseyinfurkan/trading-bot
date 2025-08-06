@@ -84,12 +84,13 @@ class LiveDataEngine:
                     market_data = await self.exchange_manager.get_real_time_data(symbol)
                     
                     if market_data:
+                        logger.debug(f"✅ {symbol} real-time data OK: ${market_data.get('price', 'N/A')}")
                         # Get historical data for analysis (last 200 periods)
                         historical_data = await self.exchange_manager.get_market_data(
                             symbol, timeframe='1m', limit=200
                         )
                         
-                        if historical_data:
+                        if historical_data and historical_data.get('dataframe') is not None:
                             # Combine real-time with historical
                             combined_data = {
                                 'symbol': symbol,
@@ -114,6 +115,10 @@ class LiveDataEngine:
                             if self.analysis_count % 10 == 0:
                                 logger.debug(f"📊 {symbol}: ${market_data['price']:.4f} "
                                            f"(24h: {market_data.get('change_pct_24h', 0):+.2f}%)")
+                        else:
+                            logger.warning(f"⚠️ {symbol} için historical data bulunamadı veya dataframe eksik")
+                    else:
+                        logger.warning(f"⚠️ {symbol} için real-time data bulunamadı")
                     
                     # Wait before next update (every 10 seconds)
                     await asyncio.sleep(10)
@@ -221,9 +226,9 @@ class LiveDataEngine:
             market_data = {
                 'symbol': symbol,
                 'dataframe': dataframe,
-                'close': live_data['current_price'],
-                'volume': live_data['volume_24h'],
-                'timestamp': live_data['timestamp']
+                'close': live_data.get('current_price', 0) if live_data else 0,
+                'volume': live_data.get('volume_24h', 0) if live_data else 0,
+                'timestamp': live_data.get('timestamp', datetime.now()) if live_data else datetime.now()
             }
             
             # 1. Market Condition Analysis
@@ -253,7 +258,7 @@ class LiveDataEngine:
             return {
                 'symbol': symbol,
                 'timestamp': datetime.now(),
-                'current_price': live_data['current_price'],
+                'current_price': live_data.get('current_price', 0) if live_data else 0,
                 'market_condition': market_condition,
                 'ai_signals': ai_signals,
                 'recommended_strategy': recommended_strategy,
@@ -261,10 +266,10 @@ class LiveDataEngine:
                 'risk_assessment': risk_assessment,
                 'technical_summary': technical_summary,
                 'data_quality': {
-                    'data_points': len(dataframe),
-                    'spread_pct': live_data['spread_pct'],
-                    'orderbook_depth': len(live_data.get('orderbook', {}).get('bids', [])),
-                    'recent_trades_count': len(live_data.get('recent_trades', []))
+                    'data_points': len(dataframe) if dataframe is not None else 0,
+                    'spread_pct': live_data.get('spread_pct', 0) if live_data else 0,
+                    'orderbook_depth': len(live_data.get('orderbook', {}).get('bids', [])) if live_data else 0,
+                    'recent_trades_count': len(live_data.get('recent_trades', [])) if live_data else 0
                 }
             }
             

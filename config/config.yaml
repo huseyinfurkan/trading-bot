@@ -269,7 +269,7 @@ monitoring:
 # LOGGING
 # =============================================================================
 logging:
-  level: "INFO"                 # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "DEBUG"                # DEBUG, INFO, WARNING, ERROR, CRITICAL
   file_path: "logs/trading_bot.log"
   max_bytes: 10485760           # 10MB
   backup_count: 5
