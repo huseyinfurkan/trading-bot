@@ -124,7 +124,10 @@ class ExchangeManager:
                 'min_interval': 1.0 / config.get('requests_per_second', 10)
             }
             
-            logger.success(f"✅ {exchange_name} connected (mock mode: invalid API key)")
+            if hasattr(exchange, '_public_only') and exchange._public_only:
+                logger.success(f"✅ {exchange_name} connected (public data only)")
+            else:
+                logger.success(f"✅ {exchange_name} connected successfully")
             
         except Exception as e:
             logger.error(f"❌ {exchange_name} connection failed: {e}")

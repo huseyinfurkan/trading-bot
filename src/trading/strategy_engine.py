@@ -477,24 +477,65 @@ class StrategyEngine:
             best_result = None
             best_roi = -float('inf')
             
-            # Grid search (simplified)
+            # Real Grid search with parameter combinations
             ranges = param_ranges[strategy]
+            param_names = list(ranges.keys())
+            param_values = list(ranges.values())
             
-            # Test a few combinations
-            for i in range(min(5, len(ranges.get(list(ranges.keys())[0], [])))):
-                # Run backtest with different parameters
-                result = await self.backtest_strategy(symbol, strategy, historical_data)
+            import itertools
+            combinations = list(itertools.product(*param_values))
+            
+            tested_combinations = 0
+            logger.info(f"🔧 Testing {len(combinations)} parameter combinations")
+            
+            # Test each combination
+            for combination in combinations[:20]:  # Limit to 20 tests for speed
+                tested_combinations += 1
                 
-                if 'roi' in result and result['roi'] > best_roi:
+                # Create parameter dict
+                params = dict(zip(param_names, combination))
+                logger.debug(f"🧪 Testing combination {tested_combinations}: {params}")
+                
+                # Run backtest with these parameters
+                result = await self._backtest_with_params(symbol, strategy, historical_data, params)
+                
+                if result and 'roi' in result and result['roi'] > best_roi:
                     best_roi = result['roi']
-                    best_result = result
+                    best_result = result.copy()
+                    best_result['best_params'] = params
+                    logger.info(f"🎯 New best ROI: {best_roi:.2%} with {params}")
             
             if best_result:
                 best_result['optimization'] = 'completed'
-                best_result['tested_combinations'] = min(5, len(ranges.get(list(ranges.keys())[0], [])))
+                best_result['tested_combinations'] = tested_combinations
+                logger.success(f"✅ Optimization completed: {tested_combinations} combinations tested")
+            else:
+                best_result = {'error': 'No profitable combinations found', 'tested_combinations': tested_combinations}
             
-            return best_result or {'error': 'Optimization failed'}
+            return best_result
             
         except Exception as e:
             logger.error(f"❌ Parameter optimization error: {e}")
             return {'error': str(e)}
+    
+    async def _backtest_with_params(self, symbol: str, strategy: str, 
+                                   historical_data: pd.DataFrame, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Run backtest with specific parameters"""
+        try:
+            # Temporarily store original strategy parameters
+            original_params = getattr(self, f"{strategy}_params", {})
+            
+            # Update strategy parameters
+            setattr(self, f"{strategy}_params", params)
+            
+            # Run backtest
+            result = await self.backtest_strategy(symbol, strategy, historical_data)
+            
+            # Restore original parameters
+            setattr(self, f"{strategy}_params", original_params)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Backtest with params error: {e}")
+            return None

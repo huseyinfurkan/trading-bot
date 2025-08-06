@@ -576,11 +576,193 @@ class AISignalFilter:
     async def _load_existing_models(self):
         """Mevcut modelleri yükle"""
         try:
-            # Mock implementation - gerçekte modeller disk'ten yüklenecek
-            logger.info("📁 Model loading skipped (mock mode)")
+            import os
+            model_dir = "models"
+            os.makedirs(model_dir, exist_ok=True)
             
+            # Check for existing models
+            gb_path = f"{model_dir}/gradient_boosting_model.joblib"
+            rf_path = f"{model_dir}/random_forest_model.joblib"
+            
+            if os.path.exists(gb_path) and os.path.exists(rf_path):
+                import joblib
+                self.gb_model = joblib.load(gb_path)
+                self.rf_model = joblib.load(rf_path)
+                logger.success("✅ Pre-trained models loaded successfully")
+            else:
+                logger.info("🎓 No existing models found, will train new ones")
+                await self._train_models()
+                
         except Exception as e:
             logger.error(f"❌ Model loading error: {e}")
+            logger.info("🎓 Training new models as fallback")
+            await self._train_models()
+    
+    async def _train_models(self):
+        """Train ML models with historical data"""
+        try:
+            logger.info("🎓 Starting ML model training...")
+            
+            # Get training data from multiple symbols
+            symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
+            all_features = []
+            all_labels = []
+            
+            for symbol in symbols:
+                try:
+                    # Get historical data for training (last 30 days)
+                    from datetime import datetime, timedelta
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=30)
+                    
+                    data = await self.exchange_manager.get_historical_data(
+                        symbol, '1h', start_date, end_date
+                    )
+                    
+                    if data is not None and len(data) > 50:
+                        features, labels = self._prepare_training_data(data)
+                        if len(features) > 0:
+                            all_features.extend(features)
+                            all_labels.extend(labels)
+                            logger.info(f"📊 {symbol}: {len(features)} training samples")
+                
+                except Exception as e:
+                    logger.warning(f"⚠️ Training data error for {symbol}: {e}")
+            
+            if len(all_features) > 100:  # Need minimum samples
+                await self._train_and_save_models(all_features, all_labels)
+            else:
+                logger.warning("⚠️ Insufficient training data, using default models")
+                self._create_default_models()
+                
+        except Exception as e:
+            logger.error(f"❌ Model training error: {e}")
+            self._create_default_models()
+    
+    def _prepare_training_data(self, data):
+        """Prepare features and labels from historical data"""
+        import pandas as pd
+        import numpy as np
+        
+        try:
+            if len(data) < 20:
+                return [], []
+            
+            # Calculate technical indicators
+            data['sma_10'] = data['close'].rolling(10).mean()
+            data['sma_20'] = data['close'].rolling(20).mean()
+            data['rsi'] = self._calculate_rsi(data['close'])
+            data['bb_upper'], data['bb_lower'] = self._calculate_bollinger_bands(data['close'])
+            
+            # Calculate future returns for labels (1-hour forward)
+            data['future_return'] = data['close'].shift(-1) / data['close'] - 1
+            
+            # Remove NaN values
+            data = data.dropna()
+            
+            if len(data) < 10:
+                return [], []
+            
+            # Features: technical indicators
+            features = []
+            labels = []
+            
+            for i in range(len(data)):
+                feature_row = [
+                    data.iloc[i]['rsi'],
+                    (data.iloc[i]['close'] - data.iloc[i]['sma_10']) / data.iloc[i]['sma_10'],
+                    (data.iloc[i]['close'] - data.iloc[i]['sma_20']) / data.iloc[i]['sma_20'],
+                    (data.iloc[i]['close'] - data.iloc[i]['bb_lower']) / (data.iloc[i]['bb_upper'] - data.iloc[i]['bb_lower']),
+                    data.iloc[i]['volume'] / data['volume'].rolling(20).mean().iloc[i] if data['volume'].rolling(20).mean().iloc[i] > 0 else 1
+                ]
+                
+                # Label: 1 if profitable (>0.1%), 0 otherwise
+                label = 1 if data.iloc[i]['future_return'] > 0.001 else 0
+                
+                if not np.isnan(feature_row).any():
+                    features.append(feature_row)
+                    labels.append(label)
+            
+            return features, labels
+            
+        except Exception as e:
+            logger.error(f"❌ Data preparation error: {e}")
+            return [], []
+    
+    async def _train_and_save_models(self, features, labels):
+        """Train and save ML models"""
+        try:
+            from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+            from sklearn.model_selection import train_test_split
+            from sklearn.preprocessing import StandardScaler
+            import joblib
+            import numpy as np
+            
+            X = np.array(features)
+            y = np.array(labels)
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train Gradient Boosting
+            self.gb_model = GradientBoostingClassifier(n_estimators=100, random_state=42)
+            self.gb_model.fit(X_train_scaled, y_train)
+            gb_score = self.gb_model.score(X_test_scaled, y_test)
+            
+            # Train Random Forest
+            self.rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+            self.rf_model.fit(X_train_scaled, y_train)
+            rf_score = self.rf_model.score(X_test_scaled, y_test)
+            
+            # Save models
+            import os
+            model_dir = "models"
+            os.makedirs(model_dir, exist_ok=True)
+            
+            joblib.dump(self.gb_model, f"{model_dir}/gradient_boosting_model.joblib")
+            joblib.dump(self.rf_model, f"{model_dir}/random_forest_model.joblib")
+            joblib.dump(scaler, f"{model_dir}/scaler.joblib")
+            
+            logger.success(f"✅ Models trained and saved! GB: {gb_score:.3f}, RF: {rf_score:.3f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Model training error: {e}")
+            self._create_default_models()
+    
+    def _create_default_models(self):
+        """Create simple default models"""
+        from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+        
+        # Create untrained models with default parameters
+        self.gb_model = GradientBoostingClassifier(n_estimators=50, random_state=42)
+        self.rf_model = RandomForestClassifier(n_estimators=50, random_state=42)
+        logger.info("📊 Default models created")
+    
+    def _calculate_rsi(self, prices, period=14):
+        """Calculate RSI indicator"""
+        import pandas as pd
+        
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_bollinger_bands(self, prices, period=20, std_dev=2):
+        """Calculate Bollinger Bands"""
+        import pandas as pd
+        
+        sma = prices.rolling(window=period).mean()
+        std = prices.rolling(window=period).std()
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        return upper_band, lower_band
     
     async def get_signal_history(self, symbol: str, days: int = 7) -> List[Dict[str, Any]]:
         """Sinyal geçmişi"""
