@@ -45,7 +45,7 @@ class BacktestRunner:
             await self.db_manager.initialize()
             
             # Initialize exchange manager
-            self.exchange_manager = ExchangeManager(self.config)
+            self.exchange_manager = ExchangeManager(self.config.config.get('exchanges', {}))
             await self.exchange_manager.initialize()
             
             # Initialize AI components

@@ -101,10 +101,14 @@ class AdaptiveStrategyEngine:
             # Enhanced regime determination
             regime = self._determine_optimal_regime(analysis)
             
-            logger.info(f"📊 {symbol} Market Regime: {regime} | Vol: {analysis['volatility']:.3f} | Range: {analysis.get('range_analysis', 'N/A')}")
+            # SELECT OPTIMAL STRATEGY FOR THIS SPECIFIC SYMBOL
+            optimal_strategy = self._select_optimal_strategy(regime, analysis)
+            
+            logger.info(f"📊 {symbol} Market Regime: {regime} | Vol: {analysis['volatility']:.3f} | Range: {analysis.get('range_analysis', 'N/A')} | Strategy: {optimal_strategy}")
             
             return {
                 'regime': regime,
+                'best_strategy': optimal_strategy,
                 'confidence': analysis['confidence'],
                 'volatility': analysis['volatility'],
                 'trend_strength': analysis['trend_strength'],

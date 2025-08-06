@@ -269,7 +269,7 @@ class LiveDataEngine:
             
             # 3. NEW: Adaptive Market Regime Analysis & Strategy Selection
             market_regime = await self.strategy_engine.analyze_market_regime(symbol)
-            recommended_strategy = market_regime.get('best_strategy', 'mean_reversion_adaptive')
+            recommended_strategy = market_regime.get('best_strategy', 'bollinger_rsi_stochrsi')
             
             # Get actual trading signal from adaptive strategy
             strategy_signal = await self.strategy_engine.get_entry_signal(
