@@ -146,7 +146,7 @@ class AISignalFilter:
             else:
                 features_scaled = [features]
             
-            # Predict signal probability
+            # Predict signal probability and direction
             signal_prob = model.predict_proba(features_scaled)[0]
             signal_confidence = max(signal_prob)
             predicted_signal = 1 if signal_prob[1] > signal_prob[0] else 0
@@ -155,8 +155,20 @@ class AISignalFilter:
             regime_multiplier = self._get_regime_multiplier(regime)
             final_confidence = signal_confidence * regime_multiplier
             
-            # Generate filtered signal
-            signal_type = "BUY" if predicted_signal == 1 and final_confidence > 0.65 else "HOLD"
+            # Enhanced signal generation with BUY/SELL/HOLD support
+            if predicted_signal == 1 and final_confidence > 0.5:
+                # Check market conditions to determine BUY vs SELL
+                price_momentum = market_data.get('price_change_1h', 0)
+                rsi = market_data.get('rsi_14', 50)
+                
+                if rsi < 40 or price_momentum < -0.01:  # Oversold or downward momentum
+                    signal_type = "BUY"  # Potential bounce
+                elif rsi > 60 or price_momentum > 0.01:  # Overbought or upward momentum  
+                    signal_type = "SELL"  # Potential reversal
+                else:
+                    signal_type = "BUY"  # Default to BUY if unclear
+            else:
+                signal_type = "HOLD"
             
             result = {
                 'signal': signal_type,

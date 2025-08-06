@@ -112,7 +112,7 @@ class AdaptiveStrategyEngine:
                 'confidence': analysis['confidence'],
                 'volatility': analysis['volatility'],
                 'trend_strength': analysis['trend_strength'],
-                'recommended_strategy': self._select_optimal_strategy(regime, analysis)
+                'recommended_strategy': optimal_strategy  # Use already calculated value instead of calling again
             }
             
         except Exception as e:
@@ -298,12 +298,14 @@ class AdaptiveStrategyEngine:
             current_sma20 = sma_20.iloc[-1] if not pd.isna(sma_20.iloc[-1]) else current_price
             current_sma50 = sma_50.iloc[-1] if not pd.isna(sma_50.iloc[-1]) else current_price
             
-            # SIMPLE TREND CONDITIONS
-            # LONG: Price > SMA10 > SMA20 > SMA50 (clear uptrend)
-            strong_uptrend = (current_price > current_sma10 > current_sma20 > current_sma50)
+            # IMPROVED TREND CONDITIONS (more flexible)
+            # LONG: Strong alignment with price momentum
+            strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20)  # More flexible
+            uptrend_momentum = (current_price > current_sma20 and sma10_rising)  # Alternative condition
             
-            # SHORT: Price < SMA10 < SMA20 < SMA50 (clear downtrend)  
-            strong_downtrend = (current_price < current_sma10 < current_sma20 < current_sma50)
+            # SHORT: Strong downward alignment with price momentum  
+            strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20)  # More flexible
+            downtrend_momentum = (current_price < current_sma20 and sma10_falling)  # Alternative condition
             
             # Momentum confirmation
             sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
@@ -317,15 +319,15 @@ class AdaptiveStrategyEngine:
                 if current_vol > vol_ma.iloc[-1] * 1.2:  # 20% above average
                     volume_boost = 0.15
             
-            if strong_uptrend and sma10_rising:
+            if strong_uptrend or uptrend_momentum:  # More flexible entry conditions
                 confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
                 return {
                     'action': 'BUY',
                     'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
                     'entry_price': current_price,
                     'reasons': [
-                        "Strong uptrend: Price > SMA10 > SMA20 > SMA50",
-                        "SMA10 rising momentum",
+                        "Uptrend detected: Price > SMA10 > SMA20" if strong_uptrend else "Uptrend momentum: Price > SMA20 + SMA10 rising",
+                        "SMA10 rising momentum" if sma10_rising else "Price above key MA",
                         f"Volume boost: {volume_boost:.2f}" if volume_boost > 0 else "No volume boost"
                     ],
                     'strategy': 'Alligator Trend Following (LONG)',
@@ -334,15 +336,15 @@ class AdaptiveStrategyEngine:
                     'take_profit': current_price * 1.08,  # 8% target
                     'research_basis': '15m trend following'
                 }
-            elif strong_downtrend and sma10_falling:
+            elif strong_downtrend or downtrend_momentum:  # More flexible entry conditions
                 confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
                 return {
                     'action': 'SELL',
                     'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
                     'entry_price': current_price,
                     'reasons': [
-                        "Strong downtrend: Price < SMA10 < SMA20 < SMA50",
-                        "SMA10 falling momentum", 
+                        "Downtrend detected: Price < SMA10 < SMA20" if strong_downtrend else "Downtrend momentum: Price < SMA20 + SMA10 falling",
+                        "SMA10 falling momentum" if sma10_falling else "Price below key MA", 
                         f"Volume boost: {volume_boost:.2f}" if volume_boost > 0 else "No volume boost"
                     ],
                     'strategy': 'Alligator Trend Following (SHORT)',

@@ -24,7 +24,6 @@ from src.core.live_data_engine import LiveDataEngine
 
 # Trading modules
 from src.trading.exchange_manager import ExchangeManager
-from src.trading.strategy_engine import StrategyEngine
 from src.trading.position_manager import PositionManager
 
 # AI modules
