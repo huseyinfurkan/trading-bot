@@ -110,6 +110,26 @@ class DatabaseManager:
                 )
             """)
             
+            # Trades table
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    size REAL NOT NULL,
+                    price REAL NOT NULL,
+                    pnl REAL DEFAULT 0,
+                    strategy TEXT,
+                    confidence REAL,
+                    exchange TEXT,
+                    order_id TEXT,
+                    position_id INTEGER,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (position_id) REFERENCES positions (id)
+                )
+            """)
+            
             # Performance stats table
             await self.connection.execute("""
                 CREATE TABLE IF NOT EXISTS performance_stats (
@@ -133,6 +153,7 @@ class DatabaseManager:
             await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)")
             await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, timestamp)")
             await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_symbol_time ON signals(symbol, timestamp)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol_time ON trades(symbol, timestamp)")
             
             await self.connection.commit()
             logger.info("✅ Database tables created/verified")

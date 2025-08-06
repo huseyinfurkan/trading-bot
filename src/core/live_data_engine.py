@@ -96,8 +96,8 @@ class LiveDataEngine:
                                 'current_price': market_data['price'],
                                 'bid': market_data.get('bid'),
                                 'ask': market_data.get('ask'),
-                                'spread_pct': market_data.get('spread_pct', 0),
-                                'volume_24h': market_data.get('volume_24h'),
+                                'spread_pct': self._calculate_spread_pct(market_data),
+                                'volume_24h': market_data.get('volume', 0),
                                 'change_24h': market_data.get('change_24h'),
                                 'change_pct_24h': market_data.get('change_pct_24h'),
                                 'orderbook': market_data.get('orderbook'),
@@ -510,3 +510,14 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Live status hatası: {e}")
             return {'status': 'ERROR', 'error': str(e)}
+    
+    def _calculate_spread_pct(self, market_data: Dict) -> float:
+        """Spread yüzdesini hesapla"""
+        try:
+            bid = market_data.get('bid', 0)
+            ask = market_data.get('ask', 0)
+            if bid > 0 and ask > 0:
+                return ((ask - bid) / bid) * 100
+            return 0.0
+        except:
+            return 0.0
