@@ -120,12 +120,12 @@ class AdvancedTradingBot:
                 self.db_manager
             )
             
-            # Initialize trading components
-            self.strategy_engine = StrategyEngine(
+            # Initialize NEW adaptive trading components
+            from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
+            self.strategy_engine = AdaptiveStrategyEngine(
                 self.config.get('strategies', {}),
-                self.ai_signal_filter,
-                self.market_analyzer,
-                self.confidence_calculator
+                self.exchange_manager,
+                self.ai_signal_filter
             )
             
             self.position_manager = PositionManager(

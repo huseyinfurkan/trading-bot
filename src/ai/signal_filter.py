@@ -611,31 +611,36 @@ class AISignalFilter:
                 self._create_default_models()
                 return
             
-            # Get training data from multiple symbols
+            # Get training data from multiple symbols and timeframes
             symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
+            # Different timeframes for different strategies
+            timeframes = ['15m', '1h']  # Volatility breakout (15m) and Mean reversion (1h)
             all_features = []
             all_labels = []
             
             for symbol in symbols:
-                try:
-                    # Get historical data for training (last 150 days = ~5 months)
-                    from datetime import datetime, timedelta
-                    end_date = datetime.now()
-                    start_date = end_date - timedelta(days=150)
-                    
-                    data = await self.exchange_manager.get_historical_data(
-                        symbol, '1h', start_date, end_date
-                    )
-                    
-                    if data is not None and len(data) > 50:
+                for timeframe in timeframes:
+                    try:
+                        # Get historical data for training (last 150 days = ~5 months)
+                        from datetime import datetime, timedelta
+                        end_date = datetime.now()
+                        # Adjust days based on timeframe for similar data points
+                        days = 150 if timeframe == '1h' else 60  # 60 days of 15m = ~5760 candles
+                        start_date = end_date - timedelta(days=days)
+                        
+                         data = await self.exchange_manager.get_historical_data(
+                             symbol, timeframe, start_date, end_date
+                         )
+                         
+                         if data is not None and len(data) > 50:
                         features, labels = self._prepare_training_data(data)
                         if len(features) > 0:
                             all_features.extend(features)
                             all_labels.extend(labels)
-                            logger.info(f"📊 {symbol}: {len(features)} training samples")
-                
-                except Exception as e:
-                    logger.warning(f"⚠️ Training data error for {symbol}: {e}")
+                            logger.info(f"📊 {symbol}-{timeframe}: {len(features)} training samples")
+                    
+                    except Exception as e:
+                        logger.warning(f"⚠️ Training data error for {symbol}-{timeframe}: {e}")
             
             if len(all_features) > 100:  # Need minimum samples
                 await self._train_and_save_models(all_features, all_labels)

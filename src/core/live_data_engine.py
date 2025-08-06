@@ -267,13 +267,14 @@ class LiveDataEngine:
                 ai_signals = {'confidence': 0.0, 'signals': [], 'strength': 0.0}
                 logger.warning(f"⚠️ {symbol} AI signals None döndü, default değerler kullanılıyor")
             
-            # 3. Strategy Selection
-            recommended_strategy = await self.strategy_engine.select_strategy(
-                symbol, market_condition, ai_signals.get('confidence', 0)
-            )
-            if recommended_strategy is None:
-                recommended_strategy = 'scalping'  # Default strategy
-                logger.warning(f"⚠️ {symbol} strategy selection None döndü, scalping kullanılıyor")
+            # 3. NEW: Adaptive Market Regime Analysis & Strategy Selection
+            market_regime = await self.strategy_engine.analyze_market_regime(symbol)
+            recommended_strategy = market_regime.get('best_strategy', 'mean_reversion_adaptive')
+            
+            # Get actual trading signal from adaptive strategy
+            strategy_signal = await self.strategy_engine.get_strategy_signal(symbol, market_regime)
+            if strategy_signal is None:
+                logger.debug(f"📊 {symbol} no trading signal from adaptive strategy")
             
             # 4. Risk Assessment
             risk_assessment = await self._assess_current_risk(symbol, live_data)
@@ -299,9 +300,10 @@ class LiveDataEngine:
                 'symbol': symbol,
                 'timestamp': datetime.now(),
                 'current_price': live_data.get('current_price', 0) if live_data else 0,
-                'market_condition': market_condition,
+                'market_condition': market_regime,  # Now contains real regime analysis
                 'ai_signals': ai_signals,
                 'recommended_strategy': recommended_strategy,
+                'strategy_signal': strategy_signal,  # New: actual trading signal from adaptive engine
                 'entry_signal': entry_signal,
                 'risk_assessment': risk_assessment,
                 'technical_summary': technical_summary,
