@@ -344,7 +344,7 @@ class AdaptiveStrategyEngine:
             exit_condition = ((current_fast_sma < current_slow_sma and current_price < current_teeth) or 
                             current_price < current_sma200)
             
-            if entry_strength >= 0.7:  # Strong bullish signal
+            if entry_strength >= 0.6:  # Strong bullish signal (lowered from 0.7)
                 return {
                     'action': 'BUY',
                     'confidence': min(0.95, entry_strength),
@@ -592,10 +592,22 @@ class AdaptiveStrategyEngine:
                         # Default to bollinger strategy
                         signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     
-                    if signal['action'] == 'BUY' and signal['confidence'] > 0.7:
-                        # Enter position
-                        risk_per_trade = 0.02  # 2% risk per trade
-                        position_value = capital * risk_per_trade * 5  # 5x leverage simulation
+                    if signal['action'] == 'BUY' and signal['confidence'] > 0.6:
+                        # Enter position with strategy-specific sizing
+                        if actual_strategy == 'alligator_ma_momentum':
+                            # Conservative sizing for 4h trend following
+                            risk_per_trade = 0.015  # 1.5% risk
+                            leverage = 2.0  # Lower leverage for longer holds
+                        elif actual_strategy == 'bollinger_rsi_stochrsi':
+                            # More active sizing for 15m mean reversion
+                            risk_per_trade = 0.01   # 1% risk 
+                            leverage = 3.0  # Moderate leverage for quick trades
+                        else:
+                            # Default sizing
+                            risk_per_trade = 0.015
+                            leverage = 2.0
+                        
+                        position_value = capital * risk_per_trade * leverage
                         position_size = position_value / current_price
                         position = 'LONG'
                         entry_price = current_price
@@ -603,26 +615,45 @@ class AdaptiveStrategyEngine:
                         logger.debug(f"📈 Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
                 
                 else:  # Have position
-                    # Check exit conditions
+                    # Check exit conditions - Strategy-specific logic
                     pnl_pct = (current_price - entry_price) / entry_price
                     
                     should_exit = False
                     exit_reason = ""
                     
-                    # Profit target
-                    if pnl_pct > 0.03:  # 3% profit
-                        should_exit = True
-                        exit_reason = "Profit target"
+                    # Strategy-specific exit conditions
+                    if actual_strategy == 'alligator_ma_momentum':
+                        # Alligator strategy: longer holds, wider targets
+                        if pnl_pct > 0.06:  # 6% profit target (research-based)
+                            should_exit = True
+                            exit_reason = "Profit target"
+                        elif pnl_pct < -0.03:  # 3% stop loss
+                            should_exit = True
+                            exit_reason = "Stop loss"
+                        elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
+                            should_exit = True
+                            exit_reason = "Time limit"
                     
-                    # Stop loss
-                    elif pnl_pct < -0.015:  # 1.5% loss
-                        should_exit = True
-                        exit_reason = "Stop loss"
+                    elif actual_strategy == 'bollinger_rsi_stochrsi':
+                        # Bollinger strategy: quicker exits, tighter targets
+                        if pnl_pct > 0.025:  # 2.5% profit target
+                            should_exit = True
+                            exit_reason = "Profit target"
+                        elif pnl_pct < -0.015:  # 1.5% stop loss
+                            should_exit = True
+                            exit_reason = "Stop loss"
+                        elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
+                            should_exit = True
+                            exit_reason = "Time limit"
                     
-                    # Time-based exit
-                    elif i - len([t for t in trades if t['exit_price'] == 0]) > params['max_hold_hours']:
-                        should_exit = True
-                        exit_reason = "Time limit"
+                    else:
+                        # Default exit conditions
+                        if pnl_pct > 0.04:  # 4% profit
+                            should_exit = True
+                            exit_reason = "Profit target"
+                        elif pnl_pct < -0.02:  # 2% loss
+                            should_exit = True
+                            exit_reason = "Stop loss"
                     
                     if should_exit:
                         # Exit position
