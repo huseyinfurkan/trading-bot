@@ -146,28 +146,21 @@ class AISignalFilter:
             else:
                 features_scaled = [features]
             
-            # Predict signal probability and direction
+            # Predict signal probability and direction (3-class)
             signal_prob = model.predict_proba(features_scaled)[0]
             signal_confidence = max(signal_prob)
-            predicted_signal = 1 if signal_prob[1] > signal_prob[0] else 0
+            predicted_class = model.predict(features_scaled)[0]  # 0=HOLD, 1=SELL, 2=BUY
             
             # Analyze signal strength based on market regime
             regime_multiplier = self._get_regime_multiplier(regime)
             final_confidence = signal_confidence * regime_multiplier
             
-            # Enhanced signal generation with BUY/SELL/HOLD support
-            if predicted_signal == 1 and final_confidence > 0.5:
-                # Check market conditions to determine BUY vs SELL
-                price_momentum = market_data.get('price_change_1h', 0)
-                rsi = market_data.get('rsi_14', 50)
-                
-                if rsi < 40 or price_momentum < -0.01:  # Oversold or downward momentum
-                    signal_type = "BUY"  # Potential bounce
-                elif rsi > 60 or price_momentum > 0.01:  # Overbought or upward momentum  
-                    signal_type = "SELL"  # Potential reversal
-                else:
-                    signal_type = "BUY"  # Default to BUY if unclear
-            else:
+            # Enhanced 3-class signal generation
+            if predicted_class == 2 and final_confidence > 0.5:  # BUY
+                signal_type = "BUY"
+            elif predicted_class == 1 and final_confidence > 0.5:  # SELL
+                signal_type = "SELL"
+            else:  # HOLD or low confidence
                 signal_type = "HOLD"
             
             result = {
@@ -835,17 +828,23 @@ class AISignalFilter:
                 long_target = 0.1
             
             # DEFINE TRAINING TARGET DYNAMICALLY
-            logger.info("🎯 ML Training Target Definition:")
-            logger.info("   📈 Predicting: Profitable price movements")
+            logger.info("🎯 ML Training Target Definition (3-Class):")
+            logger.info("   📈 Predicting: BUY/SELL/HOLD signals")
             logger.info(f"   ⏰ Timeframe: {timeframe_type} detected")
-            logger.info(f"   💰 Profitability: >{short_target:.1%} in {short_period} periods AND >{long_target:.1%} in {long_period} periods")
-            logger.info("   🎯 Label 1: Both conditions met (BUY signal)")
-            logger.info("   🎯 Label 0: Conditions not met (NO BUY)")
+            logger.info(f"   💰 BUY: >{short_target:.1%} in {short_period} periods AND >{long_target:.1%} in {long_period} periods (LONG)")
+            logger.info(f"   💸 SELL: >{short_target:.1%} in {short_period} periods AND >{long_target:.1%} in {long_period} periods (SHORT)")
+            logger.info("   🎯 Label 2: BUY signal (profitable LONG)")
+            logger.info("   🎯 Label 1: SELL signal (profitable SHORT)")
+            logger.info("   🎯 Label 0: HOLD signal (no clear direction)")
             
-            # CALCULATE FUTURE RETURNS FIRST (before any feature engineering)
+            # CALCULATE FUTURE RETURNS FOR BOTH DIRECTIONS
             df = df.copy()  # Work with copy to avoid modifying original
             df['future_return_short'] = df['close'].shift(-short_period) / df['close'] - 1
             df['future_return_long'] = df['close'].shift(-long_period) / df['close'] - 1
+            
+            # Calculate negative returns for SELL signals (SHORT positions)
+            df['future_return_short_sell'] = -(df['future_return_short'])  # Negative return = profit for SHORT
+            df['future_return_long_sell'] = -(df['future_return_long'])    # Negative return = profit for SHORT
             
             # Enhanced feature engineering
             feature_columns = [
@@ -915,28 +914,41 @@ class AISignalFilter:
                         val = 0
                     feature_row.append(val)
                 
-                # Target: Future returns (TIMEFRAME-ADAPTIVE)
+                # Target: Future returns (MULTI-CLASS: BUY/HOLD/SELL)
                 future_short = df.iloc[i]['future_return_short']
                 future_long = df.iloc[i]['future_return_long']
+                future_short_sell = df.iloc[i]['future_return_short_sell']
+                future_long_sell = df.iloc[i]['future_return_long_sell']
                 
-                # CONSERVATIVE LABELING: Require consistent profitability based on timeframe
-                # Label 1: short_period return > short_target AND long_period return > long_target
-                # Label 0: Otherwise (safer approach)
-                label = 1 if (future_short > short_target/100 and future_long > long_target/100) else 0
+                # 3-CLASS LABELING: BUY=2, SELL=1, HOLD=0
+                # BUY signal: Both long conditions met for upward movement
+                buy_signal = (future_short > short_target/100 and future_long > long_target/100)
+                
+                # SELL signal: Both conditions met for downward movement (profitable SHORT)
+                sell_signal = (future_short_sell > short_target/100 and future_long_sell > long_target/100)
+                
+                if buy_signal:
+                    label = 2  # BUY
+                elif sell_signal:
+                    label = 1  # SELL
+                else:
+                    label = 0  # HOLD
                 
                 if not pd.isna(future_short) and not pd.isna(future_long):
                     features.append(feature_row)
                     labels.append(label)
             
-            # Log training statistics
-            positive_signals = sum(labels)
+            # Log training statistics with 3-class breakdown
+            buy_signals = sum(1 for label in labels if label == 2)
+            sell_signals = sum(1 for label in labels if label == 1) 
+            hold_signals = sum(1 for label in labels if label == 0)
             total_samples = len(labels)
-            positive_ratio = positive_signals / total_samples if total_samples > 0 else 0
             
-            logger.info(f"📊 Training Data Prepared:")
+            logger.info(f"📊 Training Data Prepared (3-Class):")
             logger.info(f"   📈 Total samples: {total_samples}")
-            logger.info(f"   💰 Positive signals (profitable): {positive_signals} ({positive_ratio:.1%})")
-            logger.info(f"   📉 Negative signals (avoid): {total_samples - positive_signals}")
+            logger.info(f"   💰 BUY signals: {buy_signals} ({buy_signals/total_samples*100:.1f}%)")
+            logger.info(f"   💸 SELL signals: {sell_signals} ({sell_signals/total_samples*100:.1f}%)")
+            logger.info(f"   ⏸️ HOLD signals: {hold_signals} ({hold_signals/total_samples*100:.1f}%)")
             logger.info(f"   🔧 Features: {len(feature_columns)} technical indicators")
             
             return features, labels

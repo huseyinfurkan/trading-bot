@@ -209,7 +209,7 @@ class AdaptiveStrategyEngine:
             # Sideways, consolidation, ranging - BB+RSI+StochRSI excels
             return 'bollinger_rsi_stochrsi'
 
-    async def get_entry_signal(self, symbol: str, market_data: Dict, regime: str) -> Dict[str, Any]:
+    async def get_entry_signal(self, symbol: str, market_data: Dict, regime: str, current_df_slice: pd.DataFrame = None) -> Dict[str, Any]:
         """Get entry signal using research-optimized strategies"""
         try:
             # Try to get AI confidence first
@@ -228,15 +228,22 @@ class AdaptiveStrategyEngine:
                 logger.warning(f"⚠️ AI filter error: {e}, using direct strategy signals")
                 ai_analysis = None
             
-            # Select optimal strategy
-            regime_analysis = await self.analyze_market_regime(symbol)
-            recommended_strategy = regime_analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi')
+            # Select optimal strategy (use cached regime analysis if available)
+            if current_df_slice is not None:
+                # BACKTEST MODE: Use provided data, don't fetch fresh data
+                recommended_strategy = 'bollinger_rsi_stochrsi'  # Default during backtest
+                if regime in ['trending_market', 'breakout_market']:
+                    recommended_strategy = 'alligator_ma_momentum'
+            else:
+                # LIVE MODE: Perform full regime analysis
+                regime_analysis = await self.analyze_market_regime(symbol)
+                recommended_strategy = regime_analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi')
             
             # Route to appropriate research-backed strategy
             if recommended_strategy == 'alligator_ma_momentum':
-                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8})
+                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8}, current_df_slice)
             else:
-                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8})
+                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8}, current_df_slice)
             
             # Apply AI filter to final signal (only if AI analysis succeeded)
             if signal['action'] != 'HOLD' and ai_analysis is not None:
@@ -581,7 +588,8 @@ class AdaptiveStrategyEngine:
                     confidence_threshold = custom_params.get('confidence_threshold', 0.5) if custom_params else 0.5  # Reduced from 0.7 to 0.5 for better signal generation
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
-                    signal = await self.get_entry_signal(symbol, market_data, regime)
+                    # IMPORTANT: Pass df slice to prevent API calls during backtest
+                    signal = await self.get_entry_signal(symbol, market_data, regime, current_df_slice=df.iloc[:i+1])
                     
                     # IMPROVED FALLBACK: Always ensure we have a signal, even if AI is not working
                     if signal.get('action') == 'HOLD':
