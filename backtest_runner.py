@@ -192,20 +192,20 @@ class BacktestRunner:
             
             logger.info(f"📊 Base strategy return: {base_return:.2%}")
             
-            # Define parameter variations to test
+            # Define AGGRESSIVE parameter variations for HIGH RETURNS
             if 'alligator' in strategy:
                 param_variations = [
-                    {'profit_target': 0.04, 'stop_loss': 0.02, 'confidence_threshold': 0.6},
-                    {'profit_target': 0.06, 'stop_loss': 0.03, 'confidence_threshold': 0.7},
-                    {'profit_target': 0.08, 'stop_loss': 0.04, 'confidence_threshold': 0.8},
-                    {'profit_target': 0.05, 'stop_loss': 0.025, 'confidence_threshold': 0.75}
+                    {'profit_target': 0.08, 'stop_loss': 0.03, 'confidence_threshold': 0.5},   # Aggressive
+                    {'profit_target': 0.12, 'stop_loss': 0.04, 'confidence_threshold': 0.6},   # Very aggressive  
+                    {'profit_target': 0.15, 'stop_loss': 0.05, 'confidence_threshold': 0.4},   # Ultra aggressive
+                    {'profit_target': 0.10, 'stop_loss': 0.035, 'confidence_threshold': 0.55}  # Balanced aggressive
                 ]
             elif 'bollinger' in strategy:
                 param_variations = [
-                    {'profit_target': 0.02, 'stop_loss': 0.01, 'confidence_threshold': 0.6},
-                    {'profit_target': 0.025, 'stop_loss': 0.015, 'confidence_threshold': 0.7},
-                    {'profit_target': 0.03, 'stop_loss': 0.02, 'confidence_threshold': 0.8},
-                    {'profit_target': 0.035, 'stop_loss': 0.018, 'confidence_threshold': 0.75}
+                    {'profit_target': 0.05, 'stop_loss': 0.02, 'confidence_threshold': 0.5},   # Aggressive
+                    {'profit_target': 0.08, 'stop_loss': 0.025, 'confidence_threshold': 0.6},  # Very aggressive
+                    {'profit_target': 0.10, 'stop_loss': 0.03, 'confidence_threshold': 0.45},  # Ultra aggressive 
+                    {'profit_target': 0.07, 'stop_loss': 0.022, 'confidence_threshold': 0.55}  # Balanced aggressive
                 ]
             else:
                 param_variations = []

@@ -301,43 +301,69 @@ class AdaptiveStrategyEngine:
             # Focus on the most important signals for better performance
             
             above_sma200 = current_price > current_sma200
+            below_sma200 = current_price < current_sma200
             
             # Simplified alligator condition: just lips > teeth > jaw (main trend indicator)
-            alligator_aligned = current_lips > current_teeth > current_jaw
+            alligator_aligned_bullish = current_lips > current_teeth > current_jaw
+            alligator_aligned_bearish = current_lips < current_teeth < current_jaw
             
-            # Price momentum: fast MA above slow MA
+            # Price momentum: fast MA above/below slow MA
             ma_bullish = current_fast_sma > current_slow_sma
+            ma_bearish = current_fast_sma < current_slow_sma
             
             # Calculate line directions (momentum) - simplified
             lips_trending_up = (lips.iloc[-1] - lips.iloc[-2]) if len(lips) >= 2 else 0
+            lips_trending_down = (lips.iloc[-2] - lips.iloc[-1]) if len(lips) >= 2 else 0
             
-            # Entry signal strength - more achievable conditions
-            entry_strength = 0.0
-            reasons = []
+            # LONG Entry signal strength - more achievable conditions
+            long_entry_strength = 0.0
+            long_reasons = []
             
             if above_sma200:
-                entry_strength += 0.4  # Main trend filter
-                reasons.append("Above 200 SMA")
+                long_entry_strength += 0.4  # Main trend filter
+                long_reasons.append("Above 200 SMA")
             
-            if alligator_aligned:
-                entry_strength += 0.3  # Alligator alignment
-                reasons.append("Alligator aligned")
+            if alligator_aligned_bullish:
+                long_entry_strength += 0.3  # Alligator alignment
+                long_reasons.append("Alligator bullish aligned")
             
             if ma_bullish:
-                entry_strength += 0.2  # MA momentum
-                reasons.append("MA bullish")
+                long_entry_strength += 0.2  # MA momentum
+                long_reasons.append("MA bullish")
             
             if lips_trending_up > 0:
-                entry_strength += 0.1  # Trending momentum
-                reasons.append("Upward momentum")
+                long_entry_strength += 0.1  # Trending momentum
+                long_reasons.append("Upward momentum")
+            
+            # SHORT Entry signal strength
+            short_entry_strength = 0.0
+            short_reasons = []
+            
+            if below_sma200:
+                short_entry_strength += 0.4  # Main trend filter
+                short_reasons.append("Below 200 SMA")
+            
+            if alligator_aligned_bearish:
+                short_entry_strength += 0.3  # Alligator alignment
+                short_reasons.append("Alligator bearish aligned")
+            
+            if ma_bearish:
+                short_entry_strength += 0.2  # MA momentum
+                short_reasons.append("MA bearish")
+            
+            if lips_trending_down > 0:
+                short_entry_strength += 0.1  # Trending momentum
+                short_reasons.append("Downward momentum")
             
             # Volume confirmation (if available)
             if 'volume' in data_4h.columns and len(data_4h) > 20:
                 vol_ma = data_4h['volume'].rolling(20).mean()
                 current_vol = data_4h['volume'].iloc[-1]
                 if current_vol > vol_ma.iloc[-1] * 1.1:  # Lowered threshold
-                    entry_strength += 0.1
-                    reasons.append("Volume confirmation")
+                    long_entry_strength += 0.1
+                    short_entry_strength += 0.1
+                    long_reasons.append("Volume confirmation")
+                    short_reasons.append("Volume confirmation")
             
             # RESEARCH EXIT CONDITIONS
             # Exit when: fast_sma crosses below slow_sma AND price below teeth
@@ -345,23 +371,35 @@ class AdaptiveStrategyEngine:
             exit_condition = ((current_fast_sma < current_slow_sma and current_price < current_teeth) or 
                             current_price < current_sma200)
             
-            if entry_strength >= 0.5:  # Lowered from 0.6 for more signals
+            if long_entry_strength >= 0.5:  # LONG signal
                 return {
                     'action': 'BUY',
-                    'confidence': min(0.95, entry_strength),
+                    'confidence': min(0.95, long_entry_strength),
                     'entry_price': current_price,
-                    'reasons': reasons,
-                    'strategy': 'Williams Alligator + MA (Research)',
+                    'reasons': long_reasons,
+                    'strategy': 'Williams Alligator + MA (LONG)',
                     'timeframe': '4h',
-                    'stop_loss': current_jaw * 0.98,  # Below jaw
-                    'take_profit': current_price * 1.06,  # 6% target
+                    'stop_loss': current_jaw * 0.97,  # 3% below jaw (aggressive)
+                    'take_profit': current_price * 1.08,  # 8% target (higher)
+                    'research_basis': '3,452% ETH return (TradeDots)'
+                }
+            elif short_entry_strength >= 0.5:  # SHORT signal
+                return {
+                    'action': 'SELL',
+                    'confidence': min(0.95, short_entry_strength),
+                    'entry_price': current_price,
+                    'reasons': short_reasons,
+                    'strategy': 'Williams Alligator + MA (SHORT)',
+                    'timeframe': '4h',
+                    'stop_loss': current_jaw * 1.03,  # 3% above jaw (aggressive)
+                    'take_profit': current_price * 0.92,  # 8% target (aggressive)
                     'research_basis': '3,452% ETH return (TradeDots)'
                 }
             else:
                 return {
                     'action': 'HOLD',
-                    'confidence': entry_strength,
-                    'reason': f"Conditions not met: {entry_strength:.1%} strength"
+                    'confidence': 0.0,
+                    'reason': 'No trading opportunity found'
                 }
                 
         except Exception as e:
@@ -434,9 +472,9 @@ class AdaptiveStrategyEngine:
                 if volume_ratio > 1.5:  # Above average volume
                     volume_strength = 0.15
             
-            # Signal strength calculation - LONG ONLY for backtesting
+            # Signal strength calculation - BOTH LONG AND SHORT
             if long_rsi_condition and long_stochrsi_condition and long_bb_condition:
-                confidence = 0.6 + volume_strength  # Lowered base confidence
+                confidence = 0.6 + volume_strength  # LONG signal
                 # Additional confluence factors
                 if bb_position < 0.1:  # Very close to lower band
                     confidence += 0.15
@@ -451,21 +489,45 @@ class AdaptiveStrategyEngine:
                         f"RSI oversold: {current_rsi:.1f}",
                         f"StochRSI oversold: {current_stoch_rsi:.1f}",
                         f"At lower BB: {bb_position:.2f}",
-                        "Mean reversion opportunity"
+                        "Mean reversion LONG opportunity"
                     ],
-                    'strategy': 'BB + RSI + Stochastic RSI (Research)',
+                    'strategy': 'BB + RSI + Stochastic RSI (LONG)',
                     'timeframe': '15m',
                     'stop_loss': current_price * 0.995,  # 0.5% stop
-                    'take_profit': current_price * 1.025,  # 2.5% target
+                    'take_profit': current_price * 1.035,  # 3.5% target (higher)
                     'research_basis': 'Sharpe 13.5 on BTC 15min'
                 }
             
-            # Removed SELL signals for LONG-only backtesting
+            elif short_rsi_condition and short_stochrsi_condition and short_bb_condition:
+                confidence = 0.6 + volume_strength  # SHORT signal
+                # Additional confluence factors  
+                if bb_position > 0.9:  # Very close to upper band
+                    confidence += 0.15
+                if current_rsi > 75:  # Extremely overbought
+                    confidence += 0.1
+                
+                return {
+                    'action': 'SELL',
+                    'confidence': min(0.95, confidence),
+                    'entry_price': current_price,
+                    'reasons': [
+                        f"RSI overbought: {current_rsi:.1f}",
+                        f"StochRSI overbought: {current_stoch_rsi:.1f}",
+                        f"At upper BB: {bb_position:.2f}",
+                        "Mean reversion SHORT opportunity"
+                    ],
+                    'strategy': 'BB + RSI + Stochastic RSI (SHORT)',
+                    'timeframe': '15m',
+                    'stop_loss': current_price * 1.005,  # 0.5% stop (higher price for short)
+                    'take_profit': current_price * 0.965,  # 3.5% target (lower price for short)
+                    'research_basis': 'Sharpe 13.5 on BTC 15min'
+                }
+            
             else:
                 return {
                     'action': 'HOLD',
                     'confidence': 0.0,
-                    'reason': 'No long opportunity found'
+                    'reason': 'No trading opportunity found'
                 }
                 
         except Exception as e:
@@ -572,50 +634,58 @@ class AdaptiveStrategyEngine:
                         # Default to bollinger strategy
                         signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     
-                    if signal['action'] == 'BUY' and signal['confidence'] > confidence_threshold:
-                        # Enter position with strategy-specific sizing
+                    if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal['confidence'] > confidence_threshold:
+                        # Enter position with strategy-specific sizing (AGGRESSIVE for high returns)
                         if actual_strategy == 'alligator_ma_momentum':
-                            # Conservative sizing for 4h trend following
-                            risk_per_trade = 0.015  # 1.5% risk
-                            leverage = 2.0  # Lower leverage for longer holds
+                            # Aggressive sizing for 4h trend following
+                            risk_per_trade = 0.03   # 3% risk (increased)
+                            leverage = 4.0          # Higher leverage for bigger gains
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            # More active sizing for 15m mean reversion
-                            risk_per_trade = 0.01   # 1% risk 
-                            leverage = 3.0  # Moderate leverage for quick trades
+                            # Very active sizing for 15m mean reversion
+                            risk_per_trade = 0.025  # 2.5% risk (increased)
+                            leverage = 5.0          # High leverage for quick profits
                         else:
-                            # Default sizing
-                            risk_per_trade = 0.015
-                            leverage = 2.0
+                            # Default aggressive sizing
+                            risk_per_trade = 0.025
+                            leverage = 4.0
                         
                         position_value = capital * risk_per_trade * leverage
                         position_size = position_value / current_price
-                        position = 'LONG'
+                        
+                        if signal['action'] == 'BUY':
+                            position = 'LONG'
+                        else:  # SELL
+                            position = 'SHORT'
+                            
                         entry_price = current_price
                         
-                        logger.debug(f"📈 Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
+                        logger.debug(f"📈 {position} Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
                 
                 else:  # Have position
                     # Check exit conditions - Strategy-specific logic with custom params support
-                    pnl_pct = (current_price - entry_price) / entry_price
+                    if position == 'LONG':
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:  # SHORT
+                        pnl_pct = (entry_price - current_price) / entry_price
                     
                     should_exit = False
                     exit_reason = ""
                     
-                    # Use custom parameters if provided, otherwise use defaults
+                    # Use custom parameters if provided, otherwise use AGGRESSIVE defaults
                     if custom_params:
-                        profit_target = custom_params.get('profit_target', 0.04)
-                        stop_loss = custom_params.get('stop_loss', 0.02)
+                        profit_target = custom_params.get('profit_target', 0.08)
+                        stop_loss = custom_params.get('stop_loss', 0.04)
                     else:
-                        # Strategy-specific exit conditions
+                        # Strategy-specific AGGRESSIVE exit conditions for high returns
                         if actual_strategy == 'alligator_ma_momentum':
-                            profit_target = 0.06  # 6% profit target (research-based)
-                            stop_loss = 0.03      # 3% stop loss
+                            profit_target = 0.10  # 10% profit target (aggressive)
+                            stop_loss = 0.04      # 4% stop loss (wider for trends)
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            profit_target = 0.025  # 2.5% profit target
-                            stop_loss = 0.015      # 1.5% stop loss
+                            profit_target = 0.06  # 6% profit target (aggressive)
+                            stop_loss = 0.025     # 2.5% stop loss (tighter for mean reversion)
                         else:
-                            profit_target = 0.04   # 4% default
-                            stop_loss = 0.02       # 2% default
+                            profit_target = 0.08   # 8% default (aggressive)
+                            stop_loss = 0.035      # 3.5% default
                     
                     # Apply exit conditions
                     if pnl_pct > profit_target:
@@ -629,13 +699,18 @@ class AdaptiveStrategyEngine:
                         exit_reason = "Time limit"
                 
                     if should_exit:
-                        # Exit position
-                        pnl = position_size * (current_price - entry_price)
+                        # Exit position with correct PnL calculation for LONG/SHORT
+                        if position == 'LONG':
+                            pnl = position_size * (current_price - entry_price)
+                        else:  # SHORT
+                            pnl = position_size * (entry_price - current_price)
+                            
                         capital += pnl
                         
                         trade = {
                             'entry_price': entry_price,
                             'exit_price': current_price,
+                            'position_type': position,
                             'pnl': pnl,
                             'pnl_pct': pnl_pct,
                             'reason': exit_reason,
@@ -643,16 +718,19 @@ class AdaptiveStrategyEngine:
                         }
                         trades.append(trade)
                         
-                        logger.debug(f"📉 Exit: {symbol} @ ${current_price:.4f}, PnL: ${pnl:.2f} ({pnl_pct:.2%})")
+                        logger.debug(f"📉 {position} Exit: {symbol} @ ${current_price:.4f}, PnL: ${pnl:.2f} ({pnl_pct:.2%})")
                         
                         position = None
                         position_size = 0
                         entry_price = 0
                 
-                # Track equity
+                # Track equity with correct unrealized PnL for LONG/SHORT
                 current_equity = capital
                 if position:
-                    unrealized_pnl = position_size * (current_price - entry_price)
+                    if position == 'LONG':
+                        unrealized_pnl = position_size * (current_price - entry_price)
+                    else:  # SHORT
+                        unrealized_pnl = position_size * (entry_price - current_price)
                     current_equity += unrealized_pnl
                 
                 equity_curve.append(current_equity)
