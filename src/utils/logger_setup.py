@@ -80,7 +80,7 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         logger.add(sys.stdout, level="INFO")
 
 
-def setup_logger(name: str = None, file_path: str = None, level: str = 'INFO') -> None:
+def setup_logger(name: str = None, file_path: str = None, level: str = 'INFO'):
     """Setup logger with name and file path for backwards compatibility"""
     if file_path is None:
         file_path = 'logs/trading_bot.log'
@@ -91,6 +91,10 @@ def setup_logger(name: str = None, file_path: str = None, level: str = 'INFO') -
         'console_output': True
     }
     setup_logging(config)
+    
+    # Return loguru logger
+    from loguru import logger
+    return logger
 
 
 def get_performance_logger():

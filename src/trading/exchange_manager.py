@@ -82,16 +82,14 @@ class ExchangeManager:
                 }
             })
             
-            # Test connection (skip for invalid API keys in demo)
+            # Test connection - REQUIRE VALID API KEYS
             try:
                 await exchange.load_markets()
                 logger.success(f"✅ {exchange_name} API connection verified")
             except Exception as e:
-                if "invalid" in str(e).lower() or "10003" in str(e):
-                    logger.warning(f"⚠️ {exchange_name} API key invalid - switching to mock mode")
-                    # Continue with mock mode for demo purposes
-                else:
-                    raise
+                logger.error(f"❌ {exchange_name} API connection failed: {e}")
+                logger.error(f"🔑 Check your API credentials in .env file")
+                raise
             
             self.exchanges[exchange_name] = exchange
             
@@ -176,10 +174,6 @@ class ExchangeManager:
             
         except Exception as e:
             logger.error(f"❌ Market data error for {symbol}: {e}")
-            # Return mock historical data for demo
-            if "invalid" in str(e).lower() or "10003" in str(e):
-                logger.info(f"🎭 {symbol} mock historical data kullanılıyor (demo mode)")
-                return self._generate_mock_historical_data(symbol, timeframe, start_date, end_date)
             return None
     
     async def get_real_time_data(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
@@ -204,10 +198,6 @@ class ExchangeManager:
             
         except Exception as e:
             logger.error(f"❌ Real-time data error: {e}")
-            # Return mock data for demo when API key is invalid
-            if "invalid" in str(e).lower() or "10003" in str(e):
-                logger.info(f"🎭 {symbol} mock data kullanılıyor (demo mode)")
-                return self._generate_mock_real_time_data(symbol)
             return None
     
     async def get_historical_data(self, symbol: str, timeframe: str = '1h', 
@@ -271,10 +261,6 @@ class ExchangeManager:
             
         except Exception as e:
             logger.error(f"❌ Historical data error: {e}")
-            # Return mock historical data for demo
-            if "invalid" in str(e).lower() or "10003" in str(e):
-                logger.info(f"🎭 {symbol} mock historical data kullanılıyor (demo mode)")
-                return self._generate_mock_historical_data(symbol, timeframe, start_date, end_date)
             return None
     
     async def place_order(self, symbol: str, side: str, amount: float, 
