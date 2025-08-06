@@ -1,0 +1,94 @@
+# ===============================
+# SECURITY - API KEYS & SECRETS
+# ===============================
+.env
+.env.*
+!.env.example
+config/secret.yaml
+*.key
+*.pem
+api_keys.txt
+
+# ===============================
+# PYTHON & DEVELOPMENT
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===============================
+# VIRTUAL ENVIRONMENTS
+# ===============================
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# ===============================
+# DATABASE & DATA
+# ===============================
+*.db
+*.sqlite3
+data/*.db
+data/*.sqlite
+*.log
+logs/*.log
+
+# ===============================
+# ML MODELS & CACHE
+# ===============================
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.pb
+.cache/
+*.tmp
+
+# ===============================
+# IDE & EDITORS
+# ===============================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===============================
+# JUPYTER & NOTEBOOKS
+# ===============================
+.ipynb_checkpoints
+*.ipynb
+
+# ===============================
+# TESTING & COVERAGE
+# ===============================
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+
+# ===============================
+# MACOS & WINDOWS
+# ===============================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
