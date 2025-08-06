@@ -45,7 +45,7 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
             level=level,
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
             rotation=max_file_size,
-            retention=f"{backup_count} files",
+            retention=backup_count,
             compression="zip",
             encoding="utf-8"
         )

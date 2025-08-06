@@ -407,6 +407,41 @@ class DatabaseManager:
             logger.error(f"❌ Total losses error: {e}")
             return 0.0
     
+    async def get_trades(self, symbol: str = None, limit: int = 100) -> List[Dict]:
+        """Trade geçmişini getir"""
+        try:
+            if symbol:
+                cursor = await self.connection.execute("""
+                    SELECT * FROM trades WHERE symbol = ? 
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (symbol, limit))
+            else:
+                cursor = await self.connection.execute("""
+                    SELECT * FROM trades 
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (limit,))
+            
+            rows = await cursor.fetchall()
+            
+            trades = []
+            for row in rows:
+                trades.append({
+                    'id': row[0],
+                    'symbol': row[1],
+                    'side': row[2],
+                    'size': row[3],
+                    'price': row[4],
+                    'pnl': row[5],
+                    'strategy': row[6],
+                    'timestamp': row[7]
+                })
+            
+            return trades
+            
+        except Exception as e:
+            logger.error(f"❌ Get trades error: {e}")
+            return []
+    
     async def cleanup_old_data(self, days: int = 90):
         """Eski verileri temizle"""
         try:

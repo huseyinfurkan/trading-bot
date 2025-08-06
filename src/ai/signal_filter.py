@@ -431,7 +431,10 @@ class AISignalFilter:
             
             # Volume features
             features['volume_sma_10'] = df['volume'].rolling(10).mean().iloc[-1]
-            features['volume_ratio'] = df['volume'].iloc[-1] / features['volume_sma_10']
+            if features['volume_sma_10'] > 0:
+                features['volume_ratio'] = df['volume'].iloc[-1] / features['volume_sma_10']
+            else:
+                features['volume_ratio'] = 1.0  # Default ratio if no volume data
             
             # Volatility features
             features['volatility'] = df['close'].rolling(10).std().iloc[-1]

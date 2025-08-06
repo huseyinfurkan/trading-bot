@@ -207,8 +207,14 @@ class LiveDataEngine:
     async def _perform_live_analysis(self, symbol: str, live_data: Dict) -> Optional[Dict]:
         """Tek sembol için canlı analiz gerçekleştir"""
         try:
+            # Check if live_data is None or empty
+            if live_data is None or not live_data:
+                logger.warning(f"⚠️ {symbol} için live data bulunamadı")
+                return None
+                
             dataframe = live_data.get('dataframe')
             if dataframe is None or len(dataframe) < 50:
+                logger.warning(f"⚠️ {symbol} için yeterli dataframe yok ({len(dataframe) if dataframe is not None else 0} candles)")
                 return None
             
             # Prepare market data for analysis
