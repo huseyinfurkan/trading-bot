@@ -640,53 +640,109 @@ class AISignalFilter:
             self._create_default_models()
     
     def _prepare_training_data(self, data):
-        """Prepare features and labels from historical data"""
+        """Enhanced feature engineering with overfitting prevention"""
         import pandas as pd
         import numpy as np
         
         try:
-            if len(data) < 20:
+            if len(data) < 100:  # Need more data for robust training
                 return [], []
             
-            # Calculate technical indicators
-            data['sma_10'] = data['close'].rolling(10).mean()
-            data['sma_20'] = data['close'].rolling(20).mean()
-            data['rsi'] = self._calculate_rsi(data['close'])
-            data['bb_upper'], data['bb_lower'] = self._calculate_bollinger_bands(data['close'])
+            # Copy data to prevent modification
+            df = data.copy()
             
-            # Calculate future returns for labels (1-hour forward)
-            data['future_return'] = data['close'].shift(-1) / data['close'] - 1
+            # ANTI-DATA-LEAKAGE: Calculate future returns FIRST, before any other calculations
+            df['future_return_1h'] = df['close'].shift(-1) / df['close'] - 1
+            df['future_return_4h'] = df['close'].shift(-4) / df['close'] - 1
+            
+            # Enhanced technical indicators (using only past data)
+            df['sma_10'] = df['close'].rolling(10).mean()
+            df['sma_20'] = df['close'].rolling(20).mean()
+            df['sma_50'] = df['close'].rolling(50).mean()
+            df['ema_12'] = df['close'].ewm(span=12).mean()
+            df['ema_26'] = df['close'].ewm(span=26).mean()
+            
+            # RSI
+            df['rsi'] = self._calculate_rsi(df['close'])
+            df['rsi_sma'] = df['rsi'].rolling(5).mean()
+            
+            # MACD
+            df['macd'] = df['ema_12'] - df['ema_26']
+            df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            df['macd_histogram'] = df['macd'] - df['macd_signal']
+            
+            # Bollinger Bands
+            df['bb_upper'], df['bb_lower'] = self._calculate_bollinger_bands(df['close'])
+            df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['close']
+            
+            # Volume indicators
+            df['volume_sma'] = df['volume'].rolling(20).mean()
+            df['volume_ratio'] = df['volume'] / df['volume_sma']
+            df['volume_roc'] = df['volume'].pct_change(5)
+            
+            # Price momentum features
+            df['price_roc_1'] = df['close'].pct_change(1)
+            df['price_roc_5'] = df['close'].pct_change(5)
+            df['price_roc_20'] = df['close'].pct_change(20)
+            
+            # Volatility features
+            df['returns'] = df['close'].pct_change()
+            df['volatility_5'] = df['returns'].rolling(5).std()
+            df['volatility_20'] = df['returns'].rolling(20).std()
+            
+            # Market structure features
+            df['high_low_ratio'] = (df['high'] - df['low']) / df['close']
+            df['close_position'] = (df['close'] - df['low']) / (df['high'] - df['low'])
+            
+            # Trend strength
+            df['trend_strength'] = np.abs(df['close'] - df['sma_20']) / df['sma_20']
+            
+            # ANTI-OVERFITTING: Remove last 10% of data to prevent lookahead
+            cutoff = int(len(df) * 0.9)
+            df = df.iloc[:cutoff]
             
             # Remove NaN values
-            data = data.dropna()
+            df = df.dropna()
             
-            if len(data) < 10:
+            if len(df) < 50:
                 return [], []
             
-            # Features: technical indicators
+            # Feature selection (prevent overfitting with too many features)
+            feature_columns = [
+                'rsi', 'rsi_sma', 'macd_histogram', 'bb_position', 'bb_width',
+                'volume_ratio', 'volume_roc', 'price_roc_1', 'price_roc_5',
+                'volatility_5', 'high_low_ratio', 'close_position', 'trend_strength'
+            ]
+            
             features = []
             labels = []
             
-            for i in range(len(data)):
-                feature_row = [
-                    data.iloc[i]['rsi'],
-                    (data.iloc[i]['close'] - data.iloc[i]['sma_10']) / data.iloc[i]['sma_10'],
-                    (data.iloc[i]['close'] - data.iloc[i]['sma_20']) / data.iloc[i]['sma_20'],
-                    (data.iloc[i]['close'] - data.iloc[i]['bb_lower']) / (data.iloc[i]['bb_upper'] - data.iloc[i]['bb_lower']),
-                    data.iloc[i]['volume'] / data['volume'].rolling(20).mean().iloc[i] if data['volume'].rolling(20).mean().iloc[i] > 0 else 1
-                ]
+            # Use multiple prediction horizons for robustness
+            for i in range(len(df)):
+                feature_row = []
+                for col in feature_columns:
+                    val = df.iloc[i][col]
+                    if np.isnan(val) or np.isinf(val):
+                        val = 0  # Handle edge cases
+                    feature_row.append(val)
                 
-                # Label: 1 if profitable (>0.1%), 0 otherwise
-                label = 1 if data.iloc[i]['future_return'] > 0.001 else 0
+                # Multi-target labeling for robustness
+                future_1h = df.iloc[i]['future_return_1h']
+                future_4h = df.iloc[i]['future_return_4h']
                 
-                if not np.isnan(feature_row).any():
+                # Conservative labeling: require consistent profitability
+                label = 1 if (future_1h > 0.002 and future_4h > 0.001) else 0  # 0.2% and 0.1% thresholds
+                
+                if not np.isnan([future_1h, future_4h]).any():
                     features.append(feature_row)
                     labels.append(label)
             
+            logger.info(f"📊 Prepared {len(features)} samples with {len(feature_columns)} features")
             return features, labels
             
         except Exception as e:
-            logger.error(f"❌ Data preparation error: {e}")
+            logger.error(f"❌ Enhanced data preparation error: {e}")
             return [], []
     
     async def _train_and_save_models(self, features, labels):

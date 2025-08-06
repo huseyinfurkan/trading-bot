@@ -414,3 +414,88 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Risk metrics error: {e}")
             return {}
+    
+    def _calculate_enhanced_kelly_fraction(self, confidence: float, base_risk: float,
+                                         volatility_factor: float, market_condition_factor: float) -> float:
+        """Enhanced Kelly Criterion with market conditions"""
+        try:
+            # Base Kelly calculation
+            b = self.avg_win_loss_ratio
+            p = self.win_rate
+            q = 1 - p
+            
+            # Adjust win rate based on confidence
+            adjusted_p = p * confidence
+            adjusted_q = 1 - adjusted_p
+            
+            kelly_fraction = (b * adjusted_p - adjusted_q) / b
+            
+            # Apply market condition adjustments
+            kelly_fraction *= volatility_factor * market_condition_factor
+            
+            # Apply safety limits
+            kelly_fraction = max(0, kelly_fraction)
+            kelly_fraction = min(kelly_fraction, self.kelly_fraction * 0.5)  # More conservative
+            
+            return kelly_fraction
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced Kelly calculation error: {e}")
+            return self.default_risk_per_trade * 0.5
+    
+    async def _get_volatility_adjustment(self, symbol: str) -> float:
+        """Calculate volatility-based position size adjustment"""
+        try:
+            # Get recent price data for volatility calculation
+            if hasattr(self, 'exchange_manager'):
+                from datetime import datetime, timedelta
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=7)
+                
+                data = await self.exchange_manager.get_historical_data(
+                    symbol, '1h', start_date, end_date
+                )
+                
+                if data is not None and len(data) > 20:
+                    # Calculate 7-day volatility
+                    returns = data['close'].pct_change().dropna()
+                    volatility = returns.std() * (24 ** 0.5)  # Annualized hourly volatility
+                    
+                    # Volatility adjustment factor (lower vol = higher position, higher vol = lower position)
+                    # Normal crypto volatility ~30-60%, adjust accordingly
+                    if volatility < 0.3:  # Low volatility
+                        return 1.2  # Increase position size
+                    elif volatility > 0.8:  # High volatility
+                        return 0.6  # Decrease position size significantly
+                    else:  # Normal volatility
+                        return 1.0 - (volatility - 0.3) * 0.8  # Gradual adjustment
+            
+            return 1.0  # Default if no data available
+            
+        except Exception as e:
+            logger.error(f"❌ Volatility adjustment error: {e}")
+            return 0.8  # Conservative default
+    
+    async def _get_market_condition_factor(self, symbol: str) -> float:
+        """Calculate market condition-based adjustment"""
+        try:
+            # This would integrate with market analyzer
+            if hasattr(self, 'market_analyzer'):
+                market_condition = await self.market_analyzer.analyze_market_condition(symbol)
+                
+                if market_condition:
+                    condition = market_condition.get('condition', 'unknown')
+                    strength = market_condition.get('strength', 0.5)
+                    
+                    if condition == 'bull_market' and strength > 0.7:
+                        return 1.3  # Increase positions in strong bull markets
+                    elif condition == 'bear_market' and strength > 0.7:
+                        return 0.7  # Reduce positions in strong bear markets
+                    elif condition == 'sideways_market':
+                        return 0.9  # Slightly reduce in sideways markets
+            
+            return 1.0  # Default neutral
+            
+        except Exception as e:
+            logger.error(f"❌ Market condition factor error: {e}")
+            return 0.9  # Slightly conservative default

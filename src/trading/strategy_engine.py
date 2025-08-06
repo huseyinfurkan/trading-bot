@@ -118,29 +118,106 @@ class StrategyEngine:
             return None
     
     async def _scalping_entry(self, symbol: str, market_data: Dict, signals: Dict, config: Dict) -> Optional[Dict]:
-        """Scalping giriş sinyali"""
+        """Enhanced Scalping Strategy - Multi-factor confirmation"""
         try:
             df = market_data.get('dataframe')
-            if df is None or len(df) < 20:
+            if df is None or len(df) < 50:
                 return None
             
-            # Quick RSI check
             current_price = df['close'].iloc[-1]
             
-            # Simple scalping logic - quick moves
-            price_change = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
+            # Calculate enhanced technical indicators
+            indicators = self._calculate_enhanced_indicators(df)
             
-            if abs(price_change) > 0.005:  # 0.5% move
-                signal_type = 'BUY' if price_change > 0 else 'SELL'
+            # Multi-factor confirmation system
+            buy_signals = 0
+            sell_signals = 0
+            signal_strength = 0
+            
+            # 1. RSI Mean Reversion (Scalping favors quick reversals)
+            rsi = indicators['rsi'].iloc[-1]
+            if rsi < 30:  # Oversold
+                buy_signals += 2
+                signal_strength += 0.3
+            elif rsi > 70:  # Overbought
+                sell_signals += 2
+                signal_strength += 0.3
+            
+            # 2. Volume Spike Confirmation
+            volume_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1]
+            if volume_ratio > 1.5:  # Volume spike
+                signal_strength += 0.2
+                if buy_signals > sell_signals:
+                    buy_signals += 1
+                elif sell_signals > buy_signals:
+                    sell_signals += 1
+            
+            # 3. Price Action - Quick momentum
+            price_momentum_1 = (df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-2]
+            price_momentum_5 = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
+            
+            if price_momentum_1 > 0.002 and price_momentum_5 > 0.003:  # Strong short-term momentum
+                buy_signals += 1
+                signal_strength += 0.15
+            elif price_momentum_1 < -0.002 and price_momentum_5 < -0.003:
+                sell_signals += 1
+                signal_strength += 0.15
+            
+            # 4. Bollinger Band position
+            bb_position = (current_price - indicators['bb_lower'].iloc[-1]) / (indicators['bb_upper'].iloc[-1] - indicators['bb_lower'].iloc[-1])
+            if bb_position < 0.2:  # Near lower band
+                buy_signals += 1
+                signal_strength += 0.1
+            elif bb_position > 0.8:  # Near upper band
+                sell_signals += 1
+                signal_strength += 0.1
+            
+            # 5. AI Signal confirmation
+            ai_confidence = signals.get('confidence', 0)
+            if ai_confidence > 0.6:
+                signal_strength += 0.25
+                ai_signals = signals.get('signals', [])
+                buy_ai = sum(1 for s in ai_signals if s.get('type') == 'BUY')
+                sell_ai = sum(1 for s in ai_signals if s.get('type') == 'SELL')
+                
+                if buy_ai > sell_ai:
+                    buy_signals += 1
+                elif sell_ai > buy_ai:
+                    sell_signals += 1
+            
+            # Decision logic - require strong multi-factor confirmation
+            min_signals = 3
+            min_strength = 0.7
+            
+            if buy_signals >= min_signals and signal_strength >= min_strength and buy_signals > sell_signals:
+                # Dynamic stop loss based on volatility
+                atr = indicators['atr'].iloc[-1]
+                volatility_factor = min(atr / current_price, 0.01)  # Cap at 1%
                 
                 return {
-                    'signal': signal_type,
+                    'signal': 'BUY',
                     'entry_price': current_price,
-                    'stop_loss': current_price * (0.998 if signal_type == 'BUY' else 1.002),
-                    'take_profit': current_price * (1.004 if signal_type == 'BUY' else 0.996),
-                    'confidence': 0.7,
-                    'reason': f'Scalping {price_change:.3f}% move'
+                    'stop_loss': current_price * (1 - max(0.003, volatility_factor * 2)),
+                    'take_profit': current_price * (1 + max(0.005, volatility_factor * 2.5)),
+                    'confidence': signal_strength,
+                    'reason': f'Scalping: {buy_signals} buy signals, strength {signal_strength:.2f}',
+                    'signals_count': buy_signals
                 }
+            elif sell_signals >= min_signals and signal_strength >= min_strength and sell_signals > buy_signals:
+                atr = indicators['atr'].iloc[-1]
+                volatility_factor = min(atr / current_price, 0.01)
+                
+                return {
+                    'signal': 'SELL',
+                    'entry_price': current_price,
+                    'stop_loss': current_price * (1 + max(0.003, volatility_factor * 2)),
+                    'take_profit': current_price * (1 - max(0.005, volatility_factor * 2.5)),
+                    'confidence': signal_strength,
+                    'reason': f'Scalping: {sell_signals} sell signals, strength {signal_strength:.2f}',
+                    'signals_count': sell_signals
+                }
+            
+            return None  # No strong signal
             
             return None
             
@@ -340,37 +417,84 @@ class StrategyEngine:
     
     async def backtest_strategy(self, symbol: str, strategy: str, historical_data: pd.DataFrame, 
                                initial_capital: float = 10000) -> Dict[str, Any]:
-        """Strateji backtesting"""
+        """Enhanced backtesting with realistic market conditions"""
         try:
             if historical_data.empty or len(historical_data) < 100:
                 return {'error': 'Insufficient data for backtesting'}
             
+            # Enhanced backtest parameters
             trades = []
             capital = initial_capital
             position = None
+            max_drawdown = 0
+            peak_capital = initial_capital
+            
+            # Trading costs (realistic for crypto)
+            maker_fee = 0.001  # 0.1% maker fee
+            taker_fee = 0.0015  # 0.15% taker fee
+            slippage_factor = 0.0005  # 0.05% average slippage
+            
+            # Track metrics
+            winning_trades = 0
+            losing_trades = 0
+            total_fees_paid = 0
             
             for i in range(50, len(historical_data)):
                 current_data = historical_data.iloc[:i+1]
                 market_data = {'dataframe': current_data}
-                signals = {}  # Simplified for backtest
+                
+                # Enhanced signal generation with AI mock
+                signals = await self._generate_mock_ai_signals(current_data)
                 
                 if position is None:
                     # Look for entry
                     entry_signal = await self.get_entry_signal(symbol, market_data, signals, strategy)
                     
-                    if entry_signal:
+                    if entry_signal and capital > initial_capital * 0.1:  # Stop if capital too low
+                        entry_price = entry_signal['entry_price']
+                        
+                        # Apply slippage to entry price
+                        if entry_signal['signal'] == 'BUY':
+                            actual_entry_price = entry_price * (1 + slippage_factor)
+                        else:
+                            actual_entry_price = entry_price * (1 - slippage_factor)
+                        
+                        # Dynamic position sizing based on volatility
+                        volatility = self._calculate_recent_volatility(current_data)
+                        base_position_pct = 0.1  # 10% base
+                        volatility_adjusted_pct = base_position_pct * (1 - min(volatility * 2, 0.5))  # Reduce in high vol
+                        
+                        position_value = capital * volatility_adjusted_pct
+                        position_size = position_value / actual_entry_price
+                        
+                        # Calculate entry fees
+                        entry_fee = position_value * taker_fee
+                        
                         position = {
-                            'entry_price': entry_signal['entry_price'],
+                            'entry_price': actual_entry_price,
                             'side': entry_signal['signal'],
-                            'size': capital * 0.1 / entry_signal['entry_price'],  # 10% of capital
-                            'entry_index': i
+                            'size': position_size,
+                            'entry_index': i,
+                            'entry_fee': entry_fee,
+                            'stop_loss': entry_signal.get('stop_loss'),
+                            'take_profit': entry_signal.get('take_profit'),
+                            'entry_time': current_data.index[i]
                         }
+                        
+                        capital -= entry_fee
+                        total_fees_paid += entry_fee
                         
                 else:
                     # Look for exit
                     current_price = current_data['close'].iloc[-1]
+                    current_high = current_data['high'].iloc[-1]
+                    current_low = current_data['low'].iloc[-1]
                     
-                    # Check stop loss / take profit
+                    exit_triggered = False
+                    exit_reason = ""
+                    exit_price = current_price
+                    
+                    # Check stop loss / take profit with realistic price movement
                     entry_price = position['entry_price']
                     side = position['side']
                     
@@ -539,3 +663,106 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"❌ Backtest with params error: {e}")
             return None
+    
+    def _calculate_enhanced_indicators(self, df):
+        """Calculate comprehensive technical indicators"""
+        try:
+            import pandas as pd
+            import numpy as np
+            
+            indicators = {}
+            
+            # RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            indicators['rsi'] = 100 - (100 / (1 + rs))
+            
+            # Moving Averages
+            indicators['sma_10'] = df['close'].rolling(10).mean()
+            indicators['sma_20'] = df['close'].rolling(20).mean()
+            indicators['sma_50'] = df['close'].rolling(50).mean()
+            indicators['ema_12'] = df['close'].ewm(span=12).mean()
+            indicators['ema_26'] = df['close'].ewm(span=26).mean()
+            
+            # MACD
+            indicators['macd'] = indicators['ema_12'] - indicators['ema_26']
+            indicators['macd_signal'] = indicators['macd'].ewm(span=9).mean()
+            indicators['macd_histogram'] = indicators['macd'] - indicators['macd_signal']
+            
+            # Bollinger Bands
+            bb_period = 20
+            bb_std = 2
+            sma = df['close'].rolling(window=bb_period).mean()
+            std = df['close'].rolling(window=bb_period).std()
+            indicators['bb_upper'] = sma + (std * bb_std)
+            indicators['bb_lower'] = sma - (std * bb_std)
+            indicators['bb_middle'] = sma
+            
+            # ATR (Average True Range)
+            high_low = df['high'] - df['low']
+            high_close = np.abs(df['high'] - df['close'].shift())
+            low_close = np.abs(df['low'] - df['close'].shift())
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            indicators['atr'] = true_range.rolling(14).mean()
+            
+            # Stochastic Oscillator
+            lowest_low = df['low'].rolling(14).min()
+            highest_high = df['high'].rolling(14).max()
+            indicators['stoch_k'] = 100 * ((df['close'] - lowest_low) / (highest_high - lowest_low))
+            indicators['stoch_d'] = indicators['stoch_k'].rolling(3).mean()
+            
+            # Volume indicators
+            indicators['volume_sma'] = df['volume'].rolling(20).mean()
+            indicators['volume_ratio'] = df['volume'] / indicators['volume_sma']
+            
+            return indicators
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced indicators calculation error: {e}")
+            return {}
+    
+    def _calculate_recent_volatility(self, data, period=20):
+        """Calculate recent volatility for position sizing"""
+        try:
+            if len(data) < period:
+                return 0.02  # Default 2% volatility
+            
+            returns = data['close'].pct_change().dropna()
+            recent_returns = returns.tail(period)
+            volatility = recent_returns.std()
+            
+            return max(0.01, min(volatility, 0.1))  # Cap between 1% and 10%
+            
+        except Exception as e:
+            logger.error(f"❌ Volatility calculation error: {e}")
+            return 0.02
+    
+    async def _generate_mock_ai_signals(self, data):
+        """Generate mock AI signals for backtesting"""
+        try:
+            # Simple mock implementation
+            if len(data) < 20:
+                return {'confidence': 0.5, 'signals': []}
+            
+            # Calculate simple indicators for mock signals
+            rsi = self._calculate_enhanced_indicators(data).get('rsi')
+            if rsi is not None and len(rsi) > 0:
+                current_rsi = rsi.iloc[-1]
+                
+                confidence = 0.6 + abs(50 - current_rsi) / 100  # Higher confidence away from 50
+                signals = []
+                
+                if current_rsi < 35:
+                    signals.append({'type': 'BUY', 'strength': 0.7})
+                elif current_rsi > 65:
+                    signals.append({'type': 'SELL', 'strength': 0.7})
+                
+                return {'confidence': min(confidence, 0.9), 'signals': signals}
+            
+            return {'confidence': 0.5, 'signals': []}
+            
+        except Exception as e:
+            logger.error(f"❌ Mock AI signals error: {e}")
+            return {'confidence': 0.5, 'signals': []}
