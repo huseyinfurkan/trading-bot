@@ -111,8 +111,8 @@ class AdvancedTradingBot:
             await self.ai_signal_filter.initialize()
             
             self.market_analyzer = MarketAnalyzer(
-                self.config.get('market_conditions', {}),
-                self.db_manager
+                self.config,
+                self.exchange_manager
             )
             
             self.confidence_calculator = ConfidenceCalculator(

@@ -41,7 +41,7 @@ class BacktestRunner:
             await self.config.load_config()
             
             # Initialize core components
-            self.db_manager = DatabaseManager(self.config.get_database_config())
+            self.db_manager = DatabaseManager(self.config.config.get('database', {}))
             await self.db_manager.initialize()
             
             # Initialize exchange manager
@@ -50,8 +50,15 @@ class BacktestRunner:
             
             # Initialize AI components
             self.market_analyzer = MarketAnalyzer(self.config, self.exchange_manager)
-            self.signal_filter = AISignalFilter(self.config, self.exchange_manager)
-            self.confidence_calculator = ConfidenceCalculator(self.config)
+            self.signal_filter = AISignalFilter(
+                self.config.config.get('ai_settings', {}), 
+                self.db_manager, 
+                self.exchange_manager
+            )
+            self.confidence_calculator = ConfidenceCalculator(
+                self.config.config.get('ai_settings', {}), 
+                self.db_manager
+            )
             
             # Initialize strategy engine
             self.strategy_engine = AdaptiveStrategyEngine(
@@ -248,7 +255,11 @@ async def initialize():
 
 async def main():
     """Main backtest runner"""
-    setup_logging('backtest')
+    setup_logging({
+        'level': 'INFO',
+        'file_path': 'logs/backtest.log',
+        'console_output': True
+    })
     
     try:
         # Initialize backtest runner

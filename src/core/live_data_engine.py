@@ -291,8 +291,8 @@ class LiveDataEngine:
             if strategy_signal:
                 entry_signal = {
                     'action': strategy_signal.get('action', 'HOLD'),
-                    'confidence': strategy_signal['confidence'],
-                    'entry_price': strategy_signal['entry_price'],
+                    'confidence': strategy_signal.get('confidence', 0.5),
+                    'entry_price': strategy_signal.get('entry_price', strategy_signal.get('price', 0)),
                     'stop_loss': strategy_signal.get('stop_loss'),
                     'take_profit': strategy_signal.get('take_profit'),
                     'reason': strategy_signal.get('reason', 'Adaptive strategy signal')
