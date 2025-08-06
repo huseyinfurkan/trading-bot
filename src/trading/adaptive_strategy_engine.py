@@ -494,18 +494,21 @@ class AdaptiveStrategyEngine:
         NEW METHOD - Required by backtest_runner
         """
         try:
-            # Map old strategy names to new adaptive ones
+            # Map strategy names to research-backed strategies
             strategy_mapping = {
-                'scalping': 'volatility_breakout',
-                'swing_trading': 'mean_reversion_adaptive', 
-                'trend_following': 'volatility_breakout',
-                'mean_reversion': 'mean_reversion_adaptive',
-                # Direct new names
-                'volatility_breakout': 'volatility_breakout',
-                'mean_reversion_adaptive': 'mean_reversion_adaptive'
+                # New research-backed strategies (direct mapping)
+                'alligator_ma_momentum': 'alligator_ma_momentum',
+                'bollinger_rsi_stochrsi': 'bollinger_rsi_stochrsi',
+                # Old strategy mappings for backward compatibility
+                'scalping': 'bollinger_rsi_stochrsi',
+                'swing_trading': 'alligator_ma_momentum', 
+                'trend_following': 'alligator_ma_momentum',
+                'mean_reversion': 'bollinger_rsi_stochrsi',
+                'volatility_breakout': 'alligator_ma_momentum',
+                'mean_reversion_adaptive': 'bollinger_rsi_stochrsi'
             }
             
-            actual_strategy = strategy_mapping.get(strategy_name, 'mean_reversion_adaptive')
+            actual_strategy = strategy_mapping.get(strategy_name, 'bollinger_rsi_stochrsi')
             
             logger.info(f"🔄 Backtesting {strategy_name} → {actual_strategy} on {symbol}")
             logger.info(f"📊 Data: {len(historical_data)} candles, Capital: ${initial_capital:,.2f}")
@@ -519,10 +522,13 @@ class AdaptiveStrategyEngine:
             equity_curve = []
             
             # Strategy-specific parameters
-            if actual_strategy == 'volatility_breakout':
-                params = self.adaptive_params['volatility_breakout']
+            if actual_strategy == 'alligator_ma_momentum':
+                params = self.adaptive_params['alligator_ma_momentum']
+            elif actual_strategy == 'bollinger_rsi_stochrsi':
+                params = self.adaptive_params['bollinger_rsi_stochrsi']
             else:
-                params = self.adaptive_params['mean_reversion_adaptive']
+                # Default to bollinger strategy
+                params = self.adaptive_params['bollinger_rsi_stochrsi']
             
             # Ensure we have required indicators
             df = historical_data.copy()
@@ -566,11 +572,14 @@ class AdaptiveStrategyEngine:
                 
                 # Position management
                 if position is None:  # No position
-                    # Check for entry signal
-                    if actual_strategy == 'volatility_breakout':
-                        signal = await self._volatility_breakout_signal(symbol, market_data, {'confidence': 0.8})
+                    # Check for entry signal using research-backed strategies
+                    if actual_strategy == 'alligator_ma_momentum':
+                        signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8})
+                    elif actual_strategy == 'bollinger_rsi_stochrsi':
+                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8})
                     else:
-                        signal = await self._mean_reversion_adaptive_signal(symbol, market_data, {'confidence': 0.8})
+                        # Default to bollinger strategy
+                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8})
                     
                     if signal['action'] == 'BUY' and signal['confidence'] > 0.7:
                         # Enter position
