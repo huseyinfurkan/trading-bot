@@ -283,13 +283,17 @@ class LiveDataEngine:
             
             # 5. Entry Signal Check
             entry_signal = None
-            if recommended_strategy:
-                entry_signal = await self.strategy_engine.get_entry_signal(
-                    symbol, market_data, ai_signals, recommended_strategy
-                )
+            if recommended_strategy and market_data and ai_signals:
+                try:
+                    entry_signal = await self.strategy_engine.get_entry_signal(
+                        symbol, market_data, ai_signals, recommended_strategy
+                    )
+                except Exception as ex:
+                    logger.warning(f"⚠️ {symbol} entry signal hatası: {ex}")
+                    entry_signal = None
             
             # 6. Technical Analysis Summary
-            technical_summary = self._calculate_technical_summary(dataframe)
+            technical_summary = self._calculate_technical_summary(dataframe) if dataframe is not None else {}
             
             return {
                 'symbol': symbol,
@@ -310,7 +314,9 @@ class LiveDataEngine:
             }
             
         except Exception as e:
+            import traceback
             logger.error(f"❌ {symbol} canlı analiz hatası: {e}")
+            logger.error(f"📍 Stack trace: {traceback.format_exc()}")
             return None
     
     async def _make_trading_decision(self, symbol: str, analysis: Dict) -> Optional[Dict]:
@@ -421,7 +427,7 @@ class LiveDataEngine:
     def _calculate_technical_summary(self, dataframe: pd.DataFrame) -> Dict[str, Any]:
         """Teknik analiz özeti"""
         try:
-            if len(dataframe) < 20:
+            if dataframe is None or len(dataframe) < 20:
                 return {}
             
             close_prices = dataframe['close']
