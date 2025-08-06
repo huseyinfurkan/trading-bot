@@ -7,8 +7,8 @@
 exchanges:
   bybit:
     enabled: true
-    api_key: "YOUR_BYBIT_API_KEY"  # Replace with your actual API key
-    secret: "YOUR_BYBIT_SECRET"  # Replace with your actual secret
+    api_key: ""  # Will be loaded from .env file (BYBIT_API_KEY)
+    secret: ""  # Will be loaded from .env file (BYBIT_SECRET)
     sandbox: true  # Paper trading için true, live için false
     default_type: "spot"  # spot, future, option
     requests_per_second: 10
