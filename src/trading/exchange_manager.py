@@ -82,13 +82,34 @@ class ExchangeManager:
                 }
             })
             
-            # Test connection - REQUIRE VALID API KEYS
+            # Test connection with minimal API call
             try:
+                # First try public endpoint
                 await exchange.load_markets()
-                logger.success(f"✅ {exchange_name} API connection verified")
+                logger.success(f"✅ {exchange_name} markets loaded successfully")
+                
+                # Then test private API with minimal call
+                try:
+                    balance = await exchange.fetch_balance()
+                    logger.success(f"✅ {exchange_name} API connection verified")
+                except Exception as private_error:
+                    if "10003" in str(private_error) or "invalid" in str(private_error).lower():
+                        logger.error(f"❌ {exchange_name} API credentials invalid: {private_error}")
+                        logger.error(f"🔑 Please check your API keys in .env file")
+                        logger.error(f"💡 Make sure API keys have proper permissions (spot trading)")
+                        raise
+                    else:
+                        logger.warning(f"⚠️ {exchange_name} API connection issue: {private_error}")
+                        logger.info(f"📊 Continuing with public data only...")
+                        # Mark exchange as public-only
+                        exchange._public_only = True
+                        
             except Exception as e:
-                logger.error(f"❌ {exchange_name} API connection failed: {e}")
-                logger.error(f"🔑 Check your API credentials in .env file")
+                if "load_markets" in str(e).lower():
+                    logger.error(f"❌ {exchange_name} markets loading failed: {e}")
+                    logger.error(f"🌐 Check your internet connection")
+                else:
+                    logger.error(f"❌ {exchange_name} connection failed: {e}")
                 raise
             
             self.exchanges[exchange_name] = exchange

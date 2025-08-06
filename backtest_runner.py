@@ -46,7 +46,8 @@ class BacktestRunner:
             
             # Load configuration
             self.config_manager = ConfigManager('config/config.yaml')
-            config = self.config_manager.get_config()
+            await self.config_manager.load_config()
+            config = self.config_manager.config
             
             # Initialize database
             self.db_manager = DatabaseManager(config['database'])

@@ -61,7 +61,8 @@ class PaperTradingBot:
             
             # Load configuration
             self.config_manager = ConfigManager('config/config.yaml')
-            config = self.config_manager.get_config()
+            await self.config_manager.load_config()
+            config = self.config_manager.config
             
             # Force sandbox mode for paper trading
             for exchange_name, exchange_config in config['exchanges'].items():
