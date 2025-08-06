@@ -257,17 +257,29 @@ class LiveDataEngine:
             
             # 1. Market Condition Analysis
             market_condition = await self.market_analyzer.analyze_market_condition(symbol)
+            if market_condition is None:
+                market_condition = {'condition': 'unknown', 'strength': 0.5, 'confidence': 0.0}
+                logger.warning(f"⚠️ {symbol} market condition None döndü, default değerler kullanılıyor")
             
             # 2. AI Signal Analysis
             ai_signals = await self.ai_signal_filter.analyze_signals(symbol, market_data)
+            if ai_signals is None:
+                ai_signals = {'confidence': 0.0, 'signals': [], 'strength': 0.0}
+                logger.warning(f"⚠️ {symbol} AI signals None döndü, default değerler kullanılıyor")
             
             # 3. Strategy Selection
             recommended_strategy = await self.strategy_engine.select_strategy(
                 symbol, market_condition, ai_signals.get('confidence', 0)
             )
+            if recommended_strategy is None:
+                recommended_strategy = 'scalping'  # Default strategy
+                logger.warning(f"⚠️ {symbol} strategy selection None döndü, scalping kullanılıyor")
             
             # 4. Risk Assessment
             risk_assessment = await self._assess_current_risk(symbol, live_data)
+            if risk_assessment is None:
+                risk_assessment = {'overall_risk': 'medium', 'risk_score': 0.5}
+                logger.warning(f"⚠️ {symbol} risk assessment None döndü, default değerler kullanılıyor")
             
             # 5. Entry Signal Check
             entry_signal = None
