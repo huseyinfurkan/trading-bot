@@ -657,7 +657,7 @@ class AISignalFilter:
             logger.error(f"❌ Model training error: {e}")
             self._create_default_models()
     
-    async def _prepare_training_data(self, df: pd.DataFrame) -> tuple:
+    def _prepare_training_data(self, df: pd.DataFrame) -> tuple:
         """Prepare training data with CLEAR TARGET DEFINITION"""
         try:
             if df.empty:

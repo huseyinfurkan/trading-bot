@@ -293,6 +293,7 @@ class BacktestRunner:
 
 async def main():
     """Main backtest runner"""
+    from src.utils.logger_setup import setup_logging
     setup_logging('backtest')
     
     try:
