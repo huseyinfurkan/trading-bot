@@ -37,7 +37,7 @@ class BacktestRunner:
             logger.info("🚀 Backtesting Runner başlatılıyor...")
             
             # Load configuration
-            self.config = ConfigManager()
+            self.config = ConfigManager('config/config.yaml')
             await self.config.load_config()
             
             # Initialize core components

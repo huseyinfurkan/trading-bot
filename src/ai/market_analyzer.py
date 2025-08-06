@@ -57,17 +57,20 @@ class MarketAnalyzer:
             for symbol in symbols:
                 try:
                     # Get 1h data for trend analysis
+                    now = datetime.now()
                     data_1h = await self.exchange_manager.get_historical_data(
                         symbol=symbol,
                         timeframe='1h',
-                        limit=50
+                        start_date=now - timedelta(days=3),
+                        end_date=now
                     )
                     
                     # Get 15m data for short-term analysis  
                     data_15m = await self.exchange_manager.get_historical_data(
                         symbol=symbol,
                         timeframe='15m',
-                        limit=100
+                        start_date=now - timedelta(days=1),
+                        end_date=now
                     )
                     
                     if data_1h is not None and len(data_1h) > 20 and data_15m is not None and len(data_15m) > 50:
@@ -121,8 +124,8 @@ class MarketAnalyzer:
     async def analyze_market_condition(self, symbol: str) -> Dict[str, Any]:
         """Belirli bir sembol için market koşulunu analiz et"""
         try:
-            # Get general market analysis
-            general_analysis = await self.analyze_current_market()
+            # Get general market analysis (returns string regime)
+            general_regime = await self.analyze_current_market()
             
             # Get specific symbol data
             symbol_data = await self._fetch_symbol_data(symbol)
@@ -134,20 +137,20 @@ class MarketAnalyzer:
                 # Combine with general market
                 return {
                     'symbol': symbol,
-                    'condition': symbol_analysis.get('trend', general_analysis.get('condition', 'unknown')),
-                    'strength': symbol_analysis.get('strength', general_analysis.get('strength', 0.5)),
-                    'volatility': symbol_analysis.get('volatility', general_analysis.get('volatility', 'normal')),
-                    'recommended_strategies': symbol_analysis.get('strategies', general_analysis.get('recommended_strategies', [])),
+                    'condition': symbol_analysis.get('trend', general_regime),
+                    'strength': symbol_analysis.get('strength', 0.5),
+                    'volatility': symbol_analysis.get('volatility', 'normal'),
+                    'recommended_strategies': symbol_analysis.get('strategies', []),
                     'timestamp': datetime.now(),
-                    'confidence': symbol_analysis.get('confidence', general_analysis.get('confidence', 0.5))
+                    'confidence': symbol_analysis.get('confidence', 0.5)
                 }
             else:
                 # Use general market analysis
                 return {
                     'symbol': symbol,
-                    'condition': general_analysis.get('condition', 'unknown'),
-                    'strength': general_analysis.get('strength', 0.5),
-                    'volatility': general_analysis.get('volatility', 'normal'),
+                    'condition': general_regime,
+                    'strength': 0.5,
+                    'volatility': 'normal',
                     'recommended_strategies': [],
                     'timestamp': datetime.now(),
                     'confidence': 0.5

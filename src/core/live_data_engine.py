@@ -290,7 +290,7 @@ class LiveDataEngine:
             entry_signal = None
             if strategy_signal:
                 entry_signal = {
-                    'action': strategy_signal['signal'],
+                    'action': strategy_signal.get('action', 'HOLD'),
                     'confidence': strategy_signal['confidence'],
                     'entry_price': strategy_signal['entry_price'],
                     'stop_loss': strategy_signal.get('stop_loss'),

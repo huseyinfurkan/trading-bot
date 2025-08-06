@@ -107,6 +107,132 @@ class AISignalFilter:
             logger.error(f"❌ {symbol} sinyal analizi hatası: {e}")
             return self._get_default_signals(symbol)
     
+    async def filter_signal(self, symbol: str, market_data: Dict[str, Any], regime: str = None) -> Dict[str, Any]:
+        """
+        Filter and analyze trading signals using AI models
+        
+        Args:
+            symbol: Trading symbol
+            market_data: Current market data
+            regime: Current market regime
+            
+        Returns:
+            Dict with signal analysis and filtering results
+        """
+        try:
+            logger.debug(f"🔍 Filtering signal for {symbol} in {regime} regime")
+            
+            # Get current price and basic data
+            current_price = market_data.get('price', 0)
+            volume = market_data.get('volume', 0)
+            
+            # Check if we have trained models for this symbol
+            model_key = f"{symbol}_gradient_boosting"
+            if model_key not in self.models:
+                logger.debug(f"⚠️ No trained model for {symbol}, using default analysis")
+                return self._get_default_signal_analysis(symbol, market_data, regime)
+            
+            # Prepare features for ML prediction
+            features = self._prepare_real_time_features(market_data, regime)
+            if not features:
+                return self._get_default_signal_analysis(symbol, market_data, regime)
+            
+            # Get ML prediction
+            model = self.models[model_key]
+            scaler = self.scalers.get(f"{symbol}_scaler")
+            
+            if scaler:
+                features_scaled = scaler.transform([features])
+            else:
+                features_scaled = [features]
+            
+            # Predict signal probability
+            signal_prob = model.predict_proba(features_scaled)[0]
+            signal_confidence = max(signal_prob)
+            predicted_signal = 1 if signal_prob[1] > signal_prob[0] else 0
+            
+            # Analyze signal strength based on market regime
+            regime_multiplier = self._get_regime_multiplier(regime)
+            final_confidence = signal_confidence * regime_multiplier
+            
+            # Generate filtered signal
+            signal_type = "BUY" if predicted_signal == 1 and final_confidence > 0.65 else "HOLD"
+            
+            result = {
+                'signal': signal_type,
+                'confidence': final_confidence,
+                'ml_probability': signal_prob[1],
+                'regime': regime,
+                'features_used': len(features),
+                'model_used': model_key,
+                'timestamp': datetime.now().isoformat(),
+                'price': current_price,
+                'volume': volume
+            }
+            
+            logger.debug(f"✅ Signal filtered: {signal_type} (confidence: {final_confidence:.3f})")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Signal filtering error for {symbol}: {e}")
+            return self._get_default_signal_analysis(symbol, market_data, regime)
+    
+    def _prepare_real_time_features(self, market_data: Dict[str, Any], regime: str) -> List[float]:
+        """Prepare features for real-time ML prediction"""
+        try:
+            # Basic features that match our training data
+            features = [
+                market_data.get('rsi_14', 50.0),
+                market_data.get('macd_signal', 0.0),
+                market_data.get('bb_position', 0.5),
+                market_data.get('volume_ratio', 1.0),
+                market_data.get('price_change_1h', 0.0),
+                market_data.get('volatility', 0.01),
+                market_data.get('trend_strength', 0.0),
+                0.0,  # support_distance (placeholder)
+                0.0,  # resistance_distance (placeholder)
+                market_data.get('momentum', 0.0),
+                0.0,  # volume_trend (placeholder)
+                market_data.get('price_velocity', 0.0),
+                0.0   # market_pressure (placeholder)
+            ]
+            
+            # Ensure all features are numeric and finite
+            features = [float(f) if not np.isnan(float(f)) and np.isfinite(float(f)) else 0.0 for f in features]
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"❌ Feature preparation error: {e}")
+            return []
+    
+    def _get_regime_multiplier(self, regime: str) -> float:
+        """Get confidence multiplier based on market regime"""
+        regime_multipliers = {
+            'trending_market': 1.2,
+            'breakout_market': 1.3,
+            'high_volatility': 0.8,
+            'sideways_market': 0.9,
+            'consolidation_market': 0.85,
+            'ranging_market': 0.9,
+            'volatile_ranging_market': 0.7
+        }
+        return regime_multipliers.get(regime, 1.0)
+    
+    def _get_default_signal_analysis(self, symbol: str, market_data: Dict[str, Any], regime: str) -> Dict[str, Any]:
+        """Get default signal analysis when ML models are not available"""
+        return {
+            'signal': 'HOLD',
+            'confidence': 0.5,
+            'ml_probability': 0.5,
+            'regime': regime,
+            'features_used': 0,
+            'model_used': 'default',
+            'timestamp': datetime.now().isoformat(),
+            'price': market_data.get('price', 0),
+            'volume': market_data.get('volume', 0)
+        }
+    
     def _get_technical_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Teknik analiz sinyalleri"""
         signals = []
