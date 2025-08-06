@@ -14,14 +14,16 @@ from loguru import logger
 class AISignalFilter:
     """AI destekli sinyal filtreleme sistemi"""
     
-    def __init__(self, ai_config: Dict[str, Any], db_manager):
+    def __init__(self, ai_config: Dict[str, Any], db_manager, exchange_manager=None):
         """
         Args:
             ai_config: AI konfigürasyonu
             db_manager: Veritabanı yöneticisi
+            exchange_manager: Exchange manager for data fetching
         """
         self.config = ai_config
         self.db_manager = db_manager
+        self.exchange_manager = exchange_manager
         self.confidence_threshold = ai_config.get('confidence_threshold', 0.75)
         self.retrain_frequency = ai_config.get('retrain_frequency_hours', 24)
         
@@ -603,6 +605,12 @@ class AISignalFilter:
         try:
             logger.info("🎓 Starting ML model training...")
             
+            # Check if exchange_manager is available
+            if not self.exchange_manager:
+                logger.warning("⚠️ No exchange manager available, using default models")
+                self._create_default_models()
+                return
+            
             # Get training data from multiple symbols
             symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT']
             all_features = []
@@ -631,6 +639,7 @@ class AISignalFilter:
             
             if len(all_features) > 100:  # Need minimum samples
                 await self._train_and_save_models(all_features, all_labels)
+                logger.success(f"🎓 Models trained on {len(all_features)} samples from {len(symbols)} symbols")
             else:
                 logger.warning("⚠️ Insufficient training data, using default models")
                 self._create_default_models()

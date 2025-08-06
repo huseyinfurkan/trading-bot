@@ -59,7 +59,7 @@ class BacktestRunner:
             
             # Initialize AI components
             self.market_analyzer = MarketAnalyzer(config['market_analysis'], self.db_manager)
-            self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager)
+            self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager, self.exchange_manager)
             self.confidence_calculator = ConfidenceCalculator(config['ai'], self.db_manager)
             
             # Initialize strategy engine
@@ -153,6 +153,22 @@ class BacktestRunner:
                 strategy=strategy,
                 historical_data=historical_data
             )
+            
+            # Apply optimized parameters if successful
+            if results and 'best_params' in results:
+                logger.info("🔧 Applying optimized parameters to strategy")
+                self.strategy_engine.apply_optimized_parameters(strategy, results['best_params'])
+                
+                # Run final backtest with optimized parameters
+                logger.info("🧪 Running final backtest with optimized parameters")
+                final_results = await self.strategy_engine.backtest_strategy(
+                    symbol=symbol,
+                    strategy=strategy,
+                    historical_data=historical_data
+                )
+                
+                results['final_backtest'] = final_results
+                logger.success(f"✅ Final optimized performance: {final_results.get('roi', 0):.2%} ROI")
             
             logger.success(f"✅ Optimization completed")
             

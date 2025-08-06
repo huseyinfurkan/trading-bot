@@ -105,7 +105,8 @@ class AdvancedTradingBot:
             # Initialize AI components
             self.ai_signal_filter = AISignalFilter(
                 self.config.get('ai_settings', {}),
-                self.db_manager
+                self.db_manager,
+                self.exchange_manager
             )
             await self.ai_signal_filter.initialize()
             

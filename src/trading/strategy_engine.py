@@ -14,28 +14,56 @@ import asyncio
 class StrategyEngine:
     """Strateji motoru - tüm trading stratejilerini yönetir"""
     
-    def __init__(self, strategies_config: Dict[str, Any], signal_filter, market_analyzer, confidence_calculator):
-        """
-        Args:
-            strategies_config: Strateji konfigürasyonları
-            signal_filter: AI sinyal filtreleme sistemi
-            market_analyzer: Market analizöru
-            confidence_calculator: Güven faktörü hesaplayıcısı
-        """
-        self.config = strategies_config
-        self.signal_filter = signal_filter
+    def __init__(self, strategy_config: Dict, ai_signal_filter, market_analyzer, confidence_calculator):
+        """Strategy Engine başlatıcısı"""
+        self.config = strategy_config
+        self.ai_signal_filter = ai_signal_filter
         self.market_analyzer = market_analyzer
         self.confidence_calculator = confidence_calculator
         
-        # Strategy configurations
-        self.scalping_config = strategies_config.get('scalping', {})
-        self.swing_config = strategies_config.get('swing_trading', {})
-        self.trend_config = strategies_config.get('trend_following', {})
-        self.mean_reversion_config = strategies_config.get('mean_reversion', {})
+        # Strategy-specific timeframes (CRITICAL FIX)
+        self.strategy_timeframes = {
+            'scalping': '5m',        # Scalping: 5-minute timeframe
+            'swing_trading': '1h',   # Swing: 1-hour timeframe  
+            'trend_following': '4h', # Trend: 4-hour timeframe
+            'mean_reversion': '15m'  # Mean reversion: 15-minute timeframe
+        }
         
-        # Active strategies
-        self.active_strategies = []
-        self._load_active_strategies()
+        # Strategy-specific parameters (will be optimized)
+        self.strategy_params = {
+            'scalping': {
+                'rsi_oversold': 30,
+                'rsi_overbought': 70,
+                'volume_threshold': 1.5,
+                'min_signals': 3,
+                'min_strength': 0.7
+            },
+            'swing_trading': {
+                'sma_short': 20,
+                'sma_long': 50,
+                'rsi_threshold': 35,
+                'volume_confirmation': 1.3,
+                'trend_confirmation': True
+            },
+            'trend_following': {
+                'ema_fast': 12,
+                'ema_slow': 26,
+                'trend_strength': 0.7,
+                'volume_filter': 1.2,
+                'macd_confirmation': True
+            },
+            'mean_reversion': {
+                'bb_period': 20,
+                'bb_std': 2.0,
+                'rsi_extreme': 25,
+                'reversion_target': 0.6,
+                'oversold_threshold': 25,
+                'overbought_threshold': 75
+            }
+        }
+        
+        # Load active strategies
+        self.active_strategies = self._load_active_strategies()
         
         logger.info("🎯 Strategy Engine initialized")
     
@@ -51,24 +79,74 @@ class StrategyEngine:
     
     async def select_strategy(self, symbol: str, market_condition: Dict[str, Any], 
                              confidence: float) -> Optional[str]:
-        """Piyasa koşullarına göre en uygun stratejiyi seç"""
+        """Enhanced strategy selection based on REAL market analysis"""
         try:
+            # Get real market metrics
             market_cond = market_condition.get('condition', 'sideways_market')
-            volatility = market_condition.get('volatility', 'normal')
-            strength = market_condition.get('strength', 0.5)
+            volatility = market_condition.get('volatility_score', 0.5)  # 0-1 scale
+            trend_strength = market_condition.get('trend_strength', 0.5)  # 0-1 scale
+            volume_profile = market_condition.get('volume_profile', 'normal')
             
-            # Strategy selection logic
-            if market_cond == 'bull_market' and strength > 0.7:
-                if volatility == 'low':
-                    return 'trend_following'
-                else:
-                    return 'swing_trading'
-            elif market_cond == 'bear_market' and strength > 0.7:
-                return 'mean_reversion'
-            elif volatility == 'high' and confidence > 0.8:
-                return 'scalping'
-            else:
-                return 'swing_trading'  # Default safe strategy
+            # Calculate strategy scores based on real conditions
+            strategy_scores = {}
+            
+            # Scalping: Best in high volatility, sideways markets
+            scalping_score = 0.3  # Base score
+            if volatility > 0.6:  # High volatility
+                scalping_score += 0.4
+            if market_cond == 'sideways_market':
+                scalping_score += 0.3
+            if volume_profile == 'high':
+                scalping_score += 0.2
+            if confidence > 0.8:  # High AI confidence
+                scalping_score += 0.1
+            strategy_scores['scalping'] = scalping_score
+            
+            # Trend Following: Best in strong trending markets
+            trend_score = 0.2
+            if trend_strength > 0.7:  # Strong trend
+                trend_score += 0.5
+            if market_cond in ['bull_market', 'bear_market']:
+                trend_score += 0.3
+            if volatility < 0.4:  # Low volatility = stable trend
+                trend_score += 0.2
+            strategy_scores['trend_following'] = trend_score
+            
+            # Swing Trading: Balanced approach for medium volatility
+            swing_score = 0.4  # Higher base score (safer)
+            if 0.3 < volatility < 0.7:  # Medium volatility
+                swing_score += 0.3
+            if 0.4 < trend_strength < 0.8:  # Medium trend strength
+                swing_score += 0.2
+            if market_cond == 'sideways_market':
+                swing_score += 0.1
+            strategy_scores['swing_trading'] = swing_score
+            
+            # Mean Reversion: Best when price deviates from norm
+            reversion_score = 0.2
+            if market_cond == 'sideways_market':
+                reversion_score += 0.3
+            if volatility > 0.5:  # Higher volatility for reversions
+                reversion_score += 0.3
+            if trend_strength < 0.3:  # Weak trend = good for reversion
+                reversion_score += 0.4
+            strategy_scores['mean_reversion'] = reversion_score
+            
+            # Select best strategy from active ones
+            best_strategy = None
+            best_score = 0
+            
+            for strategy in self.active_strategies:
+                if strategy in strategy_scores:
+                    score = strategy_scores[strategy]
+                    if score > best_score:
+                        best_score = score
+                        best_strategy = strategy
+            
+            logger.info(f"📊 Strategy scores: {strategy_scores}")
+            logger.info(f"🎯 Selected: {best_strategy} (score: {best_score:.2f})")
+            
+            return best_strategy or 'swing_trading'  # Safe fallback
                 
         except Exception as e:
             logger.error(f"❌ Strategy selection error: {e}")
@@ -134,18 +212,26 @@ class StrategyEngine:
             sell_signals = 0
             signal_strength = 0
             
+            # Get strategy parameters (optimized or default)
+            params = self.strategy_params.get('scalping', {})
+            rsi_oversold = params.get('rsi_oversold', 30)
+            rsi_overbought = params.get('rsi_overbought', 70)
+            volume_threshold = params.get('volume_threshold', 1.5)
+            min_signals = params.get('min_signals', 3)
+            min_strength = params.get('min_strength', 0.7)
+            
             # 1. RSI Mean Reversion (Scalping favors quick reversals)
             rsi = indicators['rsi'].iloc[-1]
-            if rsi < 30:  # Oversold
+            if rsi < rsi_oversold:  # Oversold (optimized)
                 buy_signals += 2
                 signal_strength += 0.3
-            elif rsi > 70:  # Overbought
+            elif rsi > rsi_overbought:  # Overbought (optimized)
                 sell_signals += 2
                 signal_strength += 0.3
             
             # 2. Volume Spike Confirmation
             volume_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1]
-            if volume_ratio > 1.5:  # Volume spike
+            if volume_ratio > volume_threshold:  # Volume spike (optimized)
                 signal_strength += 0.2
                 if buy_signals > sell_signals:
                     buy_signals += 1
@@ -185,9 +271,7 @@ class StrategyEngine:
                 elif sell_ai > buy_ai:
                     sell_signals += 1
             
-            # Decision logic - require strong multi-factor confirmation
-            min_signals = 3
-            min_strength = 0.7
+            # Decision logic - require strong multi-factor confirmation (optimized)
             
             if buy_signals >= min_signals and signal_strength >= min_strength and buy_signals > sell_signals:
                 # Dynamic stop loss based on volatility
@@ -582,15 +666,28 @@ class StrategyEngine:
             # Define parameter ranges for optimization
             param_ranges = {
                 'scalping': {
-                    'move_threshold': [0.003, 0.005, 0.007, 0.010],
-                    'stop_loss_pct': [0.002, 0.003, 0.005],
-                    'take_profit_pct': [0.004, 0.006, 0.008]
+                    'rsi_oversold': [25, 30, 35],
+                    'rsi_overbought': [65, 70, 75],
+                    'volume_threshold': [1.3, 1.5, 2.0],
+                    'min_signals': [2, 3, 4]
                 },
                 'swing_trading': {
                     'sma_short': [15, 20, 25],
                     'sma_long': [40, 50, 60],
-                    'stop_loss_pct': [0.02, 0.03, 0.05],
-                    'take_profit_pct': [0.04, 0.06, 0.08]
+                    'rsi_threshold': [30, 35, 40],
+                    'volume_confirmation': [1.2, 1.5, 1.8]
+                },
+                'trend_following': {
+                    'ema_fast': [12, 15, 18],
+                    'ema_slow': [26, 30, 35],
+                    'trend_strength': [0.6, 0.7, 0.8],
+                    'volume_filter': [1.1, 1.3, 1.5]
+                },
+                'mean_reversion': {
+                    'bb_period': [18, 20, 22],
+                    'bb_std': [1.8, 2.0, 2.2],
+                    'rsi_extreme': [20, 25, 30],
+                    'reversion_target': [0.5, 0.6, 0.7]
                 }
             }
             
@@ -641,6 +738,25 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"❌ Parameter optimization error: {e}")
             return {'error': str(e)}
+    
+    def apply_optimized_parameters(self, strategy: str, optimized_params: Dict[str, Any]) -> None:
+        """Apply optimized parameters to strategy"""
+        try:
+            if strategy in self.strategy_params and optimized_params:
+                logger.info(f"🔧 Applying optimized parameters for {strategy}")
+                logger.info(f"📊 Old params: {self.strategy_params[strategy]}")
+                
+                # Update strategy parameters
+                self.strategy_params[strategy].update(optimized_params)
+                
+                logger.success(f"✅ New params applied: {self.strategy_params[strategy]}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to apply optimized parameters: {e}")
+    
+    def get_strategy_timeframe(self, strategy: str) -> str:
+        """Get appropriate timeframe for strategy"""
+        return self.strategy_timeframes.get(strategy, '1h')  # Default to 1h
     
     async def _backtest_with_params(self, symbol: str, strategy: str, 
                                    historical_data: pd.DataFrame, params: Dict[str, Any]) -> Dict[str, Any]:

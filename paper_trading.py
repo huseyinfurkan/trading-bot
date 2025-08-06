@@ -81,7 +81,7 @@ class PaperTradingBot:
             
             # Initialize AI components
             self.market_analyzer = MarketAnalyzer(config['market_analysis'], self.db_manager)
-            self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager)
+            self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager, self.exchange_manager)
             self.confidence_calculator = ConfidenceCalculator(config['ai'], self.db_manager)
             
             # Initialize trading components
