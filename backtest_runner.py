@@ -93,13 +93,13 @@ class BacktestRunner:
             # Fetch historical data
             logger.info("📡 Fetching historical data...")
             
-            # Use strategy-specific timeframes for optimal performance
+            # Use strategy-specific timeframes optimized for market conditions
             if 'alligator' in strategy:
-                timeframe = '4h'  # Williams Alligator optimized for 4h
+                timeframe = '15m'  # Trend following optimized for 15m
             elif 'bollinger' in strategy:
-                timeframe = '15m'  # BB+RSI+StochRSI optimized for 15m
+                timeframe = '5m'   # Mean reversion optimized for 5m (sideways markets)
             else:
-                timeframe = '1h'  # Default fallback
+                timeframe = '15m'  # Default fallback
             
             logger.info(f"📊 Using {timeframe} timeframe for {strategy}")
             

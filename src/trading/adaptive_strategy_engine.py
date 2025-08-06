@@ -23,52 +23,52 @@ class AdaptiveStrategyEngine:
         # 2 RESEARCH-BACKED STRATEGIES with proven performance
         self.strategies = {
             'alligator_ma_momentum': {
-                'name': 'Williams Alligator + MA (3,452% Research)',
-                'timeframe': '4h',  # Research-optimized timeframe
-                'description': 'Based on TradeDots 3,452% ETH return research',
-                'market_conditions': ['trending_market', 'breakout_market', 'volatile_ranging_market'],
-                'research_source': 'TradeDots Medium - ETH/BTC swing trading',
-                'proven_performance': '3,452% vs 617% buy and hold'
+                'name': 'Williams Alligator + MA (Trend Following)',
+                'timeframe': '15m',  # Optimized for trending markets
+                'description': 'Trend following strategy for directional markets',
+                'market_conditions': ['trending_market', 'breakout_market'],
+                'research_source': 'TradeDots Medium - trend following research',
+                'proven_performance': 'Optimized for 15min trending conditions'
             },
             'bollinger_rsi_stochrsi': {
-                'name': 'BB + RSI + Stochastic RSI (Multi-Indicator)',
-                'timeframe': '15m',  # Research-optimized for BTC
-                'description': 'Research-backed volatility + momentum strategy',
+                'name': 'BB + RSI + Stochastic RSI (Mean Reversion)',
+                'timeframe': '5m',   # Optimized for sideways/ranging markets
+                'description': 'Mean reversion strategy for sideways markets',
                 'market_conditions': ['sideways_market', 'consolidation_market', 'ranging_market'],
-                'research_source': 'Multiple research papers + ML optimization',
-                'proven_performance': 'Sharpe 13.5 on BTC 15min'
+                'research_source': 'Multiple research papers + scalping optimization',
+                'proven_performance': 'Optimized for 5min mean reversion'
             }
         }
         
         # RESEARCH-OPTIMIZED PARAMETERS
         self.adaptive_params = {
             'alligator_ma_momentum': {
-                # Williams Alligator (exact research settings)
+                # Williams Alligator (adjusted for 15m)
                 'jaw_period': 13,     # Jaw (blue line)
                 'jaw_shift': 8,
                 'teeth_period': 8,    # Teeth (red line) 
                 'teeth_shift': 5,
                 'lips_period': 5,     # Lips (green line)
                 'lips_shift': 3,
-                # Moving Averages (research-optimized)
+                # Moving Averages (15m optimized)
                 'sma_200': 200,       # Trend filter
-                'fast_sma': 4,        # ETH-optimized
-                'slow_sma': 7,        # ETH-optimized (BTC uses 4,10)
-                'max_hold_hours': 96   # 4h timeframe allows longer holds
+                'fast_sma': 10,       # 15m optimized
+                'slow_sma': 20,       # 15m optimized 
+                'max_hold_hours': 12  # 15m timeframe allows shorter holds (12 periods = 3 hours)
             },
             'bollinger_rsi_stochrsi': {
-                # Bollinger Bands (research settings)
+                # Bollinger Bands (5m optimized)
                 'bb_period': 20,
-                'bb_std_dev': 1.0,     # Research: 1 std dev for sensitivity
-                # RSI (research-optimized)
+                'bb_std_dev': 2.0,     # Standard 2 std dev for 5m
+                # RSI (5m optimized)
                 'rsi_period': 14,
-                'rsi_oversold': 34,    # Research-optimized thresholds
-                'rsi_overbought': 66,
+                'rsi_oversold': 30,    # Standard thresholds for 5m
+                'rsi_overbought': 70,
                 # Stochastic RSI
                 'stochrsi_period': 14,
                 'stochrsi_oversold': 20,
                 'stochrsi_overbought': 80,
-                'max_hold_hours': 6    # 15m timeframe for quick trades
+                'max_hold_hours': 6    # 5m timeframe for quick scalping (6 periods = 30 minutes)
             }
         }
         
@@ -249,151 +249,84 @@ class AdaptiveStrategyEngine:
         try:
             # Use provided historical data or fetch fresh data
             if historical_data is not None:
-                data_4h = historical_data
+                data_15m = historical_data
             else:
-                # Get 4h data (research-optimized timeframe)
+                # Get 15m data (trend following optimized timeframe)
                 now = datetime.now()
-                data_4h = await self.exchange_manager.get_historical_data(
-                    symbol=symbol, timeframe='4h', 
-                    start_date=now - timedelta(days=45), end_date=now
+                data_15m = await self.exchange_manager.get_historical_data(
+                    symbol=symbol, timeframe='15m', 
+                    start_date=now - timedelta(days=7), end_date=now
                 )
             
-            if data_4h is None or len(data_4h) < 200:
+            if data_15m is None or len(data_15m) < 100:
                 return {'action': 'HOLD', 'confidence': 0.0, 'reason': 'Insufficient data'}
             
             params = self.adaptive_params['alligator_ma_momentum']
-            current_price = data_4h['close'].iloc[-1]
+            current_price = data_15m['close'].iloc[-1]
             
-            # Williams Alligator calculation (EXACT research settings)
-            def smma(series, period):
-                """Smoothed Moving Average"""
-                alpha = 1.0 / period
-                smma_values = []
-                smma_val = series.iloc[:period].mean()  # Initial SMA
-                smma_values.append(smma_val)
-                
-                for i in range(period, len(series)):
-                    smma_val = alpha * series.iloc[i] + (1 - alpha) * smma_val
-                    smma_values.append(smma_val)
-                
-                return pd.Series(smma_values, index=series.index[period-1:])
+            # SIMPLIFIED TREND FOLLOWING FOR 15M
+            # Moving averages (clear trend detection)
+            sma_10 = data_15m['close'].rolling(params['fast_sma']).mean()
+            sma_20 = data_15m['close'].rolling(params['slow_sma']).mean()
+            sma_50 = data_15m['close'].rolling(50).mean()
             
-            # Alligator lines (shifted into future as per research)
-            hl2 = (data_4h['high'] + data_4h['low']) / 2
-            jaw = smma(hl2, params['jaw_period'])      # 13-period SMMA, shift 8
-            teeth = smma(hl2, params['teeth_period'])  # 8-period SMMA, shift 5  
-            lips = smma(hl2, params['lips_period'])    # 5-period SMMA, shift 3
+            # Current values
+            current_sma10 = sma_10.iloc[-1] if not pd.isna(sma_10.iloc[-1]) else current_price
+            current_sma20 = sma_20.iloc[-1] if not pd.isna(sma_20.iloc[-1]) else current_price
+            current_sma50 = sma_50.iloc[-1] if not pd.isna(sma_50.iloc[-1]) else current_price
             
-            # Moving averages (research settings)
-            sma_200 = data_4h['close'].rolling(params['sma_200']).mean()
-            fast_sma = data_4h['close'].rolling(params['fast_sma']).mean()
-            slow_sma = data_4h['close'].rolling(params['slow_sma']).mean()
+            # SIMPLE TREND CONDITIONS
+            # LONG: Price > SMA10 > SMA20 > SMA50 (clear uptrend)
+            strong_uptrend = (current_price > current_sma10 > current_sma20 > current_sma50)
             
-            # Get latest values
-            current_jaw = jaw.iloc[-1] if len(jaw) > 0 else current_price
-            current_teeth = teeth.iloc[-1] if len(teeth) > 0 else current_price
-            current_lips = lips.iloc[-1] if len(lips) > 0 else current_price
-            current_sma200 = sma_200.iloc[-1] if not pd.isna(sma_200.iloc[-1]) else current_price
-            current_fast_sma = fast_sma.iloc[-1] if not pd.isna(fast_sma.iloc[-1]) else current_price
-            current_slow_sma = slow_sma.iloc[-1] if not pd.isna(slow_sma.iloc[-1]) else current_price
+            # SHORT: Price < SMA10 < SMA20 < SMA50 (clear downtrend)  
+            strong_downtrend = (current_price < current_sma10 < current_sma20 < current_sma50)
             
-            # SIMPLIFIED RESEARCH-BASED ENTRY CONDITIONS
-            # Focus on the most important signals for better performance
-            
-            above_sma200 = current_price > current_sma200
-            below_sma200 = current_price < current_sma200
-            
-            # Simplified alligator condition: just lips > teeth > jaw (main trend indicator)
-            alligator_aligned_bullish = current_lips > current_teeth > current_jaw
-            alligator_aligned_bearish = current_lips < current_teeth < current_jaw
-            
-            # Price momentum: fast MA above/below slow MA
-            ma_bullish = current_fast_sma > current_slow_sma
-            ma_bearish = current_fast_sma < current_slow_sma
-            
-            # Calculate line directions (momentum) - simplified
-            lips_trending_up = (lips.iloc[-1] - lips.iloc[-2]) if len(lips) >= 2 else 0
-            lips_trending_down = (lips.iloc[-2] - lips.iloc[-1]) if len(lips) >= 2 else 0
-            
-            # LONG Entry signal strength - more achievable conditions
-            long_entry_strength = 0.0
-            long_reasons = []
-            
-            if above_sma200:
-                long_entry_strength += 0.4  # Main trend filter
-                long_reasons.append("Above 200 SMA")
-            
-            if alligator_aligned_bullish:
-                long_entry_strength += 0.3  # Alligator alignment
-                long_reasons.append("Alligator bullish aligned")
-            
-            if ma_bullish:
-                long_entry_strength += 0.2  # MA momentum
-                long_reasons.append("MA bullish")
-            
-            if lips_trending_up > 0:
-                long_entry_strength += 0.1  # Trending momentum
-                long_reasons.append("Upward momentum")
-            
-            # SHORT Entry signal strength
-            short_entry_strength = 0.0
-            short_reasons = []
-            
-            if below_sma200:
-                short_entry_strength += 0.4  # Main trend filter
-                short_reasons.append("Below 200 SMA")
-            
-            if alligator_aligned_bearish:
-                short_entry_strength += 0.3  # Alligator alignment
-                short_reasons.append("Alligator bearish aligned")
-            
-            if ma_bearish:
-                short_entry_strength += 0.2  # MA momentum
-                short_reasons.append("MA bearish")
-            
-            if lips_trending_down > 0:
-                short_entry_strength += 0.1  # Trending momentum
-                short_reasons.append("Downward momentum")
+            # Momentum confirmation
+            sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
+            sma10_falling = (sma_10.iloc[-1] < sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             
             # Volume confirmation (if available)
-            if 'volume' in data_4h.columns and len(data_4h) > 20:
-                vol_ma = data_4h['volume'].rolling(20).mean()
-                current_vol = data_4h['volume'].iloc[-1]
-                if current_vol > vol_ma.iloc[-1] * 1.1:  # Lowered threshold
-                    long_entry_strength += 0.1
-                    short_entry_strength += 0.1
-                    long_reasons.append("Volume confirmation")
-                    short_reasons.append("Volume confirmation")
+            volume_boost = 0.0
+            if 'volume' in data_15m.columns and len(data_15m) > 20:
+                vol_ma = data_15m['volume'].rolling(20).mean()
+                current_vol = data_15m['volume'].iloc[-1]
+                if current_vol > vol_ma.iloc[-1] * 1.2:  # 20% above average
+                    volume_boost = 0.15
             
-            # RESEARCH EXIT CONDITIONS
-            # Exit when: fast_sma crosses below slow_sma AND price below teeth
-            # OR price falls below 200 SMA
-            exit_condition = ((current_fast_sma < current_slow_sma and current_price < current_teeth) or 
-                            current_price < current_sma200)
-            
-            if long_entry_strength >= 0.5:  # LONG signal
+            if strong_uptrend and sma10_rising:
+                confidence = 0.7 + volume_boost
                 return {
                     'action': 'BUY',
-                    'confidence': min(0.95, long_entry_strength),
+                    'confidence': min(0.95, confidence),
                     'entry_price': current_price,
-                    'reasons': long_reasons,
-                    'strategy': 'Williams Alligator + MA (LONG)',
-                    'timeframe': '4h',
-                    'stop_loss': current_jaw * 0.97,  # 3% below jaw (aggressive)
-                    'take_profit': current_price * 1.08,  # 8% target (higher)
-                    'research_basis': '3,452% ETH return (TradeDots)'
+                    'reasons': [
+                        "Strong uptrend: Price > SMA10 > SMA20 > SMA50",
+                        "SMA10 rising momentum",
+                        f"Volume boost: {volume_boost:.2f}" if volume_boost > 0 else "No volume boost"
+                    ],
+                    'strategy': 'Alligator Trend Following (LONG)',
+                    'timeframe': '15m',
+                    'stop_loss': current_sma20 * 0.98,  # Below SMA20
+                    'take_profit': current_price * 1.08,  # 8% target
+                    'research_basis': '15m trend following'
                 }
-            elif short_entry_strength >= 0.5:  # SHORT signal
+            elif strong_downtrend and sma10_falling:
+                confidence = 0.7 + volume_boost
                 return {
                     'action': 'SELL',
-                    'confidence': min(0.95, short_entry_strength),
+                    'confidence': min(0.95, confidence),
                     'entry_price': current_price,
-                    'reasons': short_reasons,
-                    'strategy': 'Williams Alligator + MA (SHORT)',
-                    'timeframe': '4h',
-                    'stop_loss': current_jaw * 1.03,  # 3% above jaw (aggressive)
-                    'take_profit': current_price * 0.92,  # 8% target (aggressive)
-                    'research_basis': '3,452% ETH return (TradeDots)'
+                    'reasons': [
+                        "Strong downtrend: Price < SMA10 < SMA20 < SMA50",
+                        "SMA10 falling momentum", 
+                        f"Volume boost: {volume_boost:.2f}" if volume_boost > 0 else "No volume boost"
+                    ],
+                    'strategy': 'Alligator Trend Following (SHORT)',
+                    'timeframe': '15m',
+                    'stop_loss': current_sma20 * 1.02,  # Above SMA20
+                    'take_profit': current_price * 0.92,  # 8% target
+                    'research_basis': '15m trend following'
                 }
             else:
                 return {
@@ -414,113 +347,93 @@ class AdaptiveStrategyEngine:
         try:
             # Use provided historical data or fetch fresh data
             if historical_data is not None:
-                data_15m = historical_data
+                data_5m = historical_data
             else:
-                # Get 15m data (research-optimized timeframe for BTC)
+                # Get 5m data (mean reversion optimized timeframe for sideways markets)
                 now = datetime.now()
-                data_15m = await self.exchange_manager.get_historical_data(
-                    symbol=symbol, timeframe='15m', 
-                    start_date=now - timedelta(days=3), end_date=now
+                data_5m = await self.exchange_manager.get_historical_data(
+                    symbol=symbol, timeframe='5m', 
+                    start_date=now - timedelta(days=2), end_date=now
                 )
             
-            if data_15m is None or len(data_15m) < 100:
+            if data_5m is None or len(data_5m) < 50:
                 return {'action': 'HOLD', 'confidence': 0.0, 'reason': 'Insufficient data'}
             
             params = self.adaptive_params['bollinger_rsi_stochrsi']
-            current_price = data_15m['close'].iloc[-1]
+            current_price = data_5m['close'].iloc[-1]
             
-            # Bollinger Bands (research settings: 1 std dev for sensitivity)
-            bb_ma = data_15m['close'].rolling(params['bb_period']).mean()
-            bb_std = data_15m['close'].rolling(params['bb_period']).std()
+            # MEAN REVERSION INDICATORS FOR 5M SIDEWAYS MARKETS
+            
+            # Bollinger Bands (standard settings for 5m)
+            bb_ma = data_5m['close'].rolling(params['bb_period']).mean()
+            bb_std = data_5m['close'].rolling(params['bb_period']).std()
             bb_upper = bb_ma + (bb_std * params['bb_std_dev'])
             bb_lower = bb_ma - (bb_std * params['bb_std_dev'])
             bb_position = (current_price - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])
             
-            # RSI (research-optimized thresholds)
-            delta = data_15m['close'].diff()
+            # RSI (standard settings for 5m)
+            delta = data_5m['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=params['rsi_period']).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=params['rsi_period']).mean()
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             current_rsi = rsi.iloc[-1]
             
-            # Stochastic RSI
-            rsi_min = rsi.rolling(params['stochrsi_period']).min()
-            rsi_max = rsi.rolling(params['stochrsi_period']).max()
-            stoch_rsi = 100 * (rsi - rsi_min) / (rsi_max - rsi_min)
-            current_stoch_rsi = stoch_rsi.iloc[-1]
+            # SIMPLIFIED MEAN REVERSION CONDITIONS
+            # BUY: Oversold conditions (bounce from bottom)
+            oversold_rsi = current_rsi < params['rsi_oversold']
+            near_lower_bb = bb_position < 0.2  # Near lower Bollinger Band
             
-            # RESEARCH-BASED SIGNAL CONDITIONS
+            # SELL: Overbought conditions (rejection from top)
+            overbought_rsi = current_rsi > params['rsi_overbought']
+            near_upper_bb = bb_position > 0.8  # Near upper Bollinger Band
             
-            # LONG SIGNAL (research criteria):
-            # RSI < 34 AND Stochastic RSI < 20 AND close <= lower BB
-            long_rsi_condition = current_rsi < params['rsi_oversold']
-            long_stochrsi_condition = current_stoch_rsi < params['stochrsi_oversold']
-            long_bb_condition = current_price <= bb_lower.iloc[-1] * 1.01  # 1% buffer
-            
-            # SHORT SIGNAL (research criteria):  
-            # RSI > 66 AND Stochastic RSI > 80 AND close >= upper BB
-            short_rsi_condition = current_rsi > params['rsi_overbought']
-            short_stochrsi_condition = current_stoch_rsi > params['stochrsi_overbought']
-            short_bb_condition = current_price >= bb_upper.iloc[-1] * 0.99  # 1% buffer
-            
-            # Volume confirmation (research enhancement)
+            # Volume confirmation for 5m scalping
             volume_strength = 0.0
-            if 'volume' in data_15m.columns:
-                vol_ma = data_15m['volume'].rolling(20).mean()
-                volume_ratio = data_15m['volume'].iloc[-1] / vol_ma.iloc[-1]
-                if volume_ratio > 1.5:  # Above average volume
-                    volume_strength = 0.15
+            if 'volume' in data_5m.columns and len(data_5m) > 20:
+                vol_ma = data_5m['volume'].rolling(20).mean()
+                current_vol = data_5m['volume'].iloc[-1]
+                if current_vol > vol_ma.iloc[-1] * 1.3:  # 30% above average for scalping
+                    volume_strength = 0.2
             
-            # Signal strength calculation - BOTH LONG AND SHORT
-            if long_rsi_condition and long_stochrsi_condition and long_bb_condition:
-                confidence = 0.6 + volume_strength  # LONG signal
-                # Additional confluence factors
-                if bb_position < 0.1:  # Very close to lower band
-                    confidence += 0.15
-                if current_rsi < 25:  # Extremely oversold
-                    confidence += 0.1
-                
+            # LONG signal - Mean reversion bounce
+            if oversold_rsi and near_lower_bb:
+                confidence = 0.65 + volume_strength
                 return {
                     'action': 'BUY',
                     'confidence': min(0.95, confidence),
                     'entry_price': current_price,
                     'reasons': [
                         f"RSI oversold: {current_rsi:.1f}",
-                        f"StochRSI oversold: {current_stoch_rsi:.1f}",
-                        f"At lower BB: {bb_position:.2f}",
-                        "Mean reversion LONG opportunity"
+                        f"Near lower BB: {bb_position:.2f}",
+                        "Mean reversion LONG opportunity",
+                        f"Volume strength: {volume_strength:.2f}" if volume_strength > 0 else "No volume boost"
                     ],
-                    'strategy': 'BB + RSI + Stochastic RSI (LONG)',
-                    'timeframe': '15m',
-                    'stop_loss': current_price * 0.995,  # 0.5% stop
-                    'take_profit': current_price * 1.035,  # 3.5% target (higher)
-                    'research_basis': 'Sharpe 13.5 on BTC 15min'
+                    'strategy': 'BB Mean Reversion (LONG)',
+                    'timeframe': '5m',
+                    'stop_loss': current_price * 0.995,  # Tight 0.5% stop for scalping
+                    'take_profit': current_price * 1.02,  # 2% target for quick scalp
+                    'research_basis': '5m mean reversion scalping'
                 }
             
-            elif short_rsi_condition and short_stochrsi_condition and short_bb_condition:
-                confidence = 0.6 + volume_strength  # SHORT signal
-                # Additional confluence factors  
-                if bb_position > 0.9:  # Very close to upper band
-                    confidence += 0.15
-                if current_rsi > 75:  # Extremely overbought
-                    confidence += 0.1
-                
+            # SHORT signal - Mean reversion rejection
+            elif overbought_rsi and near_upper_bb:
+                confidence = 0.65 + volume_strength
                 return {
                     'action': 'SELL',
                     'confidence': min(0.95, confidence),
                     'entry_price': current_price,
                     'reasons': [
                         f"RSI overbought: {current_rsi:.1f}",
-                        f"StochRSI overbought: {current_stoch_rsi:.1f}",
-                        f"At upper BB: {bb_position:.2f}",
-                        "Mean reversion SHORT opportunity"
+                        f"Near upper BB: {bb_position:.2f}",
+                        "Mean reversion SHORT opportunity",
+                        f"Volume strength: {volume_strength:.2f}" if volume_strength > 0 else "No volume boost"
                     ],
-                    'strategy': 'BB + RSI + Stochastic RSI (SHORT)',
-                    'timeframe': '15m',
-                    'stop_loss': current_price * 1.005,  # 0.5% stop (higher price for short)
-                    'take_profit': current_price * 0.965,  # 3.5% target (lower price for short)
-                    'research_basis': 'Sharpe 13.5 on BTC 15min'
+                    'strategy': 'BB Mean Reversion (SHORT)',
+                    'timeframe': '5m',
+                    'stop_loss': current_price * 1.005,  # Tight 0.5% stop for scalping
+                    'take_profit': current_price * 0.98,  # 2% target for quick scalp
+                    'research_basis': '5m mean reversion scalping'
                 }
             
             else:
@@ -635,19 +548,19 @@ class AdaptiveStrategyEngine:
                         signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     
                     if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal['confidence'] > confidence_threshold:
-                        # Enter position with strategy-specific sizing (AGGRESSIVE for high returns)
+                        # Enter position with strategy-specific sizing for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
-                            # Aggressive sizing for 4h trend following
-                            risk_per_trade = 0.03   # 3% risk (increased)
-                            leverage = 4.0          # Higher leverage for bigger gains
+                            # Moderate sizing for 15m trend following (less aggressive than before)
+                            risk_per_trade = 0.02   # 2% risk (reasonable for 15m)
+                            leverage = 3.0          # Moderate leverage for trend following
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            # Very active sizing for 15m mean reversion
-                            risk_per_trade = 0.025  # 2.5% risk (increased)
-                            leverage = 5.0          # High leverage for quick profits
+                            # Conservative sizing for 5m mean reversion scalping
+                            risk_per_trade = 0.015  # 1.5% risk (conservative for fast scalping)
+                            leverage = 2.5          # Lower leverage for quick trades
                         else:
-                            # Default aggressive sizing
-                            risk_per_trade = 0.025
-                            leverage = 4.0
+                            # Default moderate sizing
+                            risk_per_trade = 0.02
+                            leverage = 3.0
                         
                         position_value = capital * risk_per_trade * leverage
                         position_size = position_value / current_price
@@ -676,16 +589,16 @@ class AdaptiveStrategyEngine:
                         profit_target = custom_params.get('profit_target', 0.08)
                         stop_loss = custom_params.get('stop_loss', 0.04)
                     else:
-                        # Strategy-specific AGGRESSIVE exit conditions for high returns
+                        # Strategy-specific OPTIMIZED exit conditions for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
-                            profit_target = 0.10  # 10% profit target (aggressive)
-                            stop_loss = 0.04      # 4% stop loss (wider for trends)
+                            profit_target = 0.06  # 6% profit target (15m trend following)
+                            stop_loss = 0.03      # 3% stop loss (reasonable for 15m)
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            profit_target = 0.06  # 6% profit target (aggressive)
-                            stop_loss = 0.025     # 2.5% stop loss (tighter for mean reversion)
+                            profit_target = 0.025  # 2.5% profit target (5m mean reversion)
+                            stop_loss = 0.015      # 1.5% stop loss (tight for 5m scalping)
                         else:
-                            profit_target = 0.08   # 8% default (aggressive)
-                            stop_loss = 0.035      # 3.5% default
+                            profit_target = 0.04   # 4% default
+                            stop_loss = 0.025      # 2.5% default
                     
                     # Apply exit conditions
                     if pnl_pct > profit_target:
