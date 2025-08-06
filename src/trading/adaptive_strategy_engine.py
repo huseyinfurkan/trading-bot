@@ -241,18 +241,22 @@ class AdaptiveStrategyEngine:
             logger.error(f"❌ Error getting entry signal: {e}")
             return {'action': 'HOLD', 'confidence': 0.0, 'reason': f'Error: {str(e)}'}
 
-    async def _alligator_ma_signal(self, symbol: str, market_data: Dict, ai_analysis: Dict) -> Dict[str, Any]:
+    async def _alligator_ma_signal(self, symbol: str, market_data: Dict, ai_analysis: Dict, historical_data: pd.DataFrame = None) -> Dict[str, Any]:
         """
         Williams Alligator + Moving Average Strategy
         Based on TradeDots research: 3,452% return on ETH
         """
         try:
-            # Get 4h data (research-optimized timeframe)
-            now = datetime.now()
-            data_4h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='4h', 
-                start_date=now - timedelta(days=45), end_date=now
-            )
+            # Use provided historical data or fetch fresh data
+            if historical_data is not None:
+                data_4h = historical_data
+            else:
+                # Get 4h data (research-optimized timeframe)
+                now = datetime.now()
+                data_4h = await self.exchange_manager.get_historical_data(
+                    symbol=symbol, timeframe='4h', 
+                    start_date=now - timedelta(days=45), end_date=now
+                )
             
             if data_4h is None or len(data_4h) < 200:
                 return {'action': 'HOLD', 'confidence': 0.0, 'reason': 'Insufficient data'}
@@ -363,18 +367,22 @@ class AdaptiveStrategyEngine:
             logger.error(f"❌ Alligator MA signal error: {e}")
             return {'action': 'HOLD', 'confidence': 0.0, 'reason': f'Signal error: {str(e)}'}
 
-    async def _bollinger_rsi_stochrsi_signal(self, symbol: str, market_data: Dict, ai_analysis: Dict) -> Dict[str, Any]:
+    async def _bollinger_rsi_stochrsi_signal(self, symbol: str, market_data: Dict, ai_analysis: Dict, historical_data: pd.DataFrame = None) -> Dict[str, Any]:
         """
         Bollinger Bands + RSI + Stochastic RSI Strategy
         Based on research: Sharpe 13.5 on BTC 15min
         """
         try:
-            # Get 15m data (research-optimized timeframe for BTC)
-            now = datetime.now()
-            data_15m = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='15m', 
-                start_date=now - timedelta(days=3), end_date=now
-            )
+            # Use provided historical data or fetch fresh data
+            if historical_data is not None:
+                data_15m = historical_data
+            else:
+                # Get 15m data (research-optimized timeframe for BTC)
+                now = datetime.now()
+                data_15m = await self.exchange_manager.get_historical_data(
+                    symbol=symbol, timeframe='15m', 
+                    start_date=now - timedelta(days=3), end_date=now
+                )
             
             if data_15m is None or len(data_15m) < 100:
                 return {'action': 'HOLD', 'confidence': 0.0, 'reason': 'Insufficient data'}
@@ -573,13 +581,16 @@ class AdaptiveStrategyEngine:
                 # Position management
                 if position is None:  # No position
                     # Check for entry signal using research-backed strategies
+                    # Pass current historical data slice to avoid API calls
+                    current_df_slice = df.iloc[:i+1]  # Up to current point
+                    
                     if actual_strategy == 'alligator_ma_momentum':
-                        signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8})
+                        signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     elif actual_strategy == 'bollinger_rsi_stochrsi':
-                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8})
+                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     else:
                         # Default to bollinger strategy
-                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8})
+                        signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
                     
                     if signal['action'] == 'BUY' and signal['confidence'] > 0.7:
                         # Enter position
