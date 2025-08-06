@@ -182,7 +182,7 @@ class LiveDataEngine:
                             self.analysis_count += 1
                             
                             logger.info(f"📈 {symbol} analiz tamamlandı - "
-                                      f"Market: {analysis_result['market_condition']['condition']}, "
+                                      f"Market: {analysis_result['market_condition']['regime']}, "
                                       f"AI Confidence: {analysis_result['ai_signals']['confidence']:.2f}, "
                                       f"Strategy: {analysis_result['recommended_strategy']}")
                     
@@ -282,16 +282,17 @@ class LiveDataEngine:
                 risk_assessment = {'overall_risk': 'medium', 'risk_score': 0.5}
                 logger.warning(f"⚠️ {symbol} risk assessment None döndü, default değerler kullanılıyor")
             
-            # 5. Entry Signal Check
+            # 5. Entry Signal from Adaptive Strategy (already calculated above)
             entry_signal = None
-            if recommended_strategy and market_data and ai_signals:
-                try:
-                    entry_signal = await self.strategy_engine.get_entry_signal(
-                        symbol, market_data, ai_signals, recommended_strategy
-                    )
-                except Exception as ex:
-                    logger.warning(f"⚠️ {symbol} entry signal hatası: {ex}")
-                    entry_signal = None
+            if strategy_signal:
+                entry_signal = {
+                    'action': strategy_signal['signal'],
+                    'confidence': strategy_signal['confidence'],
+                    'entry_price': strategy_signal['entry_price'],
+                    'stop_loss': strategy_signal.get('stop_loss'),
+                    'take_profit': strategy_signal.get('take_profit'),
+                    'reason': strategy_signal.get('reason', 'Adaptive strategy signal')
+                }
             
             # 6. Technical Analysis Summary
             technical_summary = self._calculate_technical_summary(dataframe) if dataframe is not None else {}

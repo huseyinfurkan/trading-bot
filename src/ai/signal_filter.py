@@ -36,6 +36,10 @@ class AISignalFilter:
         self.signal_cache = {}
         self.cache_expiry = 300  # 5 minutes
         
+        # Initialize model validator for performance monitoring
+        from .model_validator import ModelValidator
+        self.model_validator = ModelValidator()
+        
         logger.info("🧠 AI Signal Filter initialized")
     
     async def initialize(self) -> None:
@@ -789,7 +793,25 @@ class AISignalFilter:
             self.rf_model.fit(X_train_scaled, y_train)
             rf_score = self.rf_model.score(X_test_scaled, y_test)
             
-            # Save models
+            # COMPREHENSIVE MODEL VALIDATION
+            gb_validation = self.model_validator.validate_model_performance(
+                self.gb_model, X_test_scaled, y_test, "GradientBoosting"
+            )
+            rf_validation = self.model_validator.validate_model_performance(
+                self.rf_model, X_test_scaled, y_test, "RandomForest"
+            )
+            
+            # Cross-validation for additional confidence
+            gb_cv = self.model_validator.cross_validate_model(self.gb_model, X_train_scaled, y_train, 
+                                                            cv_folds=5, model_name="GradientBoosting")
+            rf_cv = self.model_validator.cross_validate_model(self.rf_model, X_train_scaled, y_train,
+                                                            cv_folds=5, model_name="RandomForest")
+            
+            # Store validation results
+            self.gb_validation = gb_validation
+            self.rf_validation = rf_validation
+            
+            # Save models with validation metadata
             import os
             model_dir = "models"
             os.makedirs(model_dir, exist_ok=True)
@@ -797,8 +819,12 @@ class AISignalFilter:
             joblib.dump(self.gb_model, f"{model_dir}/gradient_boosting_model.joblib")
             joblib.dump(self.rf_model, f"{model_dir}/random_forest_model.joblib")
             joblib.dump(scaler, f"{model_dir}/scaler.joblib")
+            joblib.dump(gb_validation, f"{model_dir}/gb_validation.joblib")
+            joblib.dump(rf_validation, f"{model_dir}/rf_validation.joblib")
             
-            logger.success(f"✅ Models trained and saved! GB: {gb_score:.3f}, RF: {rf_score:.3f}")
+            logger.success(f"✅ Models trained and validated!")
+            logger.info(f"📊 GB: {gb_score:.3f} (Confidence: {gb_validation['confidence_score']:.3f} - {gb_validation['confidence_level']})")
+            logger.info(f"📊 RF: {rf_score:.3f} (Confidence: {rf_validation['confidence_score']:.3f} - {rf_validation['confidence_level']})")
             
         except Exception as e:
             logger.error(f"❌ Model training error: {e}")

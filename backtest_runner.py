@@ -62,12 +62,12 @@ class BacktestRunner:
             self.ai_signal_filter = AISignalFilter(config['ai'], self.db_manager, self.exchange_manager)
             self.confidence_calculator = ConfidenceCalculator(config['ai'], self.db_manager)
             
-            # Initialize strategy engine
-            self.strategy_engine = StrategyEngine(
-                config['strategies'],
-                self.ai_signal_filter,
-                self.market_analyzer,
-                self.confidence_calculator
+            # Initialize NEW Adaptive Strategy Engine
+            from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
+            self.strategy_engine = AdaptiveStrategyEngine(
+                config.get('strategies', {}),
+                self.exchange_manager,
+                self.ai_signal_filter
             )
             
             logger.success("✅ Backtesting components initialized")
