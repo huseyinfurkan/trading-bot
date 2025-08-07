@@ -245,45 +245,34 @@ class MarketAnalyzer:
             return None
     
     async def _fetch_symbol_data(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Belirli bir sembol için veri al"""
+        """Belirli bir sembol için veri al - CCXT Implementation"""
         try:
-            # Convert crypto symbol to yfinance format
-            if '/' in symbol:
-                # Format: BTC/USDT -> BTC-USD
-                base, quote = symbol.split('/')
-                if quote in ['USDT', 'BUSD']:
-                    yf_symbol = f"{base}-USD"
-                else:
-                    yf_symbol = f"{base}-{quote}"
-            else:
-                # Format: BTCUSDT -> BTC-USD
-                if symbol.endswith('USDT'):
-                    base = symbol[:-4]
-                    yf_symbol = f"{base}-USD"
-                elif symbol.endswith('BUSD'):
-                    base = symbol[:-4]
-                    yf_symbol = f"{base}-USD"
-                else:
-                    yf_symbol = symbol
+            # Get historical data from exchange (CCXT)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
             
-            ticker = yf.Ticker(yf_symbol)
-            hist = ticker.history(period="30d", interval="1h")
+            hist = await self.exchange_manager.get_historical_data(
+                symbol=symbol,
+                timeframe='1h',
+                start_date=start_date,
+                end_date=end_date
+            )
             
-            if hist.empty:
+            if hist is None or len(hist) < 2:
                 return None
             
-            current_price = hist['Close'].iloc[-1]
+            current_price = hist['close'].iloc[-1]
             
             # Technical analysis
             returns = hist['Close'].pct_change().dropna()
             volatility = returns.std() * np.sqrt(24 * 365)  # Annualized volatility for hourly data
             
             # Moving averages
-            ma_24 = hist['Close'].rolling(24).mean().iloc[-1]  # 24 hour MA
-            ma_168 = hist['Close'].rolling(168).mean().iloc[-1] if len(hist) >= 168 else current_price  # 7 day MA
+            ma_24 = hist['close'].rolling(24).mean().iloc[-1]  # 24 hour MA
+            ma_168 = hist['close'].rolling(168).mean().iloc[-1] if len(hist) >= 168 else current_price  # 7 day MA
             
             # RSI
-            delta = hist['Close'].diff()
+            delta = hist['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
@@ -305,38 +294,47 @@ class MarketAnalyzer:
             return None
     
     async def _get_market_summary(self) -> Dict[str, Any]:
-        """Genel piyasa özeti"""
+        """Crypto-focused market summary - yfinance removed"""
         try:
-            # Fetch major indices for market sentiment
-            indices = {
-                'SPY': '^GSPC',  # S&P 500
-                'QQQ': '^IXIC',  # NASDAQ
-                'DXY': 'DX-Y.NYB'  # Dollar Index
-            }
+            # Get crypto market dominance and sentiment from exchange data
+            # Instead of traditional indices, use crypto-specific metrics
+            crypto_summary = {}
             
-            index_data = {}
-            
-            for name, symbol in indices.items():
-                try:
-                    ticker = yf.Ticker(symbol)
-                    hist = ticker.history(period="5d", interval="1d")
+            try:
+                # Get BTC dominance proxy (BTC vs major alts)
+                btc_data = await self.exchange_manager.get_real_time_data('BTCUSDT')
+                eth_data = await self.exchange_manager.get_real_time_data('ETHUSDT')
+                
+                if btc_data and eth_data:
+                    btc_change = btc_data.get('change_pct_24h', 0)
+                    eth_change = eth_data.get('change_pct_24h', 0)
                     
-                    if not hist.empty:
-                        current = hist['Close'].iloc[-1]
-                        prev = hist['Close'].iloc[-2] if len(hist) > 1 else current
-                        change_pct = ((current - prev) / prev) * 100
+                    # Simple crypto market sentiment
+                    if btc_change > 2 and eth_change > 2:
+                        sentiment = 'bullish'
+                    elif btc_change < -2 and eth_change < -2:
+                        sentiment = 'bearish'
+                    else:
+                        sentiment = 'neutral'
                         
-                        index_data[name] = {
-                            'current': current,
-                            'change_pct': change_pct
-                        }
+                    crypto_summary = {
+                        'btc_change_24h': btc_change,
+                        'eth_change_24h': eth_change,
+                        'market_sentiment': sentiment,
+                        'btc_price': btc_data.get('price', 0),
+                        'eth_price': eth_data.get('price', 0)
+                    }
                         
-                except Exception as e:
-                    logger.warning(f"⚠️ Index {name} fetch failed: {e}")
-                    continue
+            except Exception as e:
+                logger.debug(f"Crypto summary error: {e}")
+                crypto_summary = {
+                    'market_sentiment': 'neutral',
+                    'btc_change_24h': 0,
+                    'eth_change_24h': 0
+                }
             
             return {
-                'indices': index_data,
+                'crypto_summary': crypto_summary,
                 'timestamp': datetime.now()
             }
             

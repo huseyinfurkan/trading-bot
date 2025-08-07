@@ -396,7 +396,7 @@ class LiveDataEngine:
                 position_result = await self.position_manager.open_position(
                     symbol=symbol,
                     action={
-                        'signal': action,
+                        'action': action,  # CRITICAL FIX: 'signal' -> 'action' for PositionManager compatibility
                         'entry_price': decision['entry_price'],
                         'stop_loss': decision.get('stop_loss'),
                         'take_profit': decision.get('take_profit'),
