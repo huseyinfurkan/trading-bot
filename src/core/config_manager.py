@@ -61,41 +61,6 @@ class ConfigManager:
         
                 # 1. DYNAMIC TYPE VALIDATION SCHEMA
         validation_schema = await self._get_dynamic_validation_schema()
-                'strategy_params': {
-                    'alligator_ma_momentum': {
-                        'jaw_period': {'type': int, 'min': 5, 'max': 20},
-                        'teeth_period': {'type': int, 'min': 3, 'max': 15},
-                        'lips_period': {'type': int, 'min': 2, 'max': 10},
-                        'fast_sma': {'type': int, 'min': 5, 'max': 20},
-                        'slow_sma': {'type': int, 'min': 10, 'max': 50},
-                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
-                    },
-                    'bollinger_rsi_stochrsi': {
-                        'bb_period': {'type': int, 'min': 10, 'max': 30},
-                        'bb_std_dev': {'type': float, 'min': 1.0, 'max': 3.0},
-                        'rsi_period': {'type': int, 'min': 10, 'max': 20},
-                        'rsi_oversold': {'type': int, 'min': 10, 'max': 40},
-                        'rsi_overbought': {'type': int, 'min': 60, 'max': 90},
-                        'stochrsi_period': {'type': int, 'min': 10, 'max': 20},
-                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
-                    }
-                }
-            },
-            'risk_management': {
-                'type': dict,
-                'required_params': {
-                    'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
-                    'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
-                    'max_positions': {'type': int, 'min': 1, 'max': 20}
-                }
-            },
-            'ai': {
-                'type': dict,
-                'required_params': {
-                    'confidence_threshold': {'type': float, 'min': 0.3, 'max': 0.9}
-                }
-            }
-        }
         
         # Validate top-level structure
         for section, schema in validation_schema.items():

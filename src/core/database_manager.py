@@ -422,16 +422,16 @@ class DatabaseManager:
         """Sinyal kaydet"""
         try:
             await self.connection.execute("""
-                INSERT INTO signals (symbol, signal_type, confidence, strength, source, reason, price)
+                INSERT INTO signals (symbol, signal_type, confidence, strategy, price, timestamp, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal_data['symbol'],
                 signal_data['signal_type'],
                 signal_data['confidence'],
-                signal_data.get('strength', 0),
-                signal_data.get('source', 'AI'),
-                signal_data.get('reason', ''),
-                signal_data.get('price', 0)
+                signal_data.get('strategy', ''),
+                signal_data.get('price', 0),
+                signal_data.get('timestamp', datetime.now()),
+                signal_data.get('metadata', '')
             ))
             
             await self.connection.commit()
@@ -568,21 +568,22 @@ class DatabaseManager:
                 
                 cursor = await self.connection.execute("""
                     INSERT INTO trades (
-                        symbol, side, size, price, pnl, strategy, 
-                        confidence, exchange, order_id, position_id, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        symbol, side, size, entry_price, exit_price, pnl, fees, strategy, 
+                        confidence, entry_time, exit_time, duration_seconds
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     trade_data.get('symbol'),
                     trade_data.get('side'),
                     float(trade_data.get('size', 0.0)),
-                    float(trade_data.get('price', 0.0)),
+                    float(trade_data.get('entry_price', 0.0)),
+                    float(trade_data.get('exit_price', 0.0)),
                     float(trade_data.get('pnl', 0.0)),
+                    float(trade_data.get('fees', 0.0)),
                     trade_data.get('strategy'),
                     float(trade_data.get('confidence', 0.0)),
-                    trade_data.get('exchange'),
-                    trade_data.get('order_id'),
-                    trade_data.get('position_id'),
-                    trade_data.get('timestamp', datetime.now())
+                    trade_data.get('entry_time', datetime.now()),
+                    trade_data.get('exit_time'),
+                    trade_data.get('duration_seconds', 0)
                 ))
                 
                 await self.connection.commit()

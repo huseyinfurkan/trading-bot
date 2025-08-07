@@ -27,12 +27,12 @@ class PerformanceMonitor:
         self.error_metrics = []
         
         # Dynamic configuration based on system performance
-        self.monitoring_interval = await self._get_dynamic_monitoring_interval(config)
-        self.retention_hours = await self._get_dynamic_retention_hours(config)
-        self.max_metrics_count = await self._get_dynamic_max_metrics_count(config)
+        self.monitoring_interval = 60  # Will be updated in initialize()
+        self.retention_hours = 24  # Will be updated in initialize()
+        self.max_metrics_count = 1000  # Will be updated in initialize()
         
         # Dynamic thresholds based on system performance
-        self.thresholds = await self._get_dynamic_thresholds(config)
+        self.thresholds = {}  # Will be updated in initialize()
         
         # Performance tracking
         self.start_time = datetime.now()
@@ -41,13 +41,29 @@ class PerformanceMonitor:
         
         # Dynamic alert tracking
         self.alerts = []
-        self.alert_cooldown = await self._get_dynamic_alert_cooldown(config)
+        self.alert_cooldown = 300  # Will be updated in initialize()
         self.last_alert_time = {}
         
         # Thread safety
         self.lock = threading.Lock()
         
         logger.info("📊 Performance Monitor initialized")
+    
+    async def initialize(self):
+        """Initialize dynamic parameters"""
+        try:
+            # Initialize dynamic configuration
+            self.monitoring_interval = await self._get_dynamic_monitoring_interval(self.config)
+            self.retention_hours = await self._get_dynamic_retention_hours(self.config)
+            self.max_metrics_count = await self._get_dynamic_max_metrics_count(self.config)
+            self.thresholds = await self._get_dynamic_thresholds(self.config)
+            self.alert_cooldown = await self._get_dynamic_alert_cooldown(self.config)
+            
+            logger.info("✅ Performance Monitor dynamic parameters initialized")
+            
+        except Exception as e:
+            logger.error(f"❌ Performance Monitor initialization error: {e}")
+            raise
     
     async def start_monitoring(self):
         """Start performance monitoring"""

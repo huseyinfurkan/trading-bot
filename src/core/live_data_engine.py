@@ -34,13 +34,13 @@ class LiveDataEngine:
         self.cache_ttl = 300  # 5 minutes TTL
         
         # Dynamic configuration based on market conditions
-        self.analysis_interval = await self._get_dynamic_analysis_interval()
-        self.data_retention_hours = await self._get_dynamic_data_retention()
-        self.symbols = await self._get_dynamic_symbols()
+        self.analysis_interval = 60  # Will be updated in initialize()
+        self.data_retention_hours = 24  # Will be updated in initialize()
+        self.symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']  # Will be updated in initialize()
         
         # Enhanced decision tracking with dynamic cooldown
         self.recent_decisions = {}
-        self.decision_cooldown = await self._get_dynamic_decision_cooldown()
+        self.decision_cooldown = 300  # Will be updated in initialize()
         self.decision_history = []
         
         # Performance tracking
@@ -52,19 +52,37 @@ class LiveDataEngine:
         self.websocket_connections = {}
         self.websocket_status = {}
         self.reconnect_attempts = {}
-        self.max_reconnect_attempts = await self._get_dynamic_max_reconnect_attempts()
-        self.reconnect_delay = await self._get_dynamic_reconnect_delay()
+        self.max_reconnect_attempts = 5  # Will be updated in initialize()
+        self.reconnect_delay = 10  # Will be updated in initialize()
         
         # Dynamic error tracking
         self.error_count = 0
         self.last_error_time = None
-        self.error_threshold = await self._get_dynamic_error_threshold()
+        self.error_threshold = 10  # Will be updated in initialize()
         
         # Dynamic interval adjustment
         self.market_volatility = 0.5
         self.interval_multiplier = 1.0
         
         logger.info("🔥 Enhanced Live Data Engine initialized")
+    
+    async def initialize(self):
+        """Initialize dynamic parameters"""
+        try:
+            # Initialize dynamic configuration
+            self.analysis_interval = await self._get_dynamic_analysis_interval()
+            self.data_retention_hours = await self._get_dynamic_data_retention()
+            self.symbols = await self._get_dynamic_symbols()
+            self.decision_cooldown = await self._get_dynamic_decision_cooldown()
+            self.max_reconnect_attempts = await self._get_dynamic_max_reconnect_attempts()
+            self.reconnect_delay = await self._get_dynamic_reconnect_delay()
+            self.error_threshold = await self._get_dynamic_error_threshold()
+            
+            logger.info("✅ Live Data Engine dynamic parameters initialized")
+            
+        except Exception as e:
+            logger.error(f"❌ Live Data Engine initialization error: {e}")
+            raise
     
     async def start_live_analysis(self):
         """Enhanced live analysis system with WebSocket stability"""

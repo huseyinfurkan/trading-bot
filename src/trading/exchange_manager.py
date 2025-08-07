@@ -36,7 +36,7 @@ class ExchangeManager:
         self.rate_limit_windows = {}
         
         # Dynamic rate limit configuration per exchange based on performance
-        self.rate_limits = await self._get_dynamic_rate_limits()
+        self.rate_limits = {}  # Will be initialized in initialize()
         
         # WebSocket callbacks
         self.price_callbacks = []
@@ -49,6 +49,9 @@ class ExchangeManager:
         """Exchange bağlantılarını başlat"""
         try:
             logger.info("🔌 Exchange connections başlatılıyor...")
+            
+            # Initialize dynamic rate limits
+            self.rate_limits = await self._get_dynamic_rate_limits()
             
             # Initialize exchanges
             for exchange_name, config in self.config.items():
@@ -109,8 +112,8 @@ class ExchangeManager:
         """Rate limiting decorator"""
         def decorator(func):
             async def wrapper(self, *args, **kwargs):
-                if exchange_name in self.rate_limiters:
-                    limiter = self.rate_limiters[exchange_name]
+                if exchange_name in self.rate_limiter:
+                    limiter = self.rate_limiter[exchange_name]
                     elapsed = time.time() - limiter['last_request']
                     
                     if elapsed < limiter['min_interval']:
@@ -233,7 +236,7 @@ class ExchangeManager:
         
         raise Exception(f"Max retries ({max_retries}) exceeded")
 
-    async def get_market_data(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+    async def get_market_data(self, symbol: str, exchange: str = 'bybit', timeframe: str = '1h', limit: int = 100) -> Optional[Dict[str, Any]]:
         """Gerçek market data al"""
         try:
             if exchange not in self.exchanges:

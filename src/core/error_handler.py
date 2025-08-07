@@ -41,17 +41,31 @@ class ErrorHandler:
         
         # Dynamic circuit breaker configuration
         self.circuit_breakers = {}
-        self.circuit_breaker_config = await self._get_dynamic_circuit_breaker_config(config)
+        self.circuit_breaker_config = {}  # Will be initialized in initialize()
         
         # Dynamic error severity thresholds
-        self.severity_thresholds = await self._get_dynamic_severity_thresholds(config)
+        self.severity_thresholds = {}  # Will be initialized in initialize()
         
         # Dynamic alert configuration
         self.alert_enabled = config.get('alerts', {}).get('enabled', True)
-        self.alert_cooldown = await self._get_dynamic_alert_cooldown(config)
+        self.alert_cooldown = 300  # Will be initialized in initialize()
         self.last_alert_time = {}
         
         logger.info("🛡️ Enhanced Error Handler initialized")
+    
+    async def initialize(self):
+        """Initialize dynamic parameters"""
+        try:
+            # Initialize dynamic configuration
+            self.circuit_breaker_config = await self._get_dynamic_circuit_breaker_config(self.config)
+            self.severity_thresholds = await self._get_dynamic_severity_thresholds(self.config)
+            self.alert_cooldown = await self._get_dynamic_alert_cooldown(self.config)
+            
+            logger.info("✅ Error Handler dynamic parameters initialized")
+            
+        except Exception as e:
+            logger.error(f"❌ Error Handler initialization error: {e}")
+            raise
     
     async def handle_error(self, error: Exception, context: str, severity: ErrorSeverity = ErrorSeverity.MEDIUM,
                           component: str = "unknown", retry_count: int = 0) -> Dict[str, Any]:

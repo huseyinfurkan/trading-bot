@@ -112,14 +112,22 @@ class BotCoordinator:
             self.health_checks += 1
             
             # Check exchange connectivity
-            exchange_status = await self.exchange_manager.get_exchange_status()
-            if not exchange_status.get('connected', False):
-                logger.warning("⚠️ Exchange bağlantısı kesildi")
+            if hasattr(self.exchange_manager, 'get_exchange_status'):
+                exchange_status = await self.exchange_manager.get_exchange_status()
+                if not exchange_status.get('connected', False):
+                    logger.warning("⚠️ Exchange bağlantısı kesildi")
+            else:
+                # Fallback check
+                logger.debug("📡 Exchange status check not available")
             
             # Check database connectivity
-            db_status = await self.db_manager.check_connection()
-            if not db_status.get('healthy', False):
-                logger.warning("⚠️ Database bağlantısı sorunlu")
+            if hasattr(self.db_manager, 'check_connection_health'):
+                db_status = await self.db_manager.check_connection_health()
+                if not db_status:
+                    logger.warning("⚠️ Database bağlantısı sorunlu")
+            else:
+                # Fallback check
+                logger.debug("🗄️ Database health check not available")
             
             # Check monitoring system
             if hasattr(self.monitoring_system, 'get_system_health'):
@@ -140,7 +148,11 @@ class BotCoordinator:
             self.risk_checks += 1
             
             # Get current risk status
-            risk_status = await self.risk_manager.get_risk_status()
+            if hasattr(self.risk_manager, 'get_risk_status'):
+                risk_status = await self.risk_manager.get_risk_status()
+            else:
+                # Fallback to get_current_risk_settings
+                risk_status = self.risk_manager.get_current_risk_settings()
             
             # Check portfolio risk
             portfolio_risk = risk_status.get('portfolio_risk', 0)
