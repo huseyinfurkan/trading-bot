@@ -16,7 +16,7 @@ exchanges:
       withdrawal_fee: 0.0005
   
   binance:
-    enabled: false  # Disabled by default
+    enabled: true  # Enabled for fallback
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_SECRET}
     params:
@@ -57,58 +57,60 @@ trading:
     - "BNB/USDT"
     - "ADA/USDT"
   
-  # Risk Management
+  # Risk Management - Dynamic parameters
   risk_management:
-    max_portfolio_risk: 0.02  # 2% max portfolio risk
-    max_position_risk: 0.01   # 1% max position risk
-    max_daily_loss: 0.05      # 5% max daily loss
-    max_open_positions: 10
-    correlation_threshold: 0.7
+    max_portfolio_risk: 0.02  # 2% max portfolio risk - will be adjusted based on market conditions
+    max_position_risk: 0.01   # 1% max position risk - will be adjusted based on volatility
+    max_daily_loss: 0.05      # 5% max daily loss - will be adjusted based on performance
+    max_open_positions: 10    # Will be adjusted based on correlation analysis
+    correlation_threshold: 0.7 # Will be adjusted dynamically based on market volatility
     correlation_adjustment_factor: 0.1
-    min_position_size: 10     # $10 minimum
-    max_position_size: 10000  # $10,000 maximum
+    min_position_size: 10     # $10 minimum - will be adjusted based on exchange minimums
+    max_position_size: 10000  # $10,000 maximum - will be adjusted based on account balance
     
-    # Position sizing methods
+    # Position sizing methods - Dynamic
     position_sizing:
-      method: "kelly"  # kelly, fixed, percentage
-      kelly_fraction: 0.25
-      fixed_amount: 100
-      percentage: 0.02
+      method: "adaptive"  # adaptive, kelly, fixed, percentage
+      kelly_fraction: 0.25  # Will be adjusted based on win rate
+      fixed_amount: 100     # Will be adjusted based on account balance
+      percentage: 0.02      # Will be adjusted based on market conditions
     
-    # Stop loss and take profit
+    # Stop loss and take profit - Dynamic
     stop_loss:
-      default_percentage: 0.02  # 2%
+      default_percentage: 0.02  # 2% - will be adjusted based on volatility
       trailing_enabled: true
-      trailing_distance: 0.01   # 1%
+      trailing_distance: 0.01   # 1% - will be adjusted based on ATR
+      volatility_adjustment: true  # Adjust based on market volatility
     
     take_profit:
-      default_percentage: 0.04  # 4%
+      default_percentage: 0.04  # 4% - will be adjusted based on volatility
       trailing_enabled: true
-      trailing_distance: 0.005  # 0.5%
+      trailing_distance: 0.005  # 0.5% - will be adjusted based on ATR
+      volatility_adjustment: true  # Adjust based on market volatility
     
-    # Exchange-specific trading costs
+    # Exchange-specific trading costs - Real-time
     exchange_fees:
       binance:
-        maker: 0.001
-        taker: 0.001
+        maker: 0.001  # Will be fetched from exchange
+        taker: 0.001  # Will be fetched from exchange
       bybit:
-        maker: 0.001
-        taker: 0.001
+        maker: 0.001  # Will be fetched from exchange
+        taker: 0.001  # Will be fetched from exchange
       okx:
-        maker: 0.0008
-        taker: 0.001
+        maker: 0.0008  # Will be fetched from exchange
+        taker: 0.001   # Will be fetched from exchange
     
-    # Slippage configuration
+    # Slippage configuration - Dynamic
     slippage_config:
-      base_slippage: 0.0005
-      volatility_multiplier: 2.0
-      volume_multiplier: 1.0
+      base_slippage: 0.0005  # Will be calculated from order book
+      volatility_multiplier: 2.0  # Will be adjusted based on market conditions
+      volume_multiplier: 1.0  # Will be adjusted based on liquidity
     
-    # Funding fee configuration
+    # Funding fee configuration - Real-time
     funding_fee_config:
-      base_rate: 0.0001
-      max_rate: 0.001
-      adjustment_period: 8  # hours
+      base_rate: 0.0001  # Will be fetched from exchange
+      max_rate: 0.001    # Will be adjusted based on market conditions
+      adjustment_period: 8  # Hours between adjustments
 
 # Strategy Configuration
 strategies:

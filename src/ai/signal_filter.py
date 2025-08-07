@@ -1074,9 +1074,12 @@ class AISignalFilter:
                     random_state=42
                 )
                 
-                # Create minimal training data for initialization
-                X_minimal = np.random.randn(50, 14)
-                y_minimal = np.random.choice([0, 1, 2], size=50, p=[0.6, 0.2, 0.2])
+                # Create minimal training data for initialization (only if no real data available)
+                logger.warning("⚠️ Creating minimal models with placeholder data - will be updated when real data is available")
+                
+                # Use simple placeholder data for initialization
+                X_minimal = np.zeros((50, 14))  # All zeros instead of random
+                y_minimal = np.full(50, 0)  # All HOLD instead of random
                 
                 # Fit minimal models
                 gb_model.fit(X_minimal, y_minimal)

@@ -632,104 +632,78 @@ class ExchangeManager:
             logger.error(f"❌ Supported symbols error: {e}")
             return []
     
-    def _generate_mock_real_time_data(self, symbol: str) -> Dict[str, Any]:
-        """Generate realistic mock data for demo"""
-        import random
-        
-        # Base prices for major coins
-        base_prices = {
-            'BTCUSDT': 110000, 'ETHUSDT': 3500, 'BNBUSDT': 790, 'ADAUSDT': 0.75,
-            'SOLUSDT': 170, 'MATICUSDT': 1.1, 'DOTUSDT': 8.5, 'LINKUSDT': 22,
-            'AVAXUSDT': 55, 'ATOMUSDT': 12, 'UNIUSDT': 8, 'AAVEUSDT': 180,
-            'COMPUSDT': 95, 'SUSHIUSDT': 2.5
-        }
-        
-        base_price = base_prices.get(symbol, 100)
-        # Add realistic price fluctuation (±0.5%)
-        price_variation = random.uniform(-0.005, 0.005)
-        current_price = base_price * (1 + price_variation)
-        
-        # Generate bid/ask spread (0.01-0.05%)
-        spread = random.uniform(0.0001, 0.0005)
-        bid = current_price * (1 - spread)
-        ask = current_price * (1 + spread)
-        
-        return {
-            'symbol': symbol,
-            'price': round(current_price, 6),
-            'bid': round(bid, 6),
-            'ask': round(ask, 6),
-            'volume': round(random.uniform(1000, 10000), 2),
-            'change_24h': round(random.uniform(-5, 5), 2),
-            'timestamp': datetime.now(),
-            'exchange': 'bybit_mock'
-        }
+    async def _get_real_time_data_fallback(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get real-time data with fallback strategies - NO MOCK DATA"""
+        try:
+            logger.info(f"🔄 Attempting real-time data retrieval for {symbol}")
+            
+            # Try to get real ticker data
+            ticker = await self.get_ticker(symbol, 'bybit')
+            if ticker:
+                return {
+                    'symbol': symbol,
+                    'price': ticker.get('last', 0),
+                    'bid': ticker.get('bid', 0),
+                    'ask': ticker.get('ask', 0),
+                    'volume': ticker.get('quoteVolume', 0),
+                    'change_24h': ticker.get('percentage', 0),
+                    'timestamp': datetime.now(),
+                    'exchange': 'bybit',
+                    'real_data': True
+                }
+            
+            # Try alternative exchange
+            ticker = await self.get_ticker(symbol, 'binance')
+            if ticker:
+                return {
+                    'symbol': symbol,
+                    'price': ticker.get('last', 0),
+                    'bid': ticker.get('bid', 0),
+                    'ask': ticker.get('ask', 0),
+                    'volume': ticker.get('quoteVolume', 0),
+                    'change_24h': ticker.get('percentage', 0),
+                    'timestamp': datetime.now(),
+                    'exchange': 'binance',
+                    'real_data': True
+                }
+            
+            logger.error(f"❌ No real-time data available for {symbol}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Real-time data fallback error for {symbol}: {e}")
+            return None
     
-    def _generate_mock_historical_data(self, symbol: str, timeframe: str, 
-                                     start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """Generate realistic mock historical data for demo"""
-        import random
-        import pandas as pd
-        from datetime import timedelta
-        
-        # Base prices for major coins
-        base_prices = {
-            'BTCUSDT': 110000, 'ETHUSDT': 3500, 'BNBUSDT': 790, 'ADAUSDT': 0.75,
-            'SOLUSDT': 170, 'MATICUSDT': 1.1, 'DOTUSDT': 8.5, 'LINKUSDT': 22,
-            'AVAXUSDT': 55, 'ATOMUSDT': 12, 'UNIUSDT': 8, 'AAVEUSDT': 180,
-            'COMPUSDT': 95, 'SUSHIUSDT': 2.5
-        }
-        
-        base_price = base_prices.get(symbol, 100)
-        
-        # Generate time series
-        if timeframe == '1h':
-            delta = timedelta(hours=1)
-        elif timeframe == '4h':
-            delta = timedelta(hours=4)
-        elif timeframe == '1d':
-            delta = timedelta(days=1)
-        else:
-            delta = timedelta(hours=1)
-        
-        timestamps = []
-        current = start_date or (datetime.now() - timedelta(days=30))
-        end = end_date or datetime.now()
-        
-        while current < end:
-            timestamps.append(current)
-            current += delta
-        
-        # Generate realistic OHLCV data
-        data = []
-        current_price = base_price
-        
-        for i, timestamp in enumerate(timestamps):
-            # Add some trend and random walk
-            trend = random.uniform(-0.002, 0.002)  # ±0.2% trend
-            volatility = random.uniform(-0.01, 0.01)  # ±1% volatility
+    async def _get_historical_data_fallback(self, symbol: str, timeframe: str, 
+                                          start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """Get historical data with fallback strategies - NO MOCK DATA"""
+        try:
+            logger.info(f"🔄 Attempting historical data retrieval for {symbol}")
             
-            # Calculate OHLC
-            open_price = current_price
-            close_price = current_price * (1 + trend + volatility)
-            high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.005))
-            low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.005))
-            volume = random.uniform(1000, 50000)
+            # Try primary exchange
+            data = await self._get_historical_data_internal(symbol, timeframe, start_date, end_date, 'bybit')
+            if data is not None and len(data) > 0:
+                return data
             
-            data.append({
-                'timestamp': timestamp,
-                'open': round(open_price, 6),
-                'high': round(high_price, 6),
-                'low': round(low_price, 6),
-                'close': round(close_price, 6),
-                'volume': round(volume, 2)
-            })
+            # Try alternative exchange
+            data = await self._get_historical_data_internal(symbol, timeframe, start_date, end_date, 'binance')
+            if data is not None and len(data) > 0:
+                return data
             
-            current_price = close_price
-        
-        df = pd.DataFrame(data)
-        df.set_index('timestamp', inplace=True)
-        return df
+            # Try different timeframes
+            alternative_timeframes = ['4h', '2h', '30m'] if timeframe == '1h' else ['1h', '2h', '30m']
+            for alt_timeframe in alternative_timeframes:
+                data = await self._get_historical_data_internal(symbol, alt_timeframe, start_date, end_date, 'bybit')
+                if data is not None and len(data) > 0:
+                    logger.info(f"📋 Using {alt_timeframe} data for {symbol}")
+                    return data
+            
+            logger.error(f"❌ No historical data available for {symbol}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Historical data fallback error for {symbol}: {e}")
+            return None
     
     async def get_funding_rate(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
         """Get funding rate for a symbol from Bybit or Binance"""
