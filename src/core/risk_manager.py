@@ -271,7 +271,7 @@ class RiskManager:
             return await self._get_fallback_market_data(symbol, exchange)
     
     async def _get_fallback_market_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
-        """Get fallback market data when real API is unavailable"""
+        """Get fallback market data when real API is unavailable - NO SIMULATION"""
         try:
             # Try to get historical data for fallback calculation
             if self.exchange_manager:
@@ -285,22 +285,33 @@ class RiskManager:
                     # Get volume from historical data
                     volume = historical_data['volume'].iloc[-1] if 'volume' in historical_data.columns else 1000000
                     
-                    # Calculate bid-ask spread estimate
+                    # Calculate bid-ask spread estimate from high-low range
                     high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
                     bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
+                    
+                    # Get real funding rate from exchange
+                    funding_rate = 0.0001  # Default, will be updated by real API
+                    try:
+                        funding_info = await self.exchange_manager.get_funding_rate(symbol, exchange)
+                        if funding_info:
+                            funding_rate = funding_info.get('fundingRate', 0.0001)
+                    except:
+                        pass
                     
                     return {
                         'volume': volume,
                         'volatility': min(volatility, 1.0),
-                        'funding_rate': 0.0001,  # Default funding rate
+                        'funding_rate': funding_rate,
                         'bid_ask_spread': max(bid_ask_spread, 0.0001),
                         'order_book_depth': {},
                         'last_price': historical_data['close'].iloc[-1],
                         'timestamp': datetime.now(),
-                        'real_data': False
+                        'real_data': False,
+                        'note': 'Using historical data fallback'
                     }
             
-            # Ultimate fallback
+            # Ultimate fallback - minimal data only
+            logger.warning(f"⚠️ No historical data available for {symbol}, using minimal fallback")
             return {
                 'volume': 1000000,
                 'volatility': 0.5,
@@ -309,7 +320,8 @@ class RiskManager:
                 'order_book_depth': {},
                 'last_price': 50000,
                 'timestamp': datetime.now(),
-                'real_data': False
+                'real_data': False,
+                'note': 'Minimal fallback - no real data available'
             }
                 
         except Exception as e:
@@ -322,7 +334,8 @@ class RiskManager:
                 'order_book_depth': {},
                 'last_price': 50000,
                 'timestamp': datetime.now(),
-                'real_data': False
+                'real_data': False,
+                'note': 'Error in fallback calculation'
             }
     
     async def _get_high_frequency_data(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
@@ -1383,64 +1396,42 @@ class RiskManager:
             logger.error(f"❌ Real volatility calculation error: {e}")
             return 0.5
     
-    async def _get_simulated_real_time_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
-        """Get simulated real-time data when API is not available"""
+    async def _get_real_time_market_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get real-time market data from exchange APIs - NO SIMULATION"""
         try:
-            import random
-            import time
+            # Try to get real exchange data first
+            exchange_instance = await self._get_exchange_instance(exchange)
+            if exchange_instance:
+                # Get real order book
+                order_book = await self._fetch_real_order_book(exchange_instance, symbol)
+                
+                # Get real funding rate
+                funding_rate = await self._fetch_real_funding_rate(exchange_instance, symbol)
+                
+                # Get real ticker data
+                ticker = await self._fetch_real_ticker(exchange_instance, symbol)
+                
+                # Calculate real slippage
+                slippage = await self._calculate_real_slippage(order_book, ticker)
+                
+                # Calculate real volatility
+                volatility = await self._calculate_real_volatility(exchange_instance, symbol)
+                
+                return {
+                    'volume': ticker.get('quoteVolume', 1000000),
+                    'volatility': volatility,
+                    'funding_rate': funding_rate,
+                    'bid_ask_spread': slippage['bid_ask_spread'],
+                    'order_book_depth': order_book,
+                    'last_price': ticker.get('last', 50000),
+                    'timestamp': datetime.now(),
+                    'real_data': True,
+                    'slippage_estimate': slippage['slippage_estimate']
+                }
             
-            current_time = datetime.now()
-            
-            # Simulate real-time funding rate (varies by exchange and time)
-            base_funding_rate = 0.0001
-            time_factor = (current_time.hour % 8) / 8  # 8-hour funding periods
-            funding_rate = base_funding_rate * (1 + 0.5 * math.sin(time_factor * 2 * math.pi))
-            
-            # Simulate real-time bid-ask spread
-            base_spread = 0.0005
-            volatility_factor = random.uniform(0.8, 1.2)
-            spread = base_spread * volatility_factor
-            
-            # Simulate real-time volume
-            base_volume = 1000000
-            volume_factor = random.uniform(0.5, 2.0)
-            volume = base_volume * volume_factor
-            
-            # Simulate real-time volatility
-            volatility = random.uniform(0.3, 0.8)
-            
-            # Simulate order book depth
-            order_book_depth = {
-                'bids': [(random.uniform(0.99, 1.0), random.uniform(100, 1000)) for _ in range(10)],
-                'asks': [(random.uniform(1.0, 1.01), random.uniform(100, 1000)) for _ in range(10)],
-                'bid_volume': random.uniform(5000, 15000),
-                'ask_volume': random.uniform(5000, 15000),
-                'spread': spread,
-                'timestamp': current_time.timestamp()
-            }
-            
-            return {
-                'volume': volume,
-                'volatility': volatility,
-                'funding_rate': funding_rate,
-                'bid_ask_spread': spread,
-                'order_book_depth': order_book_depth,
-                'last_price': random.uniform(50000, 60000),
-                'timestamp': current_time,
-                'real_data': False,
-                'slippage_estimate': spread * 2
-            }
+            # If exchange instance not available, use fallback
+            return await self._get_fallback_market_data(symbol, exchange)
             
         except Exception as e:
-            logger.error(f"❌ Simulated data generation error: {e}")
-            return {
-                'volume': 1000000,
-                'volatility': 0.5,
-                'funding_rate': 0.0001,
-                'bid_ask_spread': 0.0005,
-                'order_book_depth': {},
-                'last_price': 50000,
-                'timestamp': datetime.now(),
-                'real_data': False,
-                'slippage_estimate': 0.001
-            }
+            logger.error(f"❌ Real-time market data error: {e}")
+            return await self._get_fallback_market_data(symbol, exchange)

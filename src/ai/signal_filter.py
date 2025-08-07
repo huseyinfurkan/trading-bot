@@ -1015,63 +1015,78 @@ class AISignalFilter:
             await self._create_default_models()
     
     async def _create_default_models(self):
-        """Create realistic default ML models when training data is not available"""
+        """Create default ML models using real historical data when available"""
         try:
             from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
             from sklearn.preprocessing import StandardScaler
             import numpy as np
             
-            logger.info("🤖 Gerçekçi default modeller oluşturuluyor...")
+            logger.info("🤖 Attempting to create models with real historical data...")
             
-            # Create realistic training data based on typical crypto patterns
-            np.random.seed(42)  # For reproducibility
+            # Try to get real historical data for training
+            training_data = await self._get_real_training_data()
             
-            # Generate 1000 samples with 14 features (typical for crypto trading)
-            n_samples = 1000
-            n_features = 14
-            
-            # Create realistic feature data
-            X_dummy = np.random.randn(n_samples, n_features)
-            
-            # Create realistic labels with crypto-like patterns
-            # 0: HOLD (60%), 1: SELL (20%), 2: BUY (20%)
-            y_dummy = np.random.choice([0, 1, 2], size=n_samples, p=[0.6, 0.2, 0.2])
-            
-            # Add some realistic patterns to make models more intelligent
-            # Feature 0: Price momentum (positive = BUY signal)
-            X_dummy[:, 0] = np.random.randn(n_samples) * 0.1 + (y_dummy == 2) * 0.2
-            
-            # Feature 1: Volume ratio (high volume = stronger signal)
-            X_dummy[:, 1] = np.random.randn(n_samples) * 0.1 + (y_dummy != 0) * 0.15
-            
-            # Feature 2: RSI (oversold = BUY, overbought = SELL)
-            X_dummy[:, 2] = np.random.randn(n_samples) * 0.1 + (y_dummy == 2) * 0.3 - (y_dummy == 1) * 0.3
-            
-            # Feature 3: MACD (positive = BUY, negative = SELL)
-            X_dummy[:, 3] = np.random.randn(n_samples) * 0.1 + (y_dummy == 2) * 0.25 - (y_dummy == 1) * 0.25
-            
-            # Create and train models
-            gb_model = GradientBoostingClassifier(
-                n_estimators=100,
-                learning_rate=0.1,
-                max_depth=4,
-                random_state=42
-            )
-            
-            rf_model = RandomForestClassifier(
-                n_estimators=100,
-                max_depth=10,
-                min_samples_split=5,
-                random_state=42
-            )
-            
-            # Fit models
-            gb_model.fit(X_dummy, y_dummy)
-            rf_model.fit(X_dummy, y_dummy)
-            
-            # Create scaler
-            scaler = StandardScaler()
-            scaler.fit(X_dummy)
+            if training_data is not None and len(training_data) > 100:
+                # Use real data for training
+                X_real, y_real = training_data
+                
+                # Create and train models with real data
+                gb_model = GradientBoostingClassifier(
+                    n_estimators=100,
+                    learning_rate=0.1,
+                    max_depth=4,
+                    random_state=42
+                )
+                
+                rf_model = RandomForestClassifier(
+                    n_estimators=100,
+                    max_depth=10,
+                    min_samples_split=5,
+                    random_state=42
+                )
+                
+                # Fit models with real data
+                gb_model.fit(X_real, y_real)
+                rf_model.fit(X_real, y_real)
+                
+                # Create scaler with real data
+                scaler = StandardScaler()
+                scaler.fit(X_real)
+                
+                logger.success("✅ Models created with real historical data")
+                
+            else:
+                # No real data available - create minimal models
+                logger.warning("⚠️ No real training data available - creating minimal models")
+                
+                # Create minimal models that will be updated when real data becomes available
+                gb_model = GradientBoostingClassifier(
+                    n_estimators=10,
+                    learning_rate=0.1,
+                    max_depth=2,
+                    random_state=42
+                )
+                
+                rf_model = RandomForestClassifier(
+                    n_estimators=10,
+                    max_depth=3,
+                    min_samples_split=10,
+                    random_state=42
+                )
+                
+                # Create minimal training data for initialization
+                X_minimal = np.random.randn(50, 14)
+                y_minimal = np.random.choice([0, 1, 2], size=50, p=[0.6, 0.2, 0.2])
+                
+                # Fit minimal models
+                gb_model.fit(X_minimal, y_minimal)
+                rf_model.fit(X_minimal, y_minimal)
+                
+                # Create scaler
+                scaler = StandardScaler()
+                scaler.fit(X_minimal)
+                
+                logger.warning("⚠️ Minimal models created - will be updated when real data is available")
             
             # Store models for all symbols
             for symbol in ['BTC_USDT', 'ETH_USDT', 'BNB_USDT', 'ADA_USDT']:
@@ -1092,13 +1107,57 @@ class AISignalFilter:
                 'price_position', 'trend_strength'
             ]
             
-            logger.success("✅ Gerçekçi default modeller oluşturuldu")
-            
         except Exception as e:
-            logger.error(f"❌ Default model oluşturma hatası: {e}")
+            logger.error(f"❌ Default model creation error: {e}")
             # Set empty models to prevent errors
             self.models = {}
             self.scalers = {}
+    
+    async def _get_real_training_data(self) -> Optional[tuple]:
+        """Get real historical data for model training"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Try to get historical data for major symbols
+            symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
+            all_features = []
+            all_labels = []
+            
+            for symbol in symbols:
+                try:
+                    # Get historical data
+                    hist_data = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe='1h',
+                        limit=500
+                    )
+                    
+                    if hist_data is not None and len(hist_data) > 100:
+                        # Extract features and create labels
+                        features, labels = self._prepare_training_data(hist_data)
+                        
+                        if features is not None and labels is not None:
+                            all_features.extend(features)
+                            all_labels.extend(labels)
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get training data for {symbol}: {e}")
+                    continue
+            
+            if len(all_features) > 100:
+                # Convert to numpy arrays
+                X = np.array(all_features)
+                y = np.array(all_labels)
+                
+                logger.info(f"✅ Collected {len(X)} real training samples")
+                return X, y
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Real training data collection error: {e}")
+            return None
     
     async def _train_models(self):
         """Train ML models with historical data"""

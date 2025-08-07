@@ -528,57 +528,58 @@ class MarketAnalyzer:
             logger.error(f"❌ Temp exchange manager creation error: {e}")
             return None
     
-    async def _generate_synthetic_market_data(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Generate synthetic market data when all sources fail"""
+    async def _handle_data_unavailable(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Handle case when no real data is available - return None instead of synthetic data"""
         try:
-            # Generate realistic synthetic data based on symbol characteristics
-            import numpy as np
-            from datetime import datetime, timedelta
-            
-            # Get base price for symbol
-            base_price = self._get_base_price_for_symbol(symbol)
-            
-            # Generate 100 data points
-            n_points = 100
-            timestamps = [datetime.now() - timedelta(hours=i) for i in range(n_points, 0, -1)]
-            
-            # Generate realistic price movements
-            np.random.seed(hash(symbol) % 2**32)  # Deterministic but different for each symbol
-            
-            # Generate price series with realistic volatility
-            returns = np.random.normal(0, 0.02, n_points)  # 2% daily volatility
-            prices = [base_price]
-            
-            for i in range(1, n_points):
-                new_price = prices[-1] * (1 + returns[i])
-                prices.append(new_price)
-            
-            # Generate volume data
-            volumes = np.random.lognormal(10, 1, n_points)  # Realistic volume distribution
-            
-            # Create DataFrame
-            data = pd.DataFrame({
-                'timestamp': timestamps,
-                'open': prices,
-                'high': [p * (1 + abs(np.random.normal(0, 0.01))) for p in prices],
-                'low': [p * (1 - abs(np.random.normal(0, 0.01))) for p in prices],
-                'close': prices,
-                'volume': volumes
-            })
-            
-            data.set_index('timestamp', inplace=True)
-            
-            logger.warning(f"⚠️ Generated synthetic data for {symbol}")
-            return data
+            logger.error(f"❌ No real market data available for {symbol} - skipping analysis")
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Synthetic data generation error: {e}")
+            logger.error(f"❌ Data unavailable handling error for {symbol}: {e}")
+            return None
+    
+    async def _get_real_market_data_fallback(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Get real market data with multiple fallback strategies - NO SYNTHETIC DATA"""
+        try:
+            logger.info(f"🔄 Attempting real data retrieval for {symbol} with fallback strategies")
+            
+            # Strategy 1: Try primary exchange
+            data = await self._fetch_symbol_data(symbol)
+            if data is not None and len(data) > 0:
+                return data
+            
+            # Strategy 2: Try alternative exchange
+            data = await self._fetch_from_alternative_exchange(symbol)
+            if data is not None and len(data) > 0:
+                return data
+            
+            # Strategy 3: Try cached data
+            data = await self._get_cached_market_data(symbol)
+            if data is not None and len(data) > 0:
+                logger.info(f"📋 Using cached data for {symbol}")
+                return data
+            
+            # Strategy 4: Try with timeout
+            data = await self._fetch_symbol_data_with_timeout(symbol, timeout=5)
+            if data is not None and len(data) > 0:
+                return data
+            
+            # Strategy 5: Try alternative timeframes
+            data = await self._fetch_symbol_data_alternative(symbol)
+            if data is not None and len(data) > 0:
+                return data
+            
+            logger.error(f"❌ All real data strategies failed for {symbol}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Real market data fallback error for {symbol}: {e}")
             return None
     
     def _get_base_price_for_symbol(self, symbol: str) -> float:
-        """Get base price for symbol to generate synthetic data"""
+        """Get base price for symbol - used for error handling only"""
         try:
-            # Return realistic base prices for common symbols
+            # Return realistic base prices for common symbols (for error handling only)
             base_prices = {
                 'BTC/USDT': 50000.0,
                 'ETH/USDT': 3000.0,
