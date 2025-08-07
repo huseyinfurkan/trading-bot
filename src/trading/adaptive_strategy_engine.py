@@ -480,7 +480,8 @@ class AdaptiveStrategyEngine:
             return {'action': 'HOLD', 'confidence': 0.0, 'reason': f'Signal error: {str(e)}'}
 
     async def backtest_strategy(self, strategy_name: str, symbol: str, historical_data: pd.DataFrame, 
-                               initial_capital: float = 10000, custom_params: Dict = None) -> Dict[str, Any]:
+                               initial_capital: float = 10000, custom_params: Dict = None, 
+                               trading_fee: float = 0.001) -> Dict[str, Any]:
         """
         Backtest a single strategy on historical data
         NEW METHOD - Required by backtest_runner
@@ -585,7 +586,7 @@ class AdaptiveStrategyEngine:
                         regime = 'sideways_market'
                     
                     # Get confidence threshold from custom params or use moderate default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.5) if custom_params else 0.5  # Reduced from 0.7 to 0.5 for better signal generation
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.75) if custom_params else 0.75  # Increased from 0.5 to 0.75 to reduce overtrading
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
                     # IMPORTANT: Pass df slice to prevent API calls during backtest
@@ -632,7 +633,11 @@ class AdaptiveStrategyEngine:
                             
                         entry_price = current_price
                         
-                        logger.debug(f"📈 {position} Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}")
+                        # Apply entry fee
+                        entry_fee = position_value * trading_fee
+                        capital -= entry_fee
+                        
+                        logger.debug(f"📈 {position} Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}, Fee: ${entry_fee:.2f}")
                 
                 else:  # Have position
                     # Check exit conditions - Strategy-specific logic with custom params support
@@ -677,6 +682,10 @@ class AdaptiveStrategyEngine:
                             pnl = position_size * (current_price - entry_price)
                         else:  # SHORT
                             pnl = position_size * (entry_price - current_price)
+                        
+                        # Apply exit fee
+                        exit_fee = position_size * current_price * trading_fee
+                        pnl -= exit_fee  # Subtract exit fee from PnL
                             
                         capital += pnl
                         
@@ -687,11 +696,12 @@ class AdaptiveStrategyEngine:
                             'pnl': pnl,
                             'pnl_pct': pnl_pct,
                             'reason': exit_reason,
-                            'duration': i - len([t for t in trades if t['exit_price'] == 0])
+                            'duration': i - len([t for t in trades if t['exit_price'] == 0]),
+                            'exit_fee': exit_fee
                         }
                         trades.append(trade)
                         
-                        logger.debug(f"📉 {position} Exit: {symbol} @ ${current_price:.4f}, PnL: ${pnl:.2f} ({pnl_pct:.2%})")
+                        logger.debug(f"📉 {position} Exit: {symbol} @ ${current_price:.4f}, PnL: ${pnl:.2f} ({pnl_pct:.2%}), Fee: ${exit_fee:.2f}")
                         
                         position = None
                         position_size = 0
