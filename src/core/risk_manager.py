@@ -195,7 +195,7 @@ class RiskManager:
             trading_fee = exchange_config['taker'] if order_type == 'market' else exchange_config['maker']
             
             # Get market data for slippage calculation
-            market_data = await self._get_market_data_for_costs(symbol)
+            market_data = await self._get_market_data_for_costs(symbol, exchange)
             volume = market_data.get('volume', 1000000)
             volatility = market_data.get('volatility', 0.5)
             
@@ -231,255 +231,99 @@ class RiskManager:
                 'order_type': order_type
             }
     
-    async def _get_market_data_for_costs(self, symbol: str) -> Dict[str, Any]:
-        """Get market data for cost calculations"""
+    async def _get_market_data_for_costs(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get real market data for cost calculations from exchange APIs"""
         try:
-            # This should be implemented to get real market data
-            # For now, return default values
-            return {
-                'volume': 1000000,
-                'volatility': 0.5,
-                'funding_rate': 0.0001
-            }
-        except Exception as e:
-            logger.error(f"❌ Market data for costs error: {e}")
-            return {
-                'volume': 1000000,
-                'volatility': 0.5,
-                'funding_rate': 0.0001
-            }
-    
-    async def calculate_position_size(self, symbol: str, entry_price: float, stop_loss: float, 
-                                    confidence: float = 0.5, strategy: str = None, 
-                                    current_price: float = None, account_balance: float = None) -> Dict[str, Any]:
-        """Enhanced position size calculation with dynamic correlation and costs"""
-        try:
-            # Get current account balance
-            if account_balance is None:
-                balance_info = await self.get_account_balance()
-                account_balance = balance_info.get('total_balance', 10000)
+            # Get real exchange instance
+            exchange_instance = await self._get_exchange_instance(exchange)
+            if not exchange_instance:
+                return await self._get_fallback_market_data(symbol, exchange)
             
-            # Get current price if not provided
-            if current_price is None:
-                current_price = entry_price
+            # Fetch real-time order book
+            order_book = await self._fetch_real_order_book(exchange_instance, symbol)
             
-            # Calculate risk amount
-            risk_amount = account_balance * self.max_position_risk
+            # Fetch real-time funding rate
+            funding_rate = await self._fetch_real_funding_rate(exchange_instance, symbol)
             
-            # Calculate position risk (entry to stop loss)
-            position_risk_pct = abs(entry_price - stop_loss) / entry_price
+            # Fetch real-time ticker data
+            ticker = await self._fetch_real_ticker(exchange_instance, symbol)
             
-            # Calculate base position size
-            base_position_size = risk_amount / (account_balance * position_risk_pct)
+            # Calculate real-time slippage from order book
+            slippage = await self._calculate_real_slippage(order_book, ticker)
             
-            # Apply confidence multiplier
-            confidence_multiplier = min(confidence * 1.5, 1.0)  # Max 1.0
-            adjusted_position_size = base_position_size * confidence_multiplier
-            
-            # Apply strategy-specific adjustments
-            strategy_multiplier = self._get_strategy_risk_multiplier(strategy)
-            adjusted_position_size *= strategy_multiplier
-            
-            # Check correlation limits
-            correlation_check = await self._check_correlation_limits(symbol, adjusted_position_size)
-            if not correlation_check['allowed']:
-                return {
-                    'allowed': False,
-                    'reason': f"Correlation limit exceeded: {correlation_check['reason']}",
-                    'size': 0,
-                    'risk_amount': 0
-                }
-            
-            # Calculate trading costs
-            trading_costs = await self._calculate_trading_costs(symbol, adjusted_position_size, entry_price)
-            
-            # Apply cost adjustment
-            cost_adjusted_size = adjusted_position_size * (1 - trading_costs['total_cost_pct'])
-            
-            # Check position limits
-            position_check = await self._check_position_limits(symbol, cost_adjusted_size, entry_price)
-            if not position_check['allowed']:
-                return {
-                    'allowed': False,
-                    'reason': position_check['reason'],
-                    'size': 0,
-                    'risk_amount': 0
-                }
-            
-            # Final position size
-            final_position_size = min(cost_adjusted_size, position_check['max_allowed_size'])
+            # Calculate real-time volatility
+            volatility = await self._calculate_real_volatility(exchange_instance, symbol)
             
             return {
-                'allowed': True,
-                'size': final_position_size,
-                'risk_amount': risk_amount,
-                'confidence_multiplier': confidence_multiplier,
-                'strategy_multiplier': strategy_multiplier,
-                'trading_costs': trading_costs,
-                'correlation_check': correlation_check,
-                'position_check': position_check,
-                'leverage_used': 1.0  # Default leverage
+                'volume': ticker.get('quoteVolume', 1000000),
+                'volatility': volatility,
+                'funding_rate': funding_rate,
+                'bid_ask_spread': slippage['bid_ask_spread'],
+                'order_book_depth': order_book,
+                'last_price': ticker.get('last', 50000),
+                'timestamp': datetime.now(),
+                'real_data': True,
+                'slippage_estimate': slippage['slippage_estimate']
             }
             
         except Exception as e:
-            logger.error(f"❌ Position size calculation error: {e}")
-            return {
-                'allowed': False,
-                'reason': f"Calculation error: {str(e)}",
-                'size': 0,
-                'risk_amount': 0
-            }
+            logger.error(f"❌ Real market data fetch error: {e}")
+            return await self._get_fallback_market_data(symbol, exchange)
     
-    async def calculate_position_size_backtest(self, symbol: str, action: Dict[str, Any],
-                                             current_price: float, account_balance: float,
-                                             confidence: float) -> Dict[str, Any]:
-        """
-        Calculate position size for backtest - matches actual call signature
-        This method bridges the gap between backtest calls and existing risk logic
-        """
+    async def _get_fallback_market_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get fallback market data when real API is unavailable"""
         try:
-            # Extract stop loss from action or calculate it
-            stop_loss = action.get('stop_loss')
-            if not stop_loss:
-                # Use 2% stop loss as default
-                if action.get('action') == 'BUY':
-                    stop_loss = current_price * 0.98  # 2% below entry for LONG
-                else:  # SELL
-                    stop_loss = current_price * 1.02  # 2% above entry for SHORT
-            
-            # Extract strategy from action
-            strategy = action.get('strategy_used', 'unknown')
-            
-            # Update portfolio value for calculation
-            old_portfolio_value = self.account_balance # Changed from self.portfolio_value
-            self.account_balance = account_balance # Changed from self.portfolio_value
-            
-            # Call the existing calculate_position_size method
-            result = await self.calculate_position_size(
-                symbol=symbol,
-                entry_price=current_price,
-                stop_loss=stop_loss,
-                confidence=confidence,
-                strategy=strategy
-            )
-            
-            # Restore original portfolio value
-            self.account_balance = old_portfolio_value # Changed from self.portfolio_value
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Backtest position size calculation error: {e}")
-            return {
-                'allowed': False,
-                'reason': f'Calculation error: {str(e)}',
-                'size': 0,
-                'risk_amount': 0
-            }
-    
-
-    
-    async def _check_correlation_limits(self, symbol: str, position_size: float) -> Dict[str, Any]:
-        """Enhanced correlation check with dynamic threshold and market conditions"""
-        try:
-            # Get current open positions
-            open_positions = await self.get_open_positions()
-            
-            if not open_positions:
-                return {'allowed': True, 'reason': 'No existing positions'}
-            
-            # Get current market conditions for dynamic threshold adjustment
-            market_volatility = await self._get_market_volatility(symbol)
-            market_trend = await self._get_market_trend(symbol)
-            
-            # Update dynamic correlation threshold based on market conditions
-            await self.update_dynamic_correlation_threshold(market_volatility, market_trend)
-            
-            # Calculate correlation with existing positions using dynamic threshold
-            correlations = []
-            total_correlated_exposure = 0
-            
-            for position in open_positions:
-                pos_symbol = position.get('symbol')
-                if pos_symbol != symbol:
-                    # Calculate correlation between symbols
-                    correlation = await self._calculate_symbol_correlation(symbol, pos_symbol)
-                    correlations.append(correlation)
+            # Try to get historical data for fallback calculation
+            if self.exchange_manager:
+                historical_data = await self.exchange_manager.get_historical_data(symbol, '1h', limit=24)
+                
+                if historical_data is not None and len(historical_data) > 0:
+                    # Calculate volatility from historical data
+                    returns = historical_data['close'].pct_change().dropna()
+                    volatility = returns.std() * np.sqrt(24) if len(returns) > 0 else 0.5
                     
-                    # If correlation is high, add to correlated exposure
-                    if correlation > self.dynamic_correlation_threshold:  # Use dynamic threshold
-                        pos_value = position.get('size', 0) * position.get('entry_price', 0)
-                        total_correlated_exposure += pos_value
+                    # Get volume from historical data
+                    volume = historical_data['volume'].iloc[-1] if 'volume' in historical_data.columns else 1000000
+                    
+                    # Calculate bid-ask spread estimate
+                    high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
+                    bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
+                    
+                    return {
+                        'volume': volume,
+                        'volatility': min(volatility, 1.0),
+                        'funding_rate': 0.0001,  # Default funding rate
+                        'bid_ask_spread': max(bid_ask_spread, 0.0001),
+                        'order_book_depth': {},
+                        'last_price': historical_data['close'].iloc[-1],
+                        'timestamp': datetime.now(),
+                        'real_data': False
+                    }
             
-            # Check if new position would exceed correlation limits
-            new_position_value = position_size * self.get_current_price(symbol)
-            total_exposure = total_correlated_exposure + new_position_value
-            
-            # Calculate portfolio correlation risk with dynamic adjustment
-            avg_correlation = np.mean(correlations) if correlations else 0
-            correlation_risk = avg_correlation * (total_exposure / self.get_account_balance())
-            
-            # Adjust risk limit based on market conditions
-            adjusted_risk_limit = self.max_portfolio_risk
-            if market_volatility > 0.8:  # High volatility
-                adjusted_risk_limit *= 0.8  # Reduce risk limit
-            elif market_volatility < 0.3:  # Low volatility
-                adjusted_risk_limit *= 1.2  # Increase risk limit
-            
-            if correlation_risk > adjusted_risk_limit:
-                return {
-                    'allowed': False,
-                    'reason': f"Correlation risk too high: {correlation_risk:.2%} > {adjusted_risk_limit:.2%} (market volatility: {market_volatility:.2f})"
-                }
-            
+            # Ultimate fallback
             return {
-                'allowed': True,
-                'reason': f"Correlation check passed: {correlation_risk:.2%}",
-                'correlation_risk': correlation_risk,
-                'avg_correlation': avg_correlation,
-                'dynamic_threshold': self.dynamic_correlation_threshold,
-                'market_volatility': market_volatility,
-                'adjusted_risk_limit': adjusted_risk_limit
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001,
+                'bid_ask_spread': 0.0005,
+                'order_book_depth': {},
+                'last_price': 50000,
+                'timestamp': datetime.now(),
+                'real_data': False
             }
-            
+                
         except Exception as e:
-            logger.error(f"❌ Correlation check error: {e}")
-            return {'allowed': True, 'reason': f'Correlation check error: {str(e)}'}
-    
-    async def _calculate_symbol_correlation(self, symbol1: str, symbol2: str) -> float:
-        """Calculate high-frequency correlation between two symbols"""
-        try:
-            # Get high-frequency data (1-minute intervals for better correlation)
-            data1 = await self._get_high_frequency_data(symbol1, limit=100)
-            data2 = await self._get_high_frequency_data(symbol2, limit=100)
-            
-            if data1 is None or data2 is None or len(data1) < 50 or len(data2) < 50:
-                logger.warning(f"⚠️ Insufficient data for correlation: {symbol1} vs {symbol2}")
-                return 0.0
-            
-            # Align timestamps
-            aligned_data = self._align_time_series(data1, data2)
-            
-            if len(aligned_data) < 30:
-                logger.warning(f"⚠️ Insufficient aligned data for correlation: {symbol1} vs {symbol2}")
-                return 0.0
-            
-            # Calculate returns
-            returns1 = aligned_data[f'{symbol1}_returns']
-            returns2 = aligned_data[f'{symbol2}_returns']
-            
-            # Calculate correlation
-            correlation = returns1.corr(returns2)
-            
-            # Handle NaN values
-            if pd.isna(correlation):
-                return 0.0
-            
-            return abs(correlation)  # Return absolute correlation
-            
-        except Exception as e:
-            logger.error(f"❌ Symbol correlation calculation error: {e}")
-            return 0.0
+            logger.error(f"❌ Fallback market data calculation error: {e}")
+            return {
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001,
+                'bid_ask_spread': 0.0005,
+                'order_book_depth': {},
+                'last_price': 50000,
+                'timestamp': datetime.now(),
+                'real_data': False
+            }
     
     async def _get_high_frequency_data(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
         """Get high-frequency price data for correlation calculation"""
@@ -538,6 +382,41 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Time series alignment error: {e}")
             return pd.DataFrame()
+    
+    async def _calculate_symbol_correlation(self, symbol1: str, symbol2: str) -> float:
+        """Calculate high-frequency correlation between two symbols"""
+        try:
+            # Get high-frequency data (1-minute intervals for better correlation)
+            data1 = await self._get_high_frequency_data(symbol1, limit=100)
+            data2 = await self._get_high_frequency_data(symbol2, limit=100)
+            
+            if data1 is None or data2 is None or len(data1) < 50 or len(data2) < 50:
+                logger.warning(f"⚠️ Insufficient data for correlation: {symbol1} vs {symbol2}")
+                return 0.0
+            
+            # Align timestamps
+            aligned_data = self._align_time_series(data1, data2)
+            
+            if len(aligned_data) < 30:
+                logger.warning(f"⚠️ Insufficient aligned data for correlation: {symbol1} vs {symbol2}")
+                return 0.0
+            
+            # Calculate returns
+            returns1 = aligned_data[f'{symbol1}_returns']
+            returns2 = aligned_data[f'{symbol2}_returns']
+            
+            # Calculate correlation
+            correlation = returns1.corr(returns2)
+            
+            # Handle NaN values
+            if pd.isna(correlation):
+                return 0.0
+            
+            return abs(correlation)  # Return absolute correlation
+            
+        except Exception as e:
+            logger.error(f"❌ Symbol correlation calculation error: {e}")
+            return 0.0
     
     async def _calculate_real_time_correlation(self, symbol: str, existing_positions: List[Dict]) -> Dict[str, Any]:
         """Calculate real-time correlation with existing positions"""

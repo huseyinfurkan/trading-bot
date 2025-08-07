@@ -624,38 +624,38 @@ class LiveDataEngine:
             # Get real macro indicators from multiple sources
             try:
                 # SPY (S&P 500) analysis from real API
-                spy_data = await self._get_real_macro_data('SPY')
+                spy_data = await self._get_real_macro_data_from_alpha_vantage('SPY')
                 if spy_data:
                     macro_data['spy_trend'] = self._calculate_trend_strength(spy_data)
                     macro_data['spy_volatility'] = self._calculate_volatility(spy_data, period=20)
-                    macro_data['spy_price'] = spy_data['close'].iloc[-1] if len(spy_data) > 0 else 0
+                    macro_data['spy_price'] = spy_data['price'] if len(spy_data) > 0 else 0
                 
                 # DXY (Dollar Index) analysis from real API
-                dxy_data = await self._get_real_macro_data('DXY')
+                dxy_data = await self._get_real_macro_data_from_alpha_vantage('DXY')
                 if dxy_data:
                     macro_data['dxy_trend'] = self._calculate_trend_strength(dxy_data)
                     macro_data['dxy_volatility'] = self._calculate_volatility(dxy_data, period=20)
-                    macro_data['dxy_price'] = dxy_data['close'].iloc[-1] if len(dxy_data) > 0 else 0
+                    macro_data['dxy_price'] = dxy_data['price'] if len(dxy_data) > 0 else 0
                 
                 # Gold analysis from real API
-                gold_data = await self._get_real_macro_data('GLD')
+                gold_data = await self._get_real_macro_data_from_alpha_vantage('GLD')
                 if gold_data:
                     macro_data['gold_trend'] = self._calculate_trend_strength(gold_data)
                     macro_data['gold_volatility'] = self._calculate_volatility(gold_data, period=20)
-                    macro_data['gold_price'] = gold_data['close'].iloc[-1] if len(gold_data) > 0 else 0
+                    macro_data['gold_price'] = gold_data['price'] if len(gold_data) > 0 else 0
                 
                 # VIX (Volatility Index) analysis
-                vix_data = await self._get_real_macro_data('VIX')
+                vix_data = await self._get_real_macro_data_from_alpha_vantage('VIX')
                 if vix_data:
-                    macro_data['vix_level'] = vix_data['close'].iloc[-1] if len(vix_data) > 0 else 20
+                    macro_data['vix_level'] = vix_data['price'] if len(vix_data) > 0 else 20
                     macro_data['vix_trend'] = self._calculate_trend_strength(vix_data)
                 
                 # Treasury yields (10Y, 2Y)
-                treasury_10y = await self._get_real_macro_data('TNX')
-                treasury_2y = await self._get_real_macro_data('UST2YR')
+                treasury_10y = await self._get_real_macro_data_from_fred('TNX')
+                treasury_2y = await self._get_real_macro_data_from_fred('UST2YR')
                 if treasury_10y and treasury_2y:
-                    macro_data['yield_10y'] = treasury_10y['close'].iloc[-1] if len(treasury_10y) > 0 else 4.0
-                    macro_data['yield_2y'] = treasury_2y['close'].iloc[-1] if len(treasury_2y) > 0 else 4.5
+                    macro_data['yield_10y'] = treasury_10y['price'] if len(treasury_10y) > 0 else 4.0
+                    macro_data['yield_2y'] = treasury_2y['price'] if len(treasury_2y) > 0 else 4.5
                     macro_data['yield_curve'] = macro_data['yield_10y'] - macro_data['yield_2y']
                 
                 # Get news sentiment analysis
@@ -694,15 +694,15 @@ class LiveDataEngine:
             logger.error(f"❌ Macro conditions analysis error: {e}")
             return {'sentiment': 'neutral', 'sentiment_score': 0.5, 'note': 'Analysis failed'}
     
-    async def _get_real_macro_data(self, symbol: str) -> Optional[pd.DataFrame]:
+    async def _get_real_macro_data(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get real macro market data from multiple sources"""
         try:
             # Try multiple data sources
             sources = [
-                self._get_macro_data_from_alpha_vantage,
-                self._get_macro_data_from_yahoo_finance,
-                self._get_macro_data_from_fred,
-                self._get_macro_data_from_quandl
+                self._get_real_macro_data_from_alpha_vantage,
+                self._get_real_macro_data_from_yahoo_finance,
+                self._get_real_macro_data_from_fred,
+                self._get_real_macro_data_from_quandl
             ]
             
             for source_func in sources:
@@ -722,44 +722,221 @@ class LiveDataEngine:
             logger.error(f"❌ Real macro data retrieval error: {e}")
             return None
     
-    async def _get_macro_data_from_alpha_vantage(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Get macro data from Alpha Vantage API"""
+    async def _get_real_macro_data_from_alpha_vantage(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get real macro data from Alpha Vantage API"""
         try:
-            # This should be implemented with real Alpha Vantage API key
-            # For now, return None to indicate unavailability
+            import aiohttp
+            import os
+            
+            api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+            if not api_key:
+                logger.warning("⚠️ Alpha Vantage API key not found")
+                return None
+            
+            # Alpha Vantage endpoints for different instruments
+            endpoints = {
+                'SPY': 'TIME_SERIES_DAILY',
+                'DXY': 'FX_DAILY',
+                'GLD': 'TIME_SERIES_DAILY',
+                'VIX': 'TIME_SERIES_DAILY',
+                'TNX': 'TIME_SERIES_DAILY'
+            }
+            
+            endpoint = endpoints.get(symbol, 'TIME_SERIES_DAILY')
+            
+            if endpoint == 'FX_DAILY':
+                url = f"https://www.alphavantage.co/query?function={endpoint}&from_symbol={symbol}&to_symbol=USD&apikey={api_key}"
+            else:
+                url = f"https://www.alphavantage.co/query?function={endpoint}&symbol={symbol}&apikey={api_key}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Parse Alpha Vantage response
+                        if 'Time Series (Daily)' in data:
+                            time_series = data['Time Series (Daily)']
+                            dates = sorted(time_series.keys(), reverse=True)[:30]  # Last 30 days
+                            
+                            if len(dates) >= 2:
+                                latest_date = dates[0]
+                                previous_date = dates[1]
+                                
+                                latest_close = float(time_series[latest_date]['4. close'])
+                                previous_close = float(time_series[previous_date]['4. close'])
+                                
+                                change_pct = ((latest_close - previous_close) / previous_close) * 100
+                                
+                                return {
+                                    'symbol': symbol,
+                                    'price': latest_close,
+                                    'change_pct': change_pct,
+                                    'timestamp': latest_date,
+                                    'source': 'alpha_vantage'
+                                }
+            
             return None
+            
         except Exception as e:
-            logger.error(f"❌ Alpha Vantage data error: {e}")
+            logger.error(f"❌ Alpha Vantage API error for {symbol}: {e}")
             return None
     
-    async def _get_macro_data_from_yahoo_finance(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Get macro data from Yahoo Finance"""
+    async def _get_real_macro_data_from_yahoo_finance(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get real macro data from Yahoo Finance API"""
         try:
-            # This should be implemented with real Yahoo Finance API
-            # For now, return None to indicate unavailability
+            import aiohttp
+            
+            # Yahoo Finance API endpoint
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=30d"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
+                            result = data['chart']['result'][0]
+                            
+                            if 'timestamp' in result and 'indicators' in result:
+                                timestamps = result['timestamp']
+                                quotes = result['indicators']['quote'][0]
+                                
+                                if len(timestamps) >= 2 and 'close' in quotes:
+                                    closes = quotes['close']
+                                    if len(closes) >= 2:
+                                        latest_close = closes[-1]
+                                        previous_close = closes[-2]
+                                        
+                                        if latest_close and previous_close:
+                                            change_pct = ((latest_close - previous_close) / previous_close) * 100
+                                            
+                                            return {
+                                                'symbol': symbol,
+                                                'price': latest_close,
+                                                'change_pct': change_pct,
+                                                'timestamp': datetime.fromtimestamp(timestamps[-1]),
+                                                'source': 'yahoo_finance'
+                                            }
+            
             return None
+            
         except Exception as e:
-            logger.error(f"❌ Yahoo Finance data error: {e}")
+            logger.error(f"❌ Yahoo Finance API error for {symbol}: {e}")
             return None
     
-    async def _get_macro_data_from_fred(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Get macro data from FRED (Federal Reserve Economic Data)"""
+    async def _get_real_macro_data_from_fred(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get real macro data from FRED API"""
         try:
-            # This should be implemented with real FRED API
-            # For now, return None to indicate unavailability
+            import aiohttp
+            import os
+            
+            api_key = os.getenv('FRED_API_KEY')
+            if not api_key:
+                logger.warning("⚠️ FRED API key not found")
+                return None
+            
+            # FRED series mapping
+            fred_series = {
+                'TNX': 'DGS10',  # 10-Year Treasury Constant Maturity Rate
+                'UST2YR': 'DGS2',  # 2-Year Treasury Constant Maturity Rate
+                'VIX': 'VIXCLS'  # CBOE Volatility Index
+            }
+            
+            series_id = fred_series.get(symbol)
+            if not series_id:
+                return None
+            
+            url = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={api_key}&file_type=json&limit=30"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if 'observations' in data and len(data['observations']) >= 2:
+                            observations = data['observations']
+                            
+                            # Get latest and previous values
+                            latest_obs = observations[-1]
+                            previous_obs = observations[-2]
+                            
+                            if latest_obs['value'] != '.' and previous_obs['value'] != '.':
+                                latest_value = float(latest_obs['value'])
+                                previous_value = float(previous_obs['value'])
+                                
+                                change_pct = ((latest_value - previous_value) / previous_value) * 100
+                                
+                                return {
+                                    'symbol': symbol,
+                                    'price': latest_value,
+                                    'change_pct': change_pct,
+                                    'timestamp': latest_obs['date'],
+                                    'source': 'fred'
+                                }
+            
             return None
+            
         except Exception as e:
-            logger.error(f"❌ FRED data error: {e}")
+            logger.error(f"❌ FRED API error for {symbol}: {e}")
             return None
     
-    async def _get_macro_data_from_quandl(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Get macro data from Quandl"""
+    async def _get_real_macro_data_from_quandl(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get real macro data from Quandl API"""
         try:
-            # This should be implemented with real Quandl API
-            # For now, return None to indicate unavailability
+            import aiohttp
+            import os
+            
+            api_key = os.getenv('QUANDL_API_KEY')
+            if not api_key:
+                logger.warning("⚠️ Quandl API key not found")
+                return None
+            
+            # Quandl dataset mapping
+            quandl_datasets = {
+                'DXY': 'FRED/DEXUSEU',  # US Dollar Index
+                'GLD': 'WGC/GLD_DAILY_USD'  # Gold ETF
+            }
+            
+            dataset = quandl_datasets.get(symbol)
+            if not dataset:
+                return None
+            
+            url = f"https://www.quandl.com/api/v3/datasets/{dataset}/data.json?api_key={api_key}&limit=30"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if 'dataset_data' in data and 'data' in data['dataset_data']:
+                            dataset_data = data['dataset_data']['data']
+                            
+                            if len(dataset_data) >= 2:
+                                latest_data = dataset_data[0]
+                                previous_data = dataset_data[1]
+                                
+                                latest_value = float(latest_data[1])  # Value is usually in second column
+                                previous_value = float(previous_data[1])
+                                
+                                change_pct = ((latest_value - previous_value) / previous_value) * 100
+                                
+                                return {
+                                    'symbol': symbol,
+                                    'price': latest_value,
+                                    'change_pct': change_pct,
+                                    'timestamp': latest_data[0],
+                                    'source': 'quandl'
+                                }
+            
             return None
+            
         except Exception as e:
-            logger.error(f"❌ Quandl data error: {e}")
+            logger.error(f"❌ Quandl API error for {symbol}: {e}")
             return None
     
     async def _get_alternative_macro_data(self) -> Dict[str, Any]:

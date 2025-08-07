@@ -627,10 +627,34 @@ class AdaptiveStrategyEngine:
             # Save detailed results to JSON file
             await self._save_detailed_results(strategy_name, best_params, best_result)
             
+            # Update current strategy parameters
+            await self._update_current_strategy_parameters(strategy_name, best_params)
+            
             logger.info(f"💾 Optimization results saved for {strategy_name}")
             
         except Exception as e:
             logger.error(f"❌ Optimization results save error: {e}")
+    
+    async def _update_current_strategy_parameters(self, strategy_name: str, best_params: Dict):
+        """Update current strategy parameters with optimized values"""
+        try:
+            if strategy_name in self.adaptive_params:
+                # Update the current parameters
+                self.adaptive_params[strategy_name].update(best_params)
+                
+                # Also update the config in memory
+                if 'strategy_parameters' not in self.config:
+                    self.config['strategy_parameters'] = {}
+                
+                if strategy_name not in self.config['strategy_parameters']:
+                    self.config['strategy_parameters'][strategy_name] = {}
+                
+                self.config['strategy_parameters'][strategy_name].update(best_params)
+                
+                logger.info(f"🔄 Current parameters updated for {strategy_name}")
+                
+        except Exception as e:
+            logger.error(f"❌ Parameter update error: {e}")
     
     async def _save_to_config_file(self, strategy_name: str, best_params: Dict):
         """Save optimized parameters to config file"""
@@ -665,7 +689,14 @@ class AdaptiveStrategyEngine:
             config_data['optimization_metadata'][strategy_name] = {
                 'last_optimization': datetime.now().isoformat(),
                 'optimized_parameters': list(best_params.keys()),
-                'optimization_method': 'bayesian_optimization'
+                'optimization_method': 'bayesian_optimization',
+                'performance_metrics': {
+                    'sharpe_ratio': best_result.get('sharpe_ratio', 0),
+                    'total_return': best_result.get('total_return', 0),
+                    'max_drawdown': best_result.get('max_drawdown', 0),
+                    'win_rate': best_result.get('win_rate', 0),
+                    'profit_factor': best_result.get('profit_factor', 0)
+                }
             }
             
             # Save updated config
@@ -676,6 +707,120 @@ class AdaptiveStrategyEngine:
             
         except Exception as e:
             logger.error(f"❌ Config file save error: {e}")
+    
+    async def load_optimized_parameters(self, strategy_name: str) -> Dict[str, Any]:
+        """Load optimized parameters from config and update current parameters"""
+        try:
+            import yaml
+            from pathlib import Path
+            
+            config_path = Path('config/config.yaml')
+            
+            if not config_path.exists():
+                logger.warning(f"⚠️ Config file not found, using default parameters for {strategy_name}")
+                return self.adaptive_params.get(strategy_name, {})
+            
+            # Load config
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            # Get strategy parameters
+            strategy_params = config_data.get('strategy_parameters', {}).get(strategy_name, {})
+            
+            if strategy_params:
+                # Update current parameters
+                if strategy_name in self.adaptive_params:
+                    self.adaptive_params[strategy_name].update(strategy_params)
+                
+                # Update config in memory
+                if 'strategy_parameters' not in self.config:
+                    self.config['strategy_parameters'] = {}
+                self.config['strategy_parameters'][strategy_name] = strategy_params
+                
+                logger.info(f"📋 Loaded and applied optimized parameters for {strategy_name}")
+                return strategy_params
+            else:
+                logger.warning(f"⚠️ No optimized parameters found for {strategy_name}, using defaults")
+                return self.adaptive_params.get(strategy_name, {})
+                
+        except Exception as e:
+            logger.error(f"❌ Load optimized parameters error: {e}")
+            return self.adaptive_params.get(strategy_name, {})
+    
+    async def apply_optimized_parameters_to_all_strategies(self):
+        """Load and apply optimized parameters for all strategies"""
+        try:
+            logger.info("🔄 Loading optimized parameters for all strategies...")
+            
+            for strategy_name in self.adaptive_params.keys():
+                optimized_params = await self.load_optimized_parameters(strategy_name)
+                
+                if optimized_params:
+                    logger.info(f"✅ Applied optimized parameters for {strategy_name}")
+                else:
+                    logger.warning(f"⚠️ No optimized parameters found for {strategy_name}")
+            
+            logger.info("✅ All optimized parameters loaded and applied")
+            
+        except Exception as e:
+            logger.error(f"❌ Apply optimized parameters error: {e}")
+    
+    async def get_parameter_history(self, strategy_name: str) -> List[Dict]:
+        """Get parameter optimization history for a strategy"""
+        try:
+            import json
+            from pathlib import Path
+            
+            history_file = Path('data/optimization_history.json')
+            
+            if not history_file.exists():
+                return []
+            
+            # Load history
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+            
+            # Filter by strategy
+            strategy_history = [h for h in history if h.get('strategy_name') == strategy_name]
+            
+            # Sort by timestamp
+            strategy_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            return strategy_history
+            
+        except Exception as e:
+            logger.error(f"❌ Get parameter history error: {e}")
+            return []
+    
+    async def revert_to_previous_parameters(self, strategy_name: str, history_index: int = 0) -> bool:
+        """Revert to previous parameter set"""
+        try:
+            history = await self.get_parameter_history(strategy_name)
+            
+            if not history or history_index >= len(history):
+                logger.warning(f"⚠️ No parameter history found for {strategy_name}")
+                return False
+            
+            # Get previous parameters
+            previous_params = history[history_index].get('optimized_parameters', {})
+            
+            if not previous_params:
+                logger.warning(f"⚠️ No parameters found in history for {strategy_name}")
+                return False
+            
+            # Update current parameters
+            if strategy_name in self.adaptive_params:
+                self.adaptive_params[strategy_name].update(previous_params)
+            
+            # Save to config
+            await self._save_to_config_file(strategy_name, previous_params)
+            
+            logger.info(f"🔄 Reverted {strategy_name} to previous parameters")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Revert parameters error: {e}")
+            return False
     
     async def _save_to_database(self, strategy_name: str, best_params: Dict, best_result: Dict):
         """Save optimization results to database"""
@@ -803,357 +948,6 @@ class AdaptiveStrategyEngine:
             logger.error(f"❌ Parameter impact analysis error: {e}")
             return {}
     
-    async def load_optimized_parameters(self, strategy_name: str) -> Dict[str, Any]:
-        """Load optimized parameters from config"""
-        try:
-            import yaml
-            from pathlib import Path
-            
-            config_path = Path('config/config.yaml')
-            
-            if not config_path.exists():
-                logger.warning(f"⚠️ Config file not found, using default parameters for {strategy_name}")
-                return self.adaptive_params.get(strategy_name, {})
-            
-            # Load config
-            with open(config_path, 'r') as f:
-                config_data = yaml.safe_load(f)
-            
-            # Get strategy parameters
-            strategy_params = config_data.get('strategy_parameters', {}).get(strategy_name, {})
-            
-            if strategy_params:
-                logger.info(f"📋 Loaded optimized parameters for {strategy_name}")
-                return strategy_params
-            else:
-                logger.warning(f"⚠️ No optimized parameters found for {strategy_name}, using defaults")
-                return self.adaptive_params.get(strategy_name, {})
-                
-        except Exception as e:
-            logger.error(f"❌ Load optimized parameters error: {e}")
-            return self.adaptive_params.get(strategy_name, {})
-    
-    async def get_optimization_history(self, strategy_name: str = None, limit: int = 10) -> List[Dict]:
-        """Get optimization history"""
-        try:
-            import json
-            from pathlib import Path
-            
-            history_file = Path('data/optimization_history.json')
-            
-            if not history_file.exists():
-                return []
-            
-            # Load history
-            with open(history_file, 'r') as f:
-                history = json.load(f)
-            
-            # Filter by strategy if specified
-            if strategy_name:
-                history = [h for h in history if h.get('strategy_name') == strategy_name]
-            
-            # Return recent history
-            return history[-limit:] if limit else history
-            
-        except Exception as e:
-            logger.error(f"❌ Get optimization history error: {e}")
-            return []
-    
-    async def update_strategy_performance(self, strategy_name: str, trade_result: Dict):
-        """Update strategy performance tracking"""
-        try:
-            if strategy_name not in self.strategy_performance:
-                self.strategy_performance[strategy_name] = {'wins': 0, 'losses': 0, 'total_pnl': 0.0}
-            
-            pnl = trade_result.get('pnl', 0)
-            
-            if pnl > 0:
-                self.strategy_performance[strategy_name]['wins'] += 1
-            else:
-                self.strategy_performance[strategy_name]['losses'] += 1
-            
-            self.strategy_performance[strategy_name]['total_pnl'] += pnl
-            
-            # Store detailed performance data
-            if strategy_name not in self.performance_history:
-                self.performance_history[strategy_name] = []
-            
-            self.performance_history[strategy_name].append({
-                'timestamp': datetime.now(),
-                'pnl': pnl,
-                'entry_price': trade_result.get('entry_price', 0),
-                'exit_price': trade_result.get('exit_price', 0),
-                'duration': trade_result.get('duration', 0)
-            })
-            
-            # Keep only last 100 trades
-            if len(self.performance_history[strategy_name]) > 100:
-                self.performance_history[strategy_name] = self.performance_history[strategy_name][-100:]
-            
-        except Exception as e:
-            logger.error(f"❌ Strategy performance update error: {e}")
-    
-    def get_strategy_performance_summary(self) -> Dict[str, Any]:
-        """Get summary of all strategy performances"""
-        try:
-            summary = {}
-            
-            for strategy_name, performance in self.strategy_performance.items():
-                total_trades = performance['wins'] + performance['losses']
-                if total_trades > 0:
-                    win_rate = performance['wins'] / total_trades
-                    avg_pnl = performance['total_pnl'] / total_trades
-                else:
-                    win_rate = 0
-                    avg_pnl = 0
-                
-                summary[strategy_name] = {
-                    'total_trades': total_trades,
-                    'wins': performance['wins'],
-                    'losses': performance['losses'],
-                    'win_rate': win_rate,
-                    'total_pnl': performance['total_pnl'],
-                    'avg_pnl': avg_pnl
-                }
-            
-            return summary
-            
-        except Exception as e:
-            logger.error(f"❌ Strategy performance summary error: {e}")
-            return {}
-
-    async def analyze_market_regime(self, symbol: str) -> Dict[str, Any]:
-        """ENHANCED market regime analysis for strategy selection"""
-        try:
-            # Get multiple timeframes for comprehensive analysis
-            now = datetime.now()
-            data_15m = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='15m', 
-                start_date=now - timedelta(days=2), end_date=now
-            )
-            data_1h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='1h', 
-                start_date=now - timedelta(days=7), end_date=now
-            )
-            data_4h = await self.exchange_manager.get_historical_data(
-                symbol=symbol, timeframe='4h', 
-                start_date=now - timedelta(days=30), end_date=now
-            )
-            
-            if not all([data_15m is not None, data_1h is not None, data_4h is not None]):
-                return {'regime': 'sideways_market', 'confidence': 0.5}
-            
-            # Calculate comprehensive market metrics
-            analysis = self._comprehensive_regime_analysis(data_15m, data_1h, data_4h)
-            
-            # Enhanced regime determination
-            regime = self._determine_optimal_regime(analysis)
-            
-            # SELECT OPTIMAL STRATEGY FOR THIS SPECIFIC SYMBOL
-            optimal_strategy = self._select_optimal_strategy(regime, analysis)
-            
-            logger.info(f"📊 {symbol} Market Regime: {regime} | Vol: {analysis['volatility']:.3f} | Range: {analysis.get('range_analysis', 'N/A')} | Strategy: {optimal_strategy}")
-            
-            return {
-                'regime': regime,
-                'best_strategy': optimal_strategy,
-                'confidence': analysis['confidence'],
-                'volatility': analysis['volatility'],
-                'trend_strength': analysis['trend_strength'],
-                'recommended_strategy': optimal_strategy  # Use already calculated value instead of calling again
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Market regime analysis error: {e}")
-            return {'regime': 'sideways_market', 'confidence': 0.5, 'recommended_strategy': 'bollinger_rsi_stochrsi'}
-    
-    def _comprehensive_regime_analysis(self, data_15m, data_1h, data_4h) -> Dict[str, Any]:
-        """ENHANCED multi-timeframe analysis with advanced indicators"""
-        try:
-            current_price = data_15m['close'].iloc[-1]
-            
-            # 1. VOLATILITY REGIME ANALYSIS
-            returns_15m = data_15m['close'].pct_change().dropna()
-            volatility = returns_15m.std() * np.sqrt(96)  # Annualized
-            
-            # GARCH-like volatility regime detection
-            vol_5_day = returns_15m.tail(96*5).std() * np.sqrt(96)  # 5-day vol
-            vol_20_day = returns_15m.tail(96*20).std() * np.sqrt(96)  # 20-day vol
-            vol_regime = 'high' if vol_5_day > vol_20_day * 1.5 else 'low' if vol_5_day < vol_20_day * 0.7 else 'normal'
-            
-            # 2. TREND REGIME ANALYSIS (Multi-timeframe)
-            # 4h for major trend
-            closes_4h = data_4h['close']
-            sma_10_4h = closes_4h.rolling(10).mean().iloc[-1]
-            sma_20_4h = closes_4h.rolling(20).mean().iloc[-1]
-            sma_50_4h = closes_4h.rolling(50).mean().iloc[-1] if len(closes_4h) >= 50 else sma_20_4h
-            
-            # 1h for intermediate trend
-            closes_1h = data_1h['close']
-            sma_20_1h = closes_1h.rolling(20).mean().iloc[-1]
-            
-            # Trend strength calculation
-            major_trend_strength = abs((current_price - sma_50_4h) / sma_50_4h) if sma_50_4h > 0 else 0
-            intermediate_trend_strength = abs((current_price - sma_20_1h) / sma_20_1h) if sma_20_1h > 0 else 0
-            
-            # Trend direction consensus
-            major_trend_up = current_price > sma_10_4h > sma_20_4h > sma_50_4h
-            major_trend_down = current_price < sma_10_4h < sma_20_4h < sma_50_4h
-            intermediate_trend_up = current_price > sma_20_1h
-            
-            # 3. MOMENTUM ANALYSIS
-            # ADX-like calculation for trend strength
-            high_15m = data_15m['high']
-            low_15m = data_15m['low']
-            close_15m = data_15m['close']
-            
-            tr = np.maximum(high_15m - low_15m, 
-                 np.maximum(abs(high_15m - close_15m.shift(1)), 
-                           abs(low_15m - close_15m.shift(1))))
-            atr = tr.rolling(14).mean().iloc[-1]
-            atr_pct = atr / current_price
-            
-            # 4. VOLUME PROFILE ANALYSIS
-            volume_15m = data_15m['volume']
-            volume_sma_20 = volume_15m.rolling(20).mean().iloc[-1]
-            current_volume = volume_15m.iloc[-1]
-            volume_strength = 'high' if current_volume > volume_sma_20 * 1.5 else 'low' if current_volume < volume_sma_20 * 0.5 else 'normal'
-            
-            # 5. RANGE ANALYSIS (Support/Resistance)
-            high_24h = data_1h['high'].tail(24).max()
-            low_24h = data_1h['low'].tail(24).min()
-            range_pct = (high_24h - low_24h) / current_price
-            
-            # Price position in range
-            price_position = (current_price - low_24h) / (high_24h - low_24h) if high_24h > low_24h else 0.5
-            
-            # 6. BREAKOUT DETECTION
-            # Recent breakout above resistance
-            resistance_break = current_price > data_1h['high'].rolling(20).max().iloc[-2]
-            support_break = current_price < data_1h['low'].rolling(20).min().iloc[-2]
-            
-            # 7. ADVANCED CONFIDENCE CALCULATION
-            confidence_factors = []
-            
-            # Trend consistency across timeframes
-            trend_consistency = 0.5
-            if major_trend_up and intermediate_trend_up:
-                trend_consistency = 0.9
-            elif major_trend_down and not intermediate_trend_up:
-                trend_consistency = 0.9
-            elif major_trend_up or intermediate_trend_up:
-                trend_consistency = 0.7
-                
-            confidence_factors.append(trend_consistency * 0.3)
-            
-            # Volume confirmation
-            volume_confirmation = min(1.0, current_volume / volume_sma_20) if volume_sma_20 > 0 else 0.5
-            confidence_factors.append(volume_confirmation * 0.2)
-            
-            # Volatility factor (higher vol = more opportunities but less certainty)
-            vol_factor = 0.8 if vol_regime == 'normal' else 0.6 if vol_regime == 'high' else 0.4
-            confidence_factors.append(vol_factor * 0.2)
-            
-            # Breakout confirmation
-            breakout_factor = 0.9 if resistance_break or support_break else 0.5
-            confidence_factors.append(breakout_factor * 0.15)
-            
-            # Range position (avoid extremes)
-            range_factor = 1.0 - abs(price_position - 0.5) * 1.5  # Prefer middle range
-            confidence_factors.append(max(0.3, range_factor) * 0.15)
-            
-            final_confidence = min(0.95, max(0.3, sum(confidence_factors)))
-            
-            return {
-                'volatility': volatility,
-                'vol_regime': vol_regime,
-                'trend_strength': major_trend_strength,
-                'intermediate_trend_strength': intermediate_trend_strength,
-                'major_trend_up': major_trend_up,
-                'major_trend_down': major_trend_down,
-                'intermediate_trend_up': intermediate_trend_up,
-                'atr_pct': atr_pct,
-                'volume_strength': volume_strength,
-                'range_pct': range_pct,
-                'price_position': price_position,
-                'resistance_break': resistance_break,
-                'support_break': support_break,
-                'confidence': final_confidence,
-                'range_analysis': 'wide' if range_pct > 0.08 else 'normal' if range_pct > 0.04 else 'tight'
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Regime analysis error: {e}")
-            return {
-                'volatility': 0.02, 'trend_strength': 0.01, 'range_pct': 0.05,
-                'volume_ratio': 1.0, 'momentum_short': 0, 'momentum_medium': 0,
-                'confidence': 0.5, 'range_analysis': 'normal'
-            }
-    
-    def _determine_optimal_regime(self, analysis: Dict) -> str:
-        """ENHANCED market regime detection with advanced indicators"""
-        # Extract enhanced analysis data
-        vol_regime = analysis.get('vol_regime', 'normal')
-        major_trend_up = analysis.get('major_trend_up', False)
-        major_trend_down = analysis.get('major_trend_down', False)
-        resistance_break = analysis.get('resistance_break', False)
-        support_break = analysis.get('support_break', False)
-        trend_strength = analysis.get('trend_strength', 0)
-        atr_pct = analysis.get('atr_pct', 0)
-        volume_strength = analysis.get('volume_strength', 'normal')
-        price_position = analysis.get('price_position', 0.5)
-        
-        # 1. BREAKOUT DETECTION (Priority 1)
-        if (resistance_break or support_break) and volume_strength == 'high':
-            if vol_regime == 'high' and atr_pct > 0.03:
-                return 'explosive_breakout_market'
-            else:
-                return 'breakout_market'
-        
-        # 2. STRONG TREND DETECTION (Priority 2)
-        if (major_trend_up or major_trend_down) and trend_strength > 0.05:
-            if vol_regime == 'high':
-                return 'volatile_trending_market'
-            elif volume_strength == 'high':
-                return 'strong_trending_market'
-            else:
-                return 'trending_market'
-        
-        # 3. RANGING MARKET DETECTION (Priority 3)
-        if not major_trend_up and not major_trend_down:
-            if vol_regime == 'high' and atr_pct > 0.04:
-                return 'high_volatility_ranging_market'
-            elif 0.3 < price_position < 0.7:  # Middle of range
-                return 'consolidation_market'
-            else:
-                return 'sideways_market'
-        
-        # 4. MEAN REVERSION CONDITIONS (Priority 4)
-        if price_position > 0.8 or price_position < 0.2:  # Near extremes
-            return 'mean_reversion_market'
-        elif vol_regime == 'low' and range_pct < 0.03:  # Low vol + tight range
-            return 'consolidation_market'
-        elif range_pct > 0.06:  # Wide range but moderate vol
-            return 'ranging_market'
-        else:
-            return 'sideways_market'
-    
-    def _select_optimal_strategy(self, regime: str, analysis: Dict) -> str:
-        """Select optimal strategy based on research and regime"""
-        vol = analysis['volatility']
-        trend = analysis['trend_strength']
-        
-        # RESEARCH-BASED STRATEGY SELECTION
-        if regime in ['trending_market', 'breakout_market']:
-            # Williams Alligator excels in trending markets (3,452% research)
-            return 'alligator_ma_momentum'
-        elif regime in ['volatile_trending_market', 'strong_trending_market'] and vol > 0.03:
-            # High volatility - Alligator can catch breakouts
-            return 'alligator_ma_momentum'
-        else:
-            # Sideways, consolidation, ranging - BB+RSI+StochRSI excels
-            return 'bollinger_rsi_stochrsi'
-
     async def get_entry_signal(self, symbol: str, market_data: Dict, regime: str, current_df_slice: pd.DataFrame = None) -> Dict[str, Any]:
         """Get entry signal using research-optimized strategies"""
         try:
