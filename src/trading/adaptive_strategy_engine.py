@@ -12,9 +12,16 @@ from loguru import logger
 from src.core.risk_manager import RiskManager
 from pathlib import Path
 import asyncio
-from skopt import gp_minimize
-from skopt.space import Real, Integer
-from skopt.utils import use_named_args
+
+# Optional imports for Bayesian optimization
+try:
+    from skopt import gp_minimize
+    from skopt.space import Real, Integer
+    from skopt.utils import use_named_args
+    BAYESIAN_OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    BAYESIAN_OPTIMIZATION_AVAILABLE = False
+    logger.warning("⚠️ scikit-optimize not available, will use grid search fallback")
 
 
 class AdaptiveStrategyEngine:
@@ -358,10 +365,9 @@ class AdaptiveStrategyEngine:
                                    optimization_ranges: Dict) -> Optional[Dict[str, Any]]:
         """Perform Bayesian optimization for parameter tuning"""
         try:
-            from skopt import gp_minimize
-            from skopt.space import Real, Integer
-            from skopt.utils import use_named_args
-            import numpy as np
+            if not BAYESIAN_OPTIMIZATION_AVAILABLE:
+                logger.warning("⚠️ scikit-optimize not available, falling back to grid search")
+                return await self._fallback_grid_search(strategy_name, historical_data, optimization_ranges)
             
             # Define optimization space
             space = []
@@ -420,9 +426,6 @@ class AdaptiveStrategyEngine:
             
             return best_params
             
-        except ImportError:
-            logger.warning("⚠️ scikit-optimize not available, falling back to grid search")
-            return await self._fallback_grid_search(strategy_name, historical_data, optimization_ranges)
         except Exception as e:
             logger.error(f"❌ Bayesian optimization error: {e}")
             return await self._fallback_grid_search(strategy_name, historical_data, optimization_ranges)
