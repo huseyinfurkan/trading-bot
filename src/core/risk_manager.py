@@ -295,7 +295,7 @@ class RiskManager:
 
     
     async def _check_correlation_limits(self, symbol: str, position_size: float) -> Dict[str, Any]:
-        """Enhanced correlation check with dynamic calculation"""
+        """Enhanced correlation check with dynamic threshold and market conditions"""
         try:
             # Get current open positions
             open_positions = await self.get_open_positions()
@@ -303,7 +303,14 @@ class RiskManager:
             if not open_positions:
                 return {'allowed': True, 'reason': 'No existing positions'}
             
-            # Calculate correlation with existing positions
+            # Get current market conditions for dynamic threshold adjustment
+            market_volatility = await self._get_market_volatility(symbol)
+            market_trend = await self._get_market_trend(symbol)
+            
+            # Update dynamic correlation threshold based on market conditions
+            await self.update_dynamic_correlation_threshold(market_volatility, market_trend)
+            
+            # Calculate correlation with existing positions using dynamic threshold
             correlations = []
             total_correlated_exposure = 0
             
@@ -315,7 +322,7 @@ class RiskManager:
                     correlations.append(correlation)
                     
                     # If correlation is high, add to correlated exposure
-                    if correlation > self.dynamic_correlation_threshold: # Use dynamic threshold
+                    if correlation > self.dynamic_correlation_threshold:  # Use dynamic threshold
                         pos_value = position.get('size', 0) * position.get('entry_price', 0)
                         total_correlated_exposure += pos_value
             
@@ -323,21 +330,31 @@ class RiskManager:
             new_position_value = position_size * self.get_current_price(symbol)
             total_exposure = total_correlated_exposure + new_position_value
             
-            # Calculate portfolio correlation risk
+            # Calculate portfolio correlation risk with dynamic adjustment
             avg_correlation = np.mean(correlations) if correlations else 0
             correlation_risk = avg_correlation * (total_exposure / self.get_account_balance())
             
-            if correlation_risk > self.max_portfolio_risk:
+            # Adjust risk limit based on market conditions
+            adjusted_risk_limit = self.max_portfolio_risk
+            if market_volatility > 0.8:  # High volatility
+                adjusted_risk_limit *= 0.8  # Reduce risk limit
+            elif market_volatility < 0.3:  # Low volatility
+                adjusted_risk_limit *= 1.2  # Increase risk limit
+            
+            if correlation_risk > adjusted_risk_limit:
                 return {
                     'allowed': False,
-                    'reason': f"Correlation risk too high: {correlation_risk:.2%} > {self.max_portfolio_risk:.2%}"
+                    'reason': f"Correlation risk too high: {correlation_risk:.2%} > {adjusted_risk_limit:.2%} (market volatility: {market_volatility:.2f})"
                 }
             
             return {
                 'allowed': True,
                 'reason': f"Correlation check passed: {correlation_risk:.2%}",
                 'correlation_risk': correlation_risk,
-                'avg_correlation': avg_correlation
+                'avg_correlation': avg_correlation,
+                'dynamic_threshold': self.dynamic_correlation_threshold,
+                'market_volatility': market_volatility,
+                'adjusted_risk_limit': adjusted_risk_limit
             }
             
         except Exception as e:
@@ -917,3 +934,128 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Get historical data error: {e}")
             return None
+
+    async def _get_market_volatility(self, symbol: str) -> float:
+        """Get current market volatility for dynamic adjustments"""
+        try:
+            # Get recent price data
+            historical_data = await self.get_historical_data(symbol, '1h', limit=24)
+            if historical_data is None or len(historical_data) < 12:
+                return 0.5  # Default volatility
+            
+            # Calculate volatility as standard deviation of returns
+            returns = historical_data['close'].pct_change().dropna()
+            volatility = returns.std() * np.sqrt(24)  # Annualized from hourly data
+            
+            return min(volatility, 1.0)  # Cap at 1.0
+            
+        except Exception as e:
+            logger.error(f"❌ Market volatility calculation error: {e}")
+            return 0.5
+    
+    async def _get_market_trend(self, symbol: str) -> float:
+        """Get current market trend strength for dynamic adjustments"""
+        try:
+            # Get recent price data
+            historical_data = await self.get_historical_data(symbol, '1h', limit=48)
+            if historical_data is None or len(historical_data) < 24:
+                return 0.5  # Default trend strength
+            
+            # Calculate trend strength using moving averages
+            short_ma = historical_data['close'].rolling(window=6).mean()
+            long_ma = historical_data['close'].rolling(window=24).mean()
+            
+            current_short = short_ma.iloc[-1]
+            current_long = long_ma.iloc[-1]
+            
+            if current_long == 0:
+                return 0.5
+            
+            # Calculate trend strength
+            trend_strength = (current_short - current_long) / current_long
+            
+            # Normalize to 0-1 range
+            return min(max(trend_strength + 0.5, 0), 1)
+            
+        except Exception as e:
+            logger.error(f"❌ Market trend calculation error: {e}")
+            return 0.5
+    
+    async def get_exchange_specific_costs(self, exchange: str, symbol: str, order_type: str = 'market') -> Dict[str, Any]:
+        """Get exchange-specific trading costs with real-time data"""
+        try:
+            # Get exchange fees from config
+            exchange_config = self.exchange_fees.get(exchange, self.exchange_fees['binance'])
+            trading_fee = exchange_config['taker'] if order_type == 'market' else exchange_config['maker']
+            
+            # Get real-time market data for dynamic cost calculation
+            market_data = await self._get_real_time_market_data(symbol, exchange)
+            volume = market_data.get('volume', 1000000)
+            volatility = market_data.get('volatility', 0.5)
+            funding_rate = market_data.get('funding_rate', self.funding_fee_config['base_rate'])
+            
+            # Calculate dynamic slippage based on market conditions
+            base_slippage = self.slippage_config['base_slippage']
+            volatility_mult = self.slippage_config['volatility_multiplier']
+            volume_mult = self.slippage_config['volume_multiplier']
+            
+            # Adjust slippage based on volatility and volume
+            slippage = base_slippage * (1 + volatility * volatility_mult)
+            slippage *= max(0.5, min(2.0, volume_mult / max(volume / 1000000, 0.1)))
+            
+            # Get exchange-specific funding rate
+            if exchange in ['bybit', 'binance', 'okx']:
+                # These exchanges have perpetual futures with funding rates
+                funding_fee = funding_rate
+            else:
+                # Spot trading
+                funding_fee = 0.0
+            
+            # Calculate total costs
+            total_cost_pct = trading_fee + slippage + funding_fee
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage': slippage,
+                'funding_fee': funding_fee,
+                'total_cost_pct': total_cost_pct,
+                'exchange': exchange,
+                'order_type': order_type,
+                'market_volume': volume,
+                'market_volatility': volatility,
+                'funding_rate': funding_rate
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange-specific costs calculation error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage': 0.0005,
+                'funding_fee': 0.0001,
+                'total_cost_pct': 0.0016,
+                'exchange': exchange,
+                'order_type': order_type,
+                'market_volume': 1000000,
+                'market_volatility': 0.5,
+                'funding_rate': 0.0001
+            }
+    
+    async def _get_real_time_market_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get real-time market data for cost calculations"""
+        try:
+            # This should be implemented to get real market data from exchange
+            # For now, return default values
+            return {
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001,
+                'bid_ask_spread': 0.0005
+            }
+        except Exception as e:
+            logger.error(f"❌ Real-time market data error: {e}")
+            return {
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001,
+                'bid_ask_spread': 0.0005
+            }

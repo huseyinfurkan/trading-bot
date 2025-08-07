@@ -76,7 +76,7 @@ class AdaptiveStrategyEngine:
         return default_strategies
     
     def _load_adaptive_params(self) -> Dict[str, Dict]:
-        """Load strategy parameters from config file"""
+        """Load strategy parameters from config file with comprehensive parameter management"""
         try:
             # Load from config file
             config_path = Path('config/config.yaml')
@@ -87,51 +87,111 @@ class AdaptiveStrategyEngine:
                 
                 strategy_params = config_data.get('strategy_parameters', {})
                 
-                # Define default parameters if not in config
+                # Define comprehensive default parameters
                 default_params = {
                     'alligator_ma_momentum': {
+                        # Core strategy parameters
+                        'jaw_period': 13,
+                        'jaw_shift': 8,
+                        'teeth_period': 8,
+                        'teeth_shift': 5,
+                        'lips_period': 5,
+                        'lips_shift': 3,
+                        'sma_200': 200,
+                        'fast_sma': 10,
+                        'slow_sma': 20,
+                        
+                        # Risk management parameters
                         'profit_target': 0.03,
                         'stop_loss': 0.02,
                         'risk_per_trade': 0.02,
                         'leverage': 1.0,
+                        'max_hold_bars': 48,
+                        
+                        # Advanced exit parameters
                         'trailing_stop_enabled': True,
                         'trailing_stop_activation': 0.01,
                         'trailing_stop_distance': 0.015,
+                        'volatility_stop_enabled': True,
                         'atr_stop_multiplier': 2.0,
-                        'max_hold_bars': 48,
+                        'time_based_exit': True,
+                        'max_hold_hours': 24,
+                        
+                        # Market condition parameters
+                        'trend_threshold': 0.6,
+                        'volatility_threshold': 0.8,
+                        'volume_threshold': 1.2,
+                        
+                        # Optimization ranges for parameter tuning
                         'optimization_ranges': {
-                            'profit_target': [0.02, 0.03, 0.04, 0.05],
-                            'stop_loss': [0.015, 0.02, 0.025, 0.03],
-                            'risk_per_trade': [0.015, 0.02, 0.025],
-                            'trailing_stop_distance': [0.01, 0.015, 0.02],
-                            'atr_stop_multiplier': [1.5, 2.0, 2.5]
+                            'fast_sma': [8, 12, 15, 18],
+                            'slow_sma': [15, 20, 25, 30],
+                            'profit_target': [0.02, 0.03, 0.04, 0.05, 0.06],
+                            'stop_loss': [0.015, 0.02, 0.025, 0.03, 0.035],
+                            'risk_per_trade': [0.015, 0.02, 0.025, 0.03],
+                            'trailing_stop_distance': [0.01, 0.015, 0.02, 0.025],
+                            'atr_stop_multiplier': [1.5, 2.0, 2.5, 3.0],
+                            'trend_threshold': [0.5, 0.6, 0.7, 0.8],
+                            'volatility_threshold': [0.6, 0.8, 1.0, 1.2]
                         }
                     },
                     'bollinger_rsi_stochrsi': {
+                        # Core strategy parameters
+                        'bb_period': 20,
+                        'bb_std_dev': 2.0,
+                        'rsi_period': 14,
+                        'rsi_oversold': 30,
+                        'rsi_overbought': 70,
+                        'stochrsi_period': 14,
+                        'stochrsi_oversold': 20,
+                        'stochrsi_overbought': 80,
+                        
+                        # Risk management parameters
                         'profit_target': 0.025,
                         'stop_loss': 0.015,
                         'risk_per_trade': 0.015,
                         'leverage': 1.0,
+                        'max_hold_bars': 24,
+                        
+                        # Advanced exit parameters
                         'trailing_stop_enabled': True,
                         'trailing_stop_activation': 0.008,
                         'trailing_stop_distance': 0.012,
+                        'volatility_stop_enabled': True,
                         'atr_stop_multiplier': 1.8,
-                        'max_hold_bars': 24,
+                        'time_based_exit': True,
+                        'max_hold_hours': 12,
+                        
+                        # Market condition parameters
+                        'trend_threshold': 0.5,
+                        'volatility_threshold': 0.7,
+                        'volume_threshold': 1.0,
+                        
+                        # Optimization ranges for parameter tuning
                         'optimization_ranges': {
-                            'profit_target': [0.02, 0.025, 0.03, 0.035],
-                            'stop_loss': [0.01, 0.015, 0.02, 0.025],
-                            'risk_per_trade': [0.01, 0.015, 0.02],
-                            'trailing_stop_distance': [0.008, 0.012, 0.016],
-                            'atr_stop_multiplier': [1.5, 1.8, 2.2]
+                            'bb_std_dev': [1.8, 2.0, 2.2, 2.5],
+                            'rsi_oversold': [25, 30, 35, 40],
+                            'rsi_overbought': [60, 65, 70, 75],
+                            'stochrsi_oversold': [15, 20, 25, 30],
+                            'stochrsi_overbought': [70, 75, 80, 85],
+                            'profit_target': [0.02, 0.025, 0.03, 0.035, 0.04],
+                            'stop_loss': [0.01, 0.015, 0.02, 0.025, 0.03],
+                            'risk_per_trade': [0.01, 0.015, 0.02, 0.025],
+                            'trailing_stop_distance': [0.008, 0.012, 0.016, 0.02],
+                            'atr_stop_multiplier': [1.5, 1.8, 2.2, 2.5],
+                            'trend_threshold': [0.4, 0.5, 0.6, 0.7],
+                            'volatility_threshold': [0.5, 0.7, 0.9, 1.1]
                         }
                     }
                 }
                 
-                # Merge config with defaults
+                # Merge config with defaults and validate parameters
                 for strategy_name, default_param in default_params.items():
                     if strategy_name in strategy_params:
                         # Update defaults with config values
                         default_param.update(strategy_params[strategy_name])
+                        # Validate parameters
+                        default_param = self._validate_strategy_parameters(strategy_name, default_param)
                     else:
                         # Use defaults and save to config
                         strategy_params[strategy_name] = default_param
@@ -141,7 +201,7 @@ class AdaptiveStrategyEngine:
                 with open(config_path, 'w') as f:
                     yaml.dump(config_data, f, default_flow_style=False)
                 
-                logger.info("📋 Strategy parameters loaded from config")
+                logger.info("📋 Comprehensive strategy parameters loaded from config")
                 return strategy_params
             else:
                 logger.warning("⚠️ Config file not found, using default parameters")
@@ -150,6 +210,47 @@ class AdaptiveStrategyEngine:
         except Exception as e:
             logger.error(f"❌ Config loading error: {e}")
             return self._get_default_params()
+    
+    def _validate_strategy_parameters(self, strategy_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate strategy parameters and set reasonable defaults"""
+        try:
+            validated_params = params.copy()
+            
+            # Validate risk parameters
+            if 'risk_per_trade' in validated_params:
+                validated_params['risk_per_trade'] = max(0.001, min(0.1, validated_params['risk_per_trade']))
+            
+            if 'profit_target' in validated_params:
+                validated_params['profit_target'] = max(0.005, min(0.2, validated_params['profit_target']))
+            
+            if 'stop_loss' in validated_params:
+                validated_params['stop_loss'] = max(0.005, min(0.1, validated_params['stop_loss']))
+            
+            # Validate leverage
+            if 'leverage' in validated_params:
+                validated_params['leverage'] = max(1.0, min(10.0, validated_params['leverage']))
+            
+            # Validate technical parameters
+            if 'rsi_period' in validated_params:
+                validated_params['rsi_period'] = max(5, min(50, validated_params['rsi_period']))
+            
+            if 'bb_period' in validated_params:
+                validated_params['bb_period'] = max(10, min(100, validated_params['bb_period']))
+            
+            if 'bb_std_dev' in validated_params:
+                validated_params['bb_std_dev'] = max(1.0, min(5.0, validated_params['bb_std_dev']))
+            
+            # Validate thresholds
+            for threshold_key in ['trend_threshold', 'volatility_threshold', 'volume_threshold']:
+                if threshold_key in validated_params:
+                    validated_params[threshold_key] = max(0.1, min(2.0, validated_params[threshold_key]))
+            
+            logger.debug(f"✅ Parameters validated for {strategy_name}")
+            return validated_params
+            
+        except Exception as e:
+            logger.error(f"❌ Parameter validation error for {strategy_name}: {e}")
+            return params
     
     def _get_default_params(self) -> Dict[str, Dict]:
         """Get default strategy parameters"""

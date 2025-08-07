@@ -688,30 +688,110 @@ class BacktestRunner:
             return 0.5
     
     async def _get_trading_costs_config(self, symbol: str) -> Dict[str, Any]:
-        """Get trading costs configuration for symbol"""
+        """Get comprehensive trading costs configuration with exchange-specific settings"""
         try:
-            # This should be implemented to get real exchange-specific costs
-            # For now, return default configuration
+            # Get exchange-specific costs
+            exchange_costs = await self._get_exchange_specific_costs(symbol)
+            
             return {
-                'trading_fee': 0.001,  # 0.1%
-                'slippage_base': 0.0005,  # 0.05%
+                'trading_fee': exchange_costs.get('trading_fee', 0.001),
+                'maker_fee': exchange_costs.get('maker_fee', 0.001),
+                'slippage_base': 0.0005,
                 'slippage_volatility_multiplier': 2.0,
-                'funding_fee': 0.0001,  # 0.01% per 8 hours
-                'minimum_order_size': 10,  # $10
+                'slippage_volume_multiplier': 1.0,
+                'funding_fee': exchange_costs.get('funding_rate', 0.0001),
+                'network_fee': 0.0001,
+                'regulatory_fee': 0.00005,
+                'platform_fee': 0.00005,
+                'minimum_order_size': 10,
                 'price_precision': 4,
-                'amount_precision': 6
+                'amount_precision': 6,
+                'exchange': exchange_costs.get('exchange', 'unknown'),
+                'withdrawal_fee': exchange_costs.get('withdrawal_fee', 0.0005)
             }
         except Exception as e:
             logger.error(f"❌ Trading costs config error: {e}")
             return {
                 'trading_fee': 0.001,
+                'maker_fee': 0.001,
                 'slippage_base': 0.0005,
                 'slippage_volatility_multiplier': 2.0,
+                'slippage_volume_multiplier': 1.0,
                 'funding_fee': 0.0001,
+                'network_fee': 0.0001,
+                'regulatory_fee': 0.00005,
+                'platform_fee': 0.00005,
                 'minimum_order_size': 10,
                 'price_precision': 4,
-                'amount_precision': 6
+                'amount_precision': 6,
+                'exchange': 'unknown',
+                'withdrawal_fee': 0.0005
             }
+    
+    async def _get_exchange_specific_costs(self, symbol: str) -> Dict[str, Any]:
+        """Get exchange-specific trading costs"""
+        try:
+            # Extract exchange from symbol (e.g., 'BTC/USDT' -> 'binance')
+            exchange = self._get_exchange_from_symbol(symbol)
+            
+            # Exchange-specific fee structures
+            exchange_fees = {
+                'binance': {
+                    'maker': 0.001,  # 0.1%
+                    'taker': 0.001,  # 0.1%
+                    'funding_rate': 0.0001,  # 0.01%
+                    'withdrawal_fee': 0.0005
+                },
+                'bybit': {
+                    'maker': 0.001,  # 0.1%
+                    'taker': 0.001,  # 0.1%
+                    'funding_rate': 0.0001,  # 0.01%
+                    'withdrawal_fee': 0.0005
+                },
+                'okx': {
+                    'maker': 0.0008,  # 0.08%
+                    'taker': 0.001,   # 0.1%
+                    'funding_rate': 0.0001,  # 0.01%
+                    'withdrawal_fee': 0.0005
+                },
+                'kucoin': {
+                    'maker': 0.001,  # 0.1%
+                    'taker': 0.001,  # 0.1%
+                    'funding_rate': 0.0001,  # 0.01%
+                    'withdrawal_fee': 0.0005
+                }
+            }
+            
+            # Get fees for the exchange (default to binance if not found)
+            fees = exchange_fees.get(exchange, exchange_fees['binance'])
+            
+            return {
+                'exchange': exchange,
+                'trading_fee': fees['taker'],  # Use taker fee for market orders
+                'maker_fee': fees['maker'],
+                'funding_rate': fees['funding_rate'],
+                'withdrawal_fee': fees['withdrawal_fee']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange-specific costs error: {e}")
+            return {
+                'exchange': 'unknown',
+                'trading_fee': 0.001,
+                'maker_fee': 0.001,
+                'funding_rate': 0.0001,
+                'withdrawal_fee': 0.0005
+            }
+    
+    def _get_exchange_from_symbol(self, symbol: str) -> str:
+        """Extract exchange from symbol (placeholder for now)"""
+        try:
+            # This should be implemented based on your exchange configuration
+            # For now, return default exchange
+            return 'binance'
+        except Exception as e:
+            logger.error(f"❌ Exchange extraction error: {e}")
+            return 'binance'
     
     async def _calculate_entry_price(self, current_price: float, side: str, 
                                    trading_costs: Dict, market_condition: Dict) -> float:

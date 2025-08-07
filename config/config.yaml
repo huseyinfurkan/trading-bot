@@ -1,5 +1,5 @@
 # Trading Bot Configuration
-# Enhanced configuration with WebSocket, error handling, and performance monitoring
+# Enhanced configuration with comprehensive parameters and exchange-specific settings
 
 # Exchange Configuration
 exchanges:
@@ -11,6 +11,11 @@ exchanges:
     params:
       testnet: true
       defaultType: 'spot'
+    fees:
+      maker: 0.001
+      taker: 0.001
+      funding_rate: 0.0001
+      withdrawal_fee: 0.0005
   
   binance:
     enabled: false  # Disabled by default
@@ -20,6 +25,11 @@ exchanges:
     params:
       testnet: true
       defaultType: 'spot'
+    fees:
+      maker: 0.001
+      taker: 0.001
+      funding_rate: 0.0001
+      withdrawal_fee: 0.0005
   
   okx:
     enabled: false  # Disabled by default
@@ -30,6 +40,11 @@ exchanges:
     params:
       testnet: true
       defaultType: 'spot'
+    fees:
+      maker: 0.0008
+      taker: 0.001
+      funding_rate: 0.0001
+      withdrawal_fee: 0.0005
 
 # WebSocket Configuration
 websocket:
@@ -55,6 +70,7 @@ trading:
     max_daily_loss: 0.05      # 5% max daily loss
     max_open_positions: 10
     correlation_threshold: 0.7
+    correlation_adjustment_factor: 0.1
     min_position_size: 10     # $10 minimum
     max_position_size: 10000  # $10,000 maximum
     
@@ -75,6 +91,30 @@ trading:
       default_percentage: 0.04  # 4%
       trailing_enabled: true
       trailing_distance: 0.005  # 0.5%
+    
+    # Exchange-specific trading costs
+    exchange_fees:
+      binance:
+        maker: 0.001
+        taker: 0.001
+      bybit:
+        maker: 0.001
+        taker: 0.001
+      okx:
+        maker: 0.0008
+        taker: 0.001
+    
+    # Slippage configuration
+    slippage_config:
+      base_slippage: 0.0005
+      volatility_multiplier: 2.0
+      volume_multiplier: 1.0
+    
+    # Funding fee configuration
+    funding_fee_config:
+      base_rate: 0.0001
+      max_rate: 0.001
+      adjustment_period: 8  # hours
 
 # Strategy Configuration
 strategies:
@@ -95,99 +135,130 @@ strategies:
 # Strategy Parameters
 strategy_parameters:
   alligator_ma_momentum:
-    # Williams Alligator
+    # Core strategy parameters
     jaw_period: 13
     jaw_shift: 8
     teeth_period: 8
     teeth_shift: 5
     lips_period: 5
     lips_shift: 3
-    
-    # Moving Averages
     sma_200: 200
     fast_sma: 10
     slow_sma: 20
-    max_hold_bars: 12
     
-    # Exit Strategy
-    profit_target: 0.08
-    stop_loss: 0.025
+    # Risk management parameters
+    profit_target: 0.03
+    stop_loss: 0.02
     risk_per_trade: 0.02
-    leverage: 2.0
+    leverage: 1.0
+    max_hold_bars: 48
     
-    # Advanced Exit
+    # Advanced exit parameters
     trailing_stop_enabled: true
-    trailing_stop_activation: 0.03
+    trailing_stop_activation: 0.01
     trailing_stop_distance: 0.015
     volatility_stop_enabled: true
     atr_stop_multiplier: 2.0
+    time_based_exit: true
+    max_hold_hours: 24
     
-    # Optimization ranges
+    # Market condition parameters
+    trend_threshold: 0.6
+    volatility_threshold: 0.8
+    volume_threshold: 1.2
+    
+    # Optimization ranges for parameter tuning
     optimization_ranges:
-      fast_sma: [8, 12, 15]
-      slow_sma: [15, 20, 25]
-      profit_target: [0.06, 0.08, 0.10]
-      stop_loss: [0.02, 0.025, 0.03]
+      fast_sma: [8, 12, 15, 18]
+      slow_sma: [15, 20, 25, 30]
+      profit_target: [0.02, 0.03, 0.04, 0.05, 0.06]
+      stop_loss: [0.015, 0.02, 0.025, 0.03, 0.035]
+      risk_per_trade: [0.015, 0.02, 0.025, 0.03]
+      trailing_stop_distance: [0.01, 0.015, 0.02, 0.025]
+      atr_stop_multiplier: [1.5, 2.0, 2.5, 3.0]
+      trend_threshold: [0.5, 0.6, 0.7, 0.8]
+      volatility_threshold: [0.6, 0.8, 1.0, 1.2]
   
   bollinger_rsi_stochrsi:
-    # Bollinger Bands
+    # Core strategy parameters
     bb_period: 20
     bb_std_dev: 2.0
-    
-    # RSI
     rsi_period: 14
     rsi_oversold: 30
     rsi_overbought: 70
-    
-    # Stochastic RSI
     stochrsi_period: 14
     stochrsi_oversold: 20
     stochrsi_overbought: 80
-    max_hold_bars: 6
     
-    # Exit Strategy
-    profit_target: 0.04
-    stop_loss: 0.012
+    # Risk management parameters
+    profit_target: 0.025
+    stop_loss: 0.015
     risk_per_trade: 0.015
-    leverage: 1.8
+    leverage: 1.0
+    max_hold_bars: 24
     
-    # Advanced Exit
+    # Advanced exit parameters
     trailing_stop_enabled: true
-    trailing_stop_activation: 0.02
-    trailing_stop_distance: 0.008
+    trailing_stop_activation: 0.008
+    trailing_stop_distance: 0.012
     volatility_stop_enabled: true
-    atr_stop_multiplier: 1.5
+    atr_stop_multiplier: 1.8
+    time_based_exit: true
+    max_hold_hours: 12
     
-    # Optimization ranges
+    # Market condition parameters
+    trend_threshold: 0.5
+    volatility_threshold: 0.7
+    volume_threshold: 1.0
+    
+    # Optimization ranges for parameter tuning
     optimization_ranges:
-      bb_std_dev: [1.8, 2.0, 2.2]
-      rsi_oversold: [25, 30, 35]
-      rsi_overbought: [65, 70, 75]
-      profit_target: [0.03, 0.04, 0.05]
+      bb_std_dev: [1.8, 2.0, 2.2, 2.5]
+      rsi_oversold: [25, 30, 35, 40]
+      rsi_overbought: [60, 65, 70, 75]
+      stochrsi_oversold: [15, 20, 25, 30]
+      stochrsi_overbought: [70, 75, 80, 85]
+      profit_target: [0.02, 0.025, 0.03, 0.035, 0.04]
+      stop_loss: [0.01, 0.015, 0.02, 0.025, 0.03]
+      risk_per_trade: [0.01, 0.015, 0.02, 0.025]
+      trailing_stop_distance: [0.008, 0.012, 0.016, 0.02]
+      atr_stop_multiplier: [1.5, 1.8, 2.2, 2.5]
+      trend_threshold: [0.4, 0.5, 0.6, 0.7]
+      volatility_threshold: [0.5, 0.7, 0.9, 1.1]
 
 # Parameter Optimization
 parameter_optimization:
   enabled: true
   interval_hours: 24
   optimization_method: "grid_search"
-  max_combinations: 10
+  max_combinations: 50
   validation_period_days: 7
+  performance_threshold: 0.6
 
 # AI Configuration
 ai:
   confidence_threshold: 0.6
   retrain_frequency_hours: 24
+  learning_rate: 0.01
+  performance_window: 100
+  
   model_validation:
     enabled: true
     min_accuracy: 0.6
     min_f1_score: 0.5
   
-  # Signal weights
+  # Signal weights (adaptive)
   signal_weights:
-    technical: 0.35
-    ml: 0.35
+    technical: 0.3
+    ml: 0.4
     volume: 0.2
     regime: 0.1
+  
+  # Adaptive thresholds
+  adaptive_thresholds:
+    confidence_min: 0.6
+    signal_strength_min: 0.5
+    ml_probability_min: 0.7
 
 # Market Analysis
 market_analysis:
@@ -195,6 +266,22 @@ market_analysis:
   symbols_for_regime: ["BTC/USDT", "ETH/USDT", "BNB/USDT"]
   volatility_threshold: 0.8
   trend_strength_threshold: 0.7
+  
+  # Macro data sources
+  macro_data:
+    enabled: true
+    sources:
+      - "alpha_vantage"
+      - "yahoo_finance"
+      - "fred"
+      - "quandl"
+    symbols:
+      - "SPY"
+      - "DXY"
+      - "GLD"
+      - "VIX"
+      - "TNX"
+      - "UST2YR"
 
 # Live Data Engine
 live_data:
@@ -209,6 +296,13 @@ live_data:
     volatility_multiplier: 0.5
     trend_multiplier: 0.8
     normal_multiplier: 1.2
+  
+  # Enhanced analysis settings
+  enhanced_analysis:
+    macro_data_enabled: true
+    liquidity_analysis_enabled: true
+    order_book_depth: 10
+    bid_ask_spread_threshold: 0.001
 
 # Error Handling
 error_handling:
@@ -226,6 +320,13 @@ error_handling:
   alerts:
     enabled: true
     cooldown_seconds: 300
+  
+  # API error handling
+  api_error_handling:
+    max_retries: 3
+    retry_delay: 2
+    timeout: 10
+    fallback_enabled: true
 
 # Performance Monitoring
 performance_monitoring:
@@ -301,7 +402,16 @@ backtesting:
   start_date: "2024-01-01"
   end_date: "2024-12-31"
   initial_capital: 10000
-  trading_fee: 0.001
+  
+  # Trading costs
+  trading_costs:
+    trading_fee: 0.001
+    slippage_base: 0.0005
+    slippage_volatility_multiplier: 2.0
+    funding_fee: 0.0001
+    network_fee: 0.0001
+    regulatory_fee: 0.00005
+    platform_fee: 0.00005
   
   # Performance metrics
   metrics:
@@ -311,6 +421,8 @@ backtesting:
     - "win_rate"
     - "profit_factor"
     - "calmar_ratio"
+    - "sortino_ratio"
+    - "information_ratio"
 
 # Security Configuration
 security:

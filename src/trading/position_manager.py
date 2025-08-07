@@ -306,22 +306,22 @@ class PositionManager:
             logger.error(f"❌ Trailing stops update error: {e}")
     
     async def _calculate_dynamic_trailing_stop(self, position: Dict[str, Any], current_price: float) -> Optional[float]:
-        """Calculate dynamic trailing stop based on market conditions"""
+        """Calculate dynamic trailing stop based on market conditions with enhanced logic"""
         try:
             entry_price = position['entry_price']
             side = position['side']
             trailing_distance = position.get('trailing_stop_distance', 0.02)
             
-            # Get market volatility for dynamic adjustment
-            volatility = await self._get_market_volatility(position['symbol'])
+            # Get comprehensive market data for dynamic adjustment
+            market_data = await self._get_comprehensive_market_data(position['symbol'])
+            volatility = market_data.get('volatility', 0.5)
+            volume = market_data.get('volume', 1000000)
+            trend_strength = market_data.get('trend_strength', 0.5)
             
-            # Adjust trailing distance based on volatility
-            if volatility > 0.8:  # High volatility
-                adjusted_distance = trailing_distance * 1.5
-            elif volatility < 0.3:  # Low volatility
-                adjusted_distance = trailing_distance * 0.7
-            else:
-                adjusted_distance = trailing_distance
+            # Calculate dynamic trailing distance based on multiple factors
+            adjusted_distance = self._calculate_dynamic_trailing_distance(
+                trailing_distance, volatility, volume, trend_strength, side
+            )
             
             # Calculate profit percentage
             if side == 'BUY':
@@ -329,27 +329,153 @@ class PositionManager:
             else:  # SELL
                 profit_pct = (entry_price - current_price) / entry_price
             
-            # Check if trailing stop should be activated
-            activation_threshold = position.get('trailing_stop_activation', 0.01)
+            # Check if trailing stop should be activated with dynamic threshold
+            activation_threshold = self._calculate_dynamic_activation_threshold(
+                position.get('trailing_stop_activation', 0.01), volatility, trend_strength
+            )
             
             if profit_pct < activation_threshold:
                 return None  # Don't activate trailing stop yet
             
-            # Calculate new stop loss
-            if side == 'BUY':
-                new_stop_loss = current_price * (1 - adjusted_distance)
-                # Ensure stop loss is not below entry price (for long positions)
-                new_stop_loss = max(new_stop_loss, entry_price * 0.98)
-            else:  # SELL
-                new_stop_loss = current_price * (1 + adjusted_distance)
-                # Ensure stop loss is not above entry price (for short positions)
-                new_stop_loss = min(new_stop_loss, entry_price * 1.02)
+            # Calculate new stop loss with enhanced logic
+            new_stop_loss = self._calculate_enhanced_stop_loss(
+                current_price, adjusted_distance, side, entry_price, profit_pct
+            )
             
             return new_stop_loss
             
         except Exception as e:
             logger.error(f"❌ Dynamic trailing stop calculation error: {e}")
             return None
+    
+    def _calculate_dynamic_trailing_distance(self, base_distance: float, volatility: float, 
+                                           volume: float, trend_strength: float, side: str) -> float:
+        """Calculate dynamic trailing distance based on market conditions"""
+        try:
+            # Base adjustment from volatility
+            volatility_multiplier = 1.0
+            if volatility > 0.8:  # High volatility
+                volatility_multiplier = 1.5
+            elif volatility < 0.3:  # Low volatility
+                volatility_multiplier = 0.7
+            
+            # Volume adjustment
+            volume_multiplier = 1.0
+            if volume > 5000000:  # High volume
+                volume_multiplier = 0.9  # Tighter stops in high volume
+            elif volume < 100000:  # Low volume
+                volume_multiplier = 1.3  # Wider stops in low volume
+            
+            # Trend strength adjustment
+            trend_multiplier = 1.0
+            if trend_strength > 0.7:  # Strong trend
+                trend_multiplier = 0.8  # Tighter stops in strong trends
+            elif trend_strength < 0.3:  # Weak trend
+                trend_multiplier = 1.2  # Wider stops in weak trends
+            
+            # Calculate final adjusted distance
+            adjusted_distance = base_distance * volatility_multiplier * volume_multiplier * trend_multiplier
+            
+            # Ensure reasonable bounds
+            return max(0.005, min(0.05, adjusted_distance))
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic trailing distance calculation error: {e}")
+            return base_distance
+    
+    def _calculate_dynamic_activation_threshold(self, base_threshold: float, volatility: float, 
+                                              trend_strength: float) -> float:
+        """Calculate dynamic activation threshold for trailing stop"""
+        try:
+            # Adjust activation threshold based on market conditions
+            if volatility > 0.8:  # High volatility
+                # Activate earlier in high volatility
+                return base_threshold * 0.7
+            elif volatility < 0.3:  # Low volatility
+                # Activate later in low volatility
+                return base_threshold * 1.3
+            
+            if trend_strength > 0.7:  # Strong trend
+                # Activate earlier in strong trends
+                return base_threshold * 0.8
+            elif trend_strength < 0.3:  # Weak trend
+                # Activate later in weak trends
+                return base_threshold * 1.2
+            
+            return base_threshold
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic activation threshold calculation error: {e}")
+            return base_threshold
+    
+    def _calculate_enhanced_stop_loss(self, current_price: float, adjusted_distance: float, 
+                                    side: str, entry_price: float, profit_pct: float) -> float:
+        """Calculate enhanced stop loss with profit-based adjustments"""
+        try:
+            # Calculate base stop loss
+            if side == 'BUY':
+                base_stop_loss = current_price * (1 - adjusted_distance)
+            else:  # SELL
+                base_stop_loss = current_price * (1 + adjusted_distance)
+            
+            # Apply profit-based adjustments
+            if profit_pct > 0.05:  # More than 5% profit
+                # Tighten stop loss to lock in profits
+                if side == 'BUY':
+                    base_stop_loss = max(base_stop_loss, entry_price * 1.02)  # Ensure 2% profit
+                else:  # SELL
+                    base_stop_loss = min(base_stop_loss, entry_price * 0.98)  # Ensure 2% profit
+            
+            # Apply safety bounds
+            if side == 'BUY':
+                # Ensure stop loss is not below entry price (for long positions)
+                final_stop_loss = max(base_stop_loss, entry_price * 0.98)
+            else:  # SELL
+                # Ensure stop loss is not above entry price (for short positions)
+                final_stop_loss = min(base_stop_loss, entry_price * 1.02)
+            
+            return final_stop_loss
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced stop loss calculation error: {e}")
+            return current_price * (1 - adjusted_distance) if side == 'BUY' else current_price * (1 + adjusted_distance)
+    
+    async def _get_comprehensive_market_data(self, symbol: str) -> Dict[str, Any]:
+        """Get comprehensive market data for dynamic adjustments"""
+        try:
+            # Get recent price data
+            market_data = await self.exchange_manager.get_market_data(symbol)
+            if not market_data or 'dataframe' not in market_data:
+                return {'volatility': 0.5, 'volume': 1000000, 'trend_strength': 0.5}
+            
+            df = market_data['dataframe']
+            if len(df) < 20:
+                return {'volatility': 0.5, 'volume': 1000000, 'trend_strength': 0.5}
+            
+            # Calculate volatility
+            returns = df['close'].pct_change().dropna()
+            volatility = returns.std() * np.sqrt(24)  # Annualized from hourly data
+            
+            # Calculate volume
+            volume = df['volume'].iloc[-1] if 'volume' in df.columns else 1000000
+            
+            # Calculate trend strength
+            if len(df) >= 20:
+                sma_20 = df['close'].rolling(20).mean().iloc[-1]
+                current_price = df['close'].iloc[-1]
+                trend_strength = abs(current_price - sma_20) / sma_20
+            else:
+                trend_strength = 0.5
+            
+            return {
+                'volatility': min(volatility, 1.0),
+                'volume': volume,
+                'trend_strength': min(trend_strength, 1.0)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Comprehensive market data error: {e}")
+            return {'volatility': 0.5, 'volume': 1000000, 'trend_strength': 0.5}
     
     async def _get_market_volatility(self, symbol: str) -> float:
         """Get market volatility for dynamic adjustments"""

@@ -1760,43 +1760,129 @@ class AISignalFilter:
             return prediction.get('confidence', 0.5)
     
     async def update_adaptive_parameters(self, performance_metrics: Dict[str, Any]):
-        """Update adaptive weights and thresholds based on performance"""
+        """Update adaptive weights and thresholds based on performance with enhanced logic"""
         try:
             # Extract performance metrics
             win_rate = performance_metrics.get('win_rate', 0.5)
             avg_return = performance_metrics.get('avg_return', 0)
             sharpe_ratio = performance_metrics.get('sharpe_ratio', 0)
+            total_trades = performance_metrics.get('total_trades', 0)
+            max_drawdown = performance_metrics.get('max_drawdown', 0)
             
-            # Calculate performance score
-            performance_score = (win_rate * 0.4 + max(0, avg_return) * 0.3 + max(0, sharpe_ratio) * 0.3)
+            # Calculate comprehensive performance score
+            performance_score = self._calculate_comprehensive_performance_score(
+                win_rate, avg_return, sharpe_ratio, total_trades, max_drawdown
+            )
             
-            # Adjust weights based on performance
-            if performance_score > 0.7:  # Good performance
-                # Increase ML weight, decrease technical
-                self.adaptive_weights['ml'] = min(0.6, self.adaptive_weights['ml'] + self.learning_rate)
-                self.adaptive_weights['technical'] = max(0.2, self.adaptive_weights['technical'] - self.learning_rate * 0.5)
-            elif performance_score < 0.3:  # Poor performance
-                # Increase technical weight, decrease ML
-                self.adaptive_weights['technical'] = min(0.5, self.adaptive_weights['technical'] + self.learning_rate)
-                self.adaptive_weights['ml'] = max(0.2, self.adaptive_weights['ml'] - self.learning_rate * 0.5)
+            # Update adaptive weights based on performance
+            await self._update_adaptive_weights(performance_score, win_rate, sharpe_ratio)
             
-            # Adjust thresholds based on performance
-            if win_rate < 0.4:  # Low win rate
-                # Increase confidence threshold
-                self.adaptive_thresholds['confidence_min'] = min(0.8, self.adaptive_thresholds['confidence_min'] + self.learning_rate)
-            elif win_rate > 0.6:  # High win rate
-                # Decrease confidence threshold
-                self.adaptive_thresholds['confidence_min'] = max(0.4, self.adaptive_thresholds['confidence_min'] - self.learning_rate)
+            # Update adaptive thresholds based on performance
+            await self._update_adaptive_thresholds(win_rate, sharpe_ratio, max_drawdown)
             
-            # Normalize weights
-            total_weight = sum(self.adaptive_weights.values())
-            for key in self.adaptive_weights:
-                self.adaptive_weights[key] /= total_weight
-            
-            logger.info(f"🔄 Adaptive parameters updated - Performance: {performance_score:.3f}, Weights: {self.adaptive_weights}")
+            # Log adaptive parameter updates
+            logger.info(f"🔄 Adaptive parameters updated - Performance: {performance_score:.3f}")
+            logger.info(f"📊 New weights: {self.adaptive_weights}")
+            logger.info(f"🎯 New thresholds: {self.adaptive_thresholds}")
             
         except Exception as e:
             logger.error(f"❌ Adaptive parameters update error: {e}")
+    
+    def _calculate_comprehensive_performance_score(self, win_rate: float, avg_return: float, 
+                                                 sharpe_ratio: float, total_trades: int, 
+                                                 max_drawdown: float) -> float:
+        """Calculate comprehensive performance score"""
+        try:
+            # Base score components
+            win_rate_score = win_rate * 0.3
+            return_score = max(0, avg_return) * 0.25
+            sharpe_score = max(0, sharpe_ratio) * 0.25
+            drawdown_penalty = max_drawdown * 0.2
+            
+            # Trade count adjustment
+            trade_adjustment = min(1.0, total_trades / 50)  # Normalize to 50 trades
+            
+            # Calculate base score
+            base_score = (win_rate_score + return_score + sharpe_score - drawdown_penalty) * trade_adjustment
+            
+            # Apply performance bonuses/penalties
+            if win_rate > 0.6 and sharpe_ratio > 1.0:
+                base_score *= 1.1  # Bonus for excellent performance
+            elif win_rate < 0.4 or sharpe_ratio < 0.5:
+                base_score *= 0.8  # Penalty for poor performance
+            
+            return max(0.0, min(1.0, base_score))
+            
+        except Exception as e:
+            logger.error(f"❌ Performance score calculation error: {e}")
+            return 0.5
+    
+    async def _update_adaptive_weights(self, performance_score: float, win_rate: float, sharpe_ratio: float):
+        """Update adaptive weights based on performance"""
+        try:
+            # Calculate weight adjustments based on performance
+            if performance_score > 0.7:  # Excellent performance
+                # Increase ML weight, decrease technical
+                self.adaptive_weights['ml'] = min(0.7, self.adaptive_weights['ml'] + self.learning_rate * 2)
+                self.adaptive_weights['technical'] = max(0.15, self.adaptive_weights['technical'] - self.learning_rate)
+                self.adaptive_weights['volume'] = max(0.1, self.adaptive_weights['volume'] - self.learning_rate * 0.5)
+                self.adaptive_weights['regime'] = max(0.05, self.adaptive_weights['regime'] - self.learning_rate * 0.5)
+                
+            elif performance_score > 0.5:  # Good performance
+                # Moderate adjustments
+                self.adaptive_weights['ml'] = min(0.6, self.adaptive_weights['ml'] + self.learning_rate)
+                self.adaptive_weights['technical'] = max(0.2, self.adaptive_weights['technical'] - self.learning_rate * 0.5)
+                
+            elif performance_score < 0.3:  # Poor performance
+                # Increase technical weight, decrease ML
+                self.adaptive_weights['technical'] = min(0.6, self.adaptive_weights['technical'] + self.learning_rate * 2)
+                self.adaptive_weights['ml'] = max(0.2, self.adaptive_weights['ml'] - self.learning_rate)
+                self.adaptive_weights['volume'] = min(0.3, self.adaptive_weights['volume'] + self.learning_rate)
+                self.adaptive_weights['regime'] = min(0.2, self.adaptive_weights['regime'] + self.learning_rate)
+            
+            # Normalize weights to sum to 1.0
+            total_weight = sum(self.adaptive_weights.values())
+            for key in self.adaptive_weights:
+                self.adaptive_weights[key] /= total_weight
+                
+        except Exception as e:
+            logger.error(f"❌ Adaptive weights update error: {e}")
+    
+    async def _update_adaptive_thresholds(self, win_rate: float, sharpe_ratio: float, max_drawdown: float):
+        """Update adaptive thresholds based on performance"""
+        try:
+            # Update confidence threshold based on win rate
+            if win_rate < 0.4:  # Low win rate
+                # Increase confidence threshold for more selective trading
+                self.adaptive_thresholds['confidence_min'] = min(0.85, 
+                    self.adaptive_thresholds['confidence_min'] + self.learning_rate * 2)
+            elif win_rate > 0.6:  # High win rate
+                # Decrease confidence threshold for more aggressive trading
+                self.adaptive_thresholds['confidence_min'] = max(0.45, 
+                    self.adaptive_thresholds['confidence_min'] - self.learning_rate)
+            
+            # Update signal strength threshold based on Sharpe ratio
+            if sharpe_ratio < 0.5:  # Low Sharpe ratio
+                # Increase signal strength threshold
+                self.adaptive_thresholds['signal_strength_min'] = min(0.8, 
+                    self.adaptive_thresholds['signal_strength_min'] + self.learning_rate)
+            elif sharpe_ratio > 1.5:  # High Sharpe ratio
+                # Decrease signal strength threshold
+                self.adaptive_thresholds['signal_strength_min'] = max(0.3, 
+                    self.adaptive_thresholds['signal_strength_min'] - self.learning_rate)
+            
+            # Update ML probability threshold based on drawdown
+            if max_drawdown > 0.2:  # High drawdown
+                # Increase ML probability threshold for more conservative predictions
+                self.adaptive_thresholds['ml_probability_min'] = min(0.9, 
+                    self.adaptive_thresholds['ml_probability_min'] + self.learning_rate)
+            elif max_drawdown < 0.1:  # Low drawdown
+                # Decrease ML probability threshold
+                self.adaptive_thresholds['ml_probability_min'] = max(0.5, 
+                    self.adaptive_thresholds['ml_probability_min'] - self.learning_rate)
+                
+        except Exception as e:
+            logger.error(f"❌ Adaptive thresholds update error: {e}")
     
     async def save_model_version(self, model_name: str, model_data: Dict[str, Any], performance: Dict[str, Any]):
         """Save model version with performance metrics"""
