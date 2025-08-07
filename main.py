@@ -66,7 +66,8 @@ class EnhancedTradingBot:
             self.config = await self.config_manager.load_config()
             
             # 2. Setup logging
-            setup_logger(self.config.get('logging', {}))
+            logging_config = self.config.get('logging', {})
+            setup_logging(logging_config)
             logger.info("✅ Logging system initialized")
             
             # 3. Initialize error handler
@@ -93,7 +94,7 @@ class EnhancedTradingBot:
             logger.info("✅ WebSocket manager initialized")
             
             # 8. Initialize AI components
-            self.ai_signal_filter = AISignalFilter(self.config.get('ai', {}))
+            self.ai_signal_filter = AISignalFilter(self.config.get('ai', {}), self.db_manager)
             await self.ai_signal_filter.initialize()
             
             self.market_analyzer = MarketAnalyzer(self.config.get('market_analysis', {}), self.exchange_manager)

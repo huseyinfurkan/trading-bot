@@ -665,13 +665,16 @@ class DatabaseManager:
     async def get_trades(self, symbol: str = None, limit: int = 100) -> List[Dict]:
         """Trade geçmişini getir"""
         try:
+            # Get connection from pool
+            conn = await self._get_connection()
+            
             if symbol:
-                cursor = await self.connection.execute("""
+                cursor = await conn.execute("""
                     SELECT * FROM trades WHERE symbol = ? 
                     ORDER BY entry_time DESC LIMIT ?
                 """, (symbol, limit))
             else:
-                cursor = await self.connection.execute("""
+                cursor = await conn.execute("""
                     SELECT * FROM trades 
                     ORDER BY entry_time DESC LIMIT ?
                 """, (limit,))
@@ -696,10 +699,16 @@ class DatabaseManager:
                     'duration_seconds': row[12]
                 })
             
+            # Return connection to pool
+            await self._return_connection(conn)
+            
             return trades
             
         except Exception as e:
             logger.error(f"❌ Get trades error: {e}")
+            # Return connection to pool on error
+            if 'conn' in locals():
+                await self._return_connection(conn)
             return []
     
     async def cleanup_old_data(self, days: int = 90):
