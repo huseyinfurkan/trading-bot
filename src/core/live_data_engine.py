@@ -617,586 +617,538 @@ class LiveDataEngine:
             return 'bollinger_rsi_stochrsi'
     
     async def _analyze_macro_conditions(self) -> Dict[str, Any]:
-        """Analyze macro market conditions with real data sources and news sentiment"""
+        """Analyze macro market conditions using Bybit and Binance public APIs only"""
         try:
             macro_data = {}
             
-            # Get real macro indicators from multiple sources
+            # Get real macro indicators from Bybit and Binance public APIs
             try:
-                # SPY (S&P 500) analysis from real API
-                spy_data = await self._get_real_macro_data_from_alpha_vantage('SPY')
-                if spy_data:
-                    macro_data['spy_trend'] = self._calculate_trend_strength(spy_data)
-                    macro_data['spy_volatility'] = self._calculate_volatility(spy_data, period=20)
-                    macro_data['spy_price'] = spy_data['price'] if len(spy_data) > 0 else 0
+                # BTC Dominance from Bybit
+                btc_dominance = await self._get_btc_dominance_bybit()
+                if btc_dominance:
+                    macro_data['btc_dominance'] = btc_dominance
+                    macro_data['btc_dominance_trend'] = self._calculate_trend_strength(btc_dominance)
                 
-                # DXY (Dollar Index) analysis from real API
-                dxy_data = await self._get_real_macro_data_from_alpha_vantage('DXY')
-                if dxy_data:
-                    macro_data['dxy_trend'] = self._calculate_trend_strength(dxy_data)
-                    macro_data['dxy_volatility'] = self._calculate_volatility(dxy_data, period=20)
-                    macro_data['dxy_price'] = dxy_data['price'] if len(dxy_data) > 0 else 0
+                # ETH Dominance from Binance
+                eth_dominance = await self._get_eth_dominance_binance()
+                if eth_dominance:
+                    macro_data['eth_dominance'] = eth_dominance
+                    macro_data['eth_dominance_trend'] = self._calculate_trend_strength(eth_dominance)
                 
-                # Gold analysis from real API
-                gold_data = await self._get_real_macro_data_from_alpha_vantage('GLD')
-                if gold_data:
-                    macro_data['gold_trend'] = self._calculate_trend_strength(gold_data)
-                    macro_data['gold_volatility'] = self._calculate_volatility(gold_data, period=20)
-                    macro_data['gold_price'] = gold_data['price'] if len(gold_data) > 0 else 0
+                # Total Market Cap from Bybit
+                total_mcap = await self._get_total_market_cap_bybit()
+                if total_mcap:
+                    macro_data['total_market_cap'] = total_mcap
+                    macro_data['market_cap_trend'] = self._calculate_trend_strength(total_mcap)
                 
-                # VIX (Volatility Index) analysis
-                vix_data = await self._get_real_macro_data_from_alpha_vantage('VIX')
-                if vix_data:
-                    macro_data['vix_level'] = vix_data['price'] if len(vix_data) > 0 else 20
-                    macro_data['vix_trend'] = self._calculate_trend_strength(vix_data)
+                # Fear & Greed Index (Public API)
+                fear_greed = await self._get_fear_greed_index()
+                if fear_greed:
+                    macro_data['fear_greed_index'] = fear_greed
+                    macro_data['market_sentiment'] = self._interpret_fear_greed(fear_greed)
                 
-                # Treasury yields (10Y, 2Y)
-                treasury_10y = await self._get_real_macro_data_from_fred('TNX')
-                treasury_2y = await self._get_real_macro_data_from_fred('UST2YR')
-                if treasury_10y and treasury_2y:
-                    macro_data['yield_10y'] = treasury_10y['price'] if len(treasury_10y) > 0 else 4.0
-                    macro_data['yield_2y'] = treasury_2y['price'] if len(treasury_2y) > 0 else 4.5
-                    macro_data['yield_curve'] = macro_data['yield_10y'] - macro_data['yield_2y']
+                # Crypto Market Volatility from Binance
+                crypto_volatility = await self._get_crypto_market_volatility_binance()
+                if crypto_volatility:
+                    macro_data['crypto_volatility'] = crypto_volatility
+                    macro_data['volatility_regime'] = self._classify_volatility_regime(crypto_volatility)
                 
-                # Get news sentiment analysis
-                news_sentiment = await self._analyze_news_sentiment()
-                if news_sentiment:
-                    macro_data['news_sentiment'] = news_sentiment
+                # DeFi TVL from public sources
+                defi_tvl = await self._get_defi_tvl_public()
+                if defi_tvl:
+                    macro_data['defi_tvl'] = defi_tvl
+                    macro_data['defi_trend'] = self._calculate_trend_strength(defi_tvl)
                 
-                # Get economic calendar events
-                economic_events = await self._get_economic_calendar()
-                if economic_events:
-                    macro_data['economic_events'] = economic_events
+                # Stablecoin Market Cap from Bybit
+                stablecoin_mcap = await self._get_stablecoin_market_cap_bybit()
+                if stablecoin_mcap:
+                    macro_data['stablecoin_mcap'] = stablecoin_mcap
+                    macro_data['stablecoin_ratio'] = stablecoin_mcap / total_mcap if total_mcap else 0
                 
-                # Get central bank announcements
-                central_bank_events = await self._get_central_bank_events()
-                if central_bank_events:
-                    macro_data['central_bank_events'] = central_bank_events
+                # Exchange Flows from Binance
+                exchange_flows = await self._get_exchange_flows_binance()
+                if exchange_flows:
+                    macro_data['exchange_flows'] = exchange_flows
+                    macro_data['flow_sentiment'] = self._interpret_exchange_flows(exchange_flows)
+                
+                # Funding Rates from Bybit
+                funding_rates = await self._get_funding_rates_bybit()
+                if funding_rates:
+                    macro_data['funding_rates'] = funding_rates
+                    macro_data['funding_sentiment'] = self._interpret_funding_rates(funding_rates)
+                
+                # Open Interest from Binance
+                open_interest = await self._get_open_interest_binance()
+                if open_interest:
+                    macro_data['open_interest'] = open_interest
+                    macro_data['oi_trend'] = self._calculate_trend_strength(open_interest)
+                
+                # Calculate overall macro sentiment
+                macro_sentiment = self._calculate_macro_sentiment(macro_data)
+                macro_data['overall_sentiment'] = macro_sentiment['sentiment']
+                macro_data['sentiment_score'] = macro_sentiment['score']
+                macro_data['sentiment_confidence'] = macro_sentiment['confidence']
+                
+                logger.info(f"📊 Macro Analysis: Sentiment={macro_data['overall_sentiment']}, Score={macro_data['sentiment_score']:.2f}, BTC Dom={macro_data.get('btc_dominance', 0):.1f}%")
+                
+                return macro_data
                 
             except Exception as e:
-                logger.debug(f"⚠️ Real macro data analysis failed: {e}")
-                # Fallback to alternative data sources
-                macro_data = await self._get_alternative_macro_data()
-            
-            # Calculate macro sentiment with enhanced logic including news
-            if macro_data:
-                macro_sentiment = self._calculate_enhanced_macro_sentiment(macro_data)
-                macro_data['sentiment'] = macro_sentiment
-                macro_data['sentiment_score'] = self._calculate_sentiment_score(macro_data)
-            else:
-                macro_data['sentiment'] = 'neutral'
-                macro_data['sentiment_score'] = 0.5
-                macro_data['note'] = 'Macro data unavailable'
-            
-            return macro_data
-            
+                logger.error(f"❌ Macro data collection error: {e}")
+                return self._get_fallback_macro_data()
+                
         except Exception as e:
             logger.error(f"❌ Macro conditions analysis error: {e}")
             return {'sentiment': 'neutral', 'sentiment_score': 0.5, 'note': 'Analysis failed'}
     
-    async def _get_real_macro_data(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get real macro market data from multiple sources"""
+    async def _get_btc_dominance_bybit(self) -> Optional[Dict[str, Any]]:
+        """Get BTC dominance from Bybit public API"""
         try:
-            # Try multiple data sources
-            sources = [
-                self._get_real_macro_data_from_alpha_vantage,
-                self._get_real_macro_data_from_yahoo_finance,
-                self._get_real_macro_data_from_fred,
-                self._get_real_macro_data_from_quandl
-            ]
+            if not self.exchange_manager:
+                return None
             
-            for source_func in sources:
+            # Get BTC and total market data from Bybit
+            btc_data = await self.exchange_manager.get_ticker('BTC/USDT', 'bybit')
+            if not btc_data:
+                return None
+            
+            # Get top 20 crypto market caps from Bybit
+            top_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT', 
+                          'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
+                          'LINK/USDT', 'UNI/USDT', 'LTC/USDT', 'BCH/USDT', 'XLM/USDT',
+                          'ATOM/USDT', 'ETC/USDT', 'FIL/USDT', 'TRX/USDT', 'NEAR/USDT']
+            
+            total_mcap = 0
+            btc_mcap = 0
+            
+            for symbol in top_symbols:
                 try:
-                    data = await source_func(symbol)
-                    if data is not None and len(data) > 0:
-                        logger.debug(f"✅ Macro data for {symbol} from {source_func.__name__}")
-                        return data
+                    ticker = await self.exchange_manager.get_ticker(symbol, 'bybit')
+                    if ticker and 'last' in ticker and 'quoteVolume' in ticker:
+                        price = ticker['last']
+                        volume_24h = ticker['quoteVolume']
+                        
+                        # Estimate market cap from 24h volume (rough approximation)
+                        estimated_mcap = volume_24h * 30  # 30x volume as rough mcap estimate
+                        
+                        if symbol == 'BTC/USDT':
+                            btc_mcap = estimated_mcap
+                        
+                        total_mcap += estimated_mcap
+                        
                 except Exception as e:
-                    logger.debug(f"⚠️ {source_func.__name__} failed for {symbol}: {e}")
+                    logger.warning(f"⚠️ Failed to get {symbol} data: {e}")
                     continue
             
-            logger.warning(f"⚠️ No macro data available for {symbol}")
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Real macro data retrieval error: {e}")
-            return None
-    
-    async def _get_real_macro_data_from_alpha_vantage(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get real macro data from Alpha Vantage API"""
-        try:
-            import aiohttp
-            import os
-            
-            api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-            if not api_key:
-                logger.warning("⚠️ Alpha Vantage API key not found")
-                return None
-            
-            # Alpha Vantage endpoints for different instruments
-            endpoints = {
-                'SPY': 'TIME_SERIES_DAILY',
-                'DXY': 'FX_DAILY',
-                'GLD': 'TIME_SERIES_DAILY',
-                'VIX': 'TIME_SERIES_DAILY',
-                'TNX': 'TIME_SERIES_DAILY'
-            }
-            
-            endpoint = endpoints.get(symbol, 'TIME_SERIES_DAILY')
-            
-            if endpoint == 'FX_DAILY':
-                url = f"https://www.alphavantage.co/query?function={endpoint}&from_symbol={symbol}&to_symbol=USD&apikey={api_key}"
-            else:
-                url = f"https://www.alphavantage.co/query?function={endpoint}&symbol={symbol}&apikey={api_key}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        # Parse Alpha Vantage response
-                        if 'Time Series (Daily)' in data:
-                            time_series = data['Time Series (Daily)']
-                            dates = sorted(time_series.keys(), reverse=True)[:30]  # Last 30 days
-                            
-                            if len(dates) >= 2:
-                                latest_date = dates[0]
-                                previous_date = dates[1]
-                                
-                                latest_close = float(time_series[latest_date]['4. close'])
-                                previous_close = float(time_series[previous_date]['4. close'])
-                                
-                                change_pct = ((latest_close - previous_close) / previous_close) * 100
-                                
-                                return {
-                                    'symbol': symbol,
-                                    'price': latest_close,
-                                    'change_pct': change_pct,
-                                    'timestamp': latest_date,
-                                    'source': 'alpha_vantage'
-                                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Alpha Vantage API error for {symbol}: {e}")
-            return None
-    
-    async def _get_real_macro_data_from_yahoo_finance(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get real macro data from Yahoo Finance API"""
-        try:
-            import aiohttp
-            
-            # Yahoo Finance API endpoint
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=30d"
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
-                            result = data['chart']['result'][0]
-                            
-                            if 'timestamp' in result and 'indicators' in result:
-                                timestamps = result['timestamp']
-                                quotes = result['indicators']['quote'][0]
-                                
-                                if len(timestamps) >= 2 and 'close' in quotes:
-                                    closes = quotes['close']
-                                    if len(closes) >= 2:
-                                        latest_close = closes[-1]
-                                        previous_close = closes[-2]
-                                        
-                                        if latest_close and previous_close:
-                                            change_pct = ((latest_close - previous_close) / previous_close) * 100
-                                            
-                                            return {
-                                                'symbol': symbol,
-                                                'price': latest_close,
-                                                'change_pct': change_pct,
-                                                'timestamp': datetime.fromtimestamp(timestamps[-1]),
-                                                'source': 'yahoo_finance'
-                                            }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Yahoo Finance API error for {symbol}: {e}")
-            return None
-    
-    async def _get_real_macro_data_from_fred(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get real macro data from FRED API"""
-        try:
-            import aiohttp
-            import os
-            
-            api_key = os.getenv('FRED_API_KEY')
-            if not api_key:
-                logger.warning("⚠️ FRED API key not found")
-                return None
-            
-            # FRED series mapping
-            fred_series = {
-                'TNX': 'DGS10',  # 10-Year Treasury Constant Maturity Rate
-                'UST2YR': 'DGS2',  # 2-Year Treasury Constant Maturity Rate
-                'VIX': 'VIXCLS'  # CBOE Volatility Index
-            }
-            
-            series_id = fred_series.get(symbol)
-            if not series_id:
-                return None
-            
-            url = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={api_key}&file_type=json&limit=30"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        if 'observations' in data and len(data['observations']) >= 2:
-                            observations = data['observations']
-                            
-                            # Get latest and previous values
-                            latest_obs = observations[-1]
-                            previous_obs = observations[-2]
-                            
-                            if latest_obs['value'] != '.' and previous_obs['value'] != '.':
-                                latest_value = float(latest_obs['value'])
-                                previous_value = float(previous_obs['value'])
-                                
-                                change_pct = ((latest_value - previous_value) / previous_value) * 100
-                                
-                                return {
-                                    'symbol': symbol,
-                                    'price': latest_value,
-                                    'change_pct': change_pct,
-                                    'timestamp': latest_obs['date'],
-                                    'source': 'fred'
-                                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ FRED API error for {symbol}: {e}")
-            return None
-    
-    async def _get_real_macro_data_from_quandl(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get real macro data from Quandl API"""
-        try:
-            import aiohttp
-            import os
-            
-            api_key = os.getenv('QUANDL_API_KEY')
-            if not api_key:
-                logger.warning("⚠️ Quandl API key not found")
-                return None
-            
-            # Quandl dataset mapping
-            quandl_datasets = {
-                'DXY': 'FRED/DEXUSEU',  # US Dollar Index
-                'GLD': 'WGC/GLD_DAILY_USD'  # Gold ETF
-            }
-            
-            dataset = quandl_datasets.get(symbol)
-            if not dataset:
-                return None
-            
-            url = f"https://www.quandl.com/api/v3/datasets/{dataset}/data.json?api_key={api_key}&limit=30"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        if 'dataset_data' in data and 'data' in data['dataset_data']:
-                            dataset_data = data['dataset_data']['data']
-                            
-                            if len(dataset_data) >= 2:
-                                latest_data = dataset_data[0]
-                                previous_data = dataset_data[1]
-                                
-                                latest_value = float(latest_data[1])  # Value is usually in second column
-                                previous_value = float(previous_data[1])
-                                
-                                change_pct = ((latest_value - previous_value) / previous_value) * 100
-                                
-                                return {
-                                    'symbol': symbol,
-                                    'price': latest_value,
-                                    'change_pct': change_pct,
-                                    'timestamp': latest_data[0],
-                                    'source': 'quandl'
-                                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Quandl API error for {symbol}: {e}")
-            return None
-    
-    async def _get_alternative_macro_data(self) -> Dict[str, Any]:
-        """Get alternative macro data when primary sources fail"""
-        try:
-            # Use crypto market data as proxy for macro conditions
-            btc_data = await self.exchange_manager.get_historical_data('BTC/USDT', '1h', limit=24)
-            eth_data = await self.exchange_manager.get_historical_data('ETH/USDT', '1h', limit=24)
-            
-            macro_data = {}
-            
-            if btc_data is not None and len(btc_data) > 0:
-                macro_data['btc_trend'] = self._calculate_trend_strength(btc_data)
-                macro_data['btc_volatility'] = self._calculate_volatility(btc_data, period=20)
-            
-            if eth_data is not None and len(eth_data) > 0:
-                macro_data['eth_trend'] = self._calculate_trend_strength(eth_data)
-                macro_data['eth_volatility'] = self._calculate_volatility(eth_data, period=20)
-            
-            return macro_data
-            
-        except Exception as e:
-            logger.error(f"❌ Alternative macro data error: {e}")
-            return {}
-    
-    def _calculate_enhanced_macro_sentiment(self, macro_data: Dict[str, Any]) -> str:
-        """Calculate enhanced macro market sentiment including news analysis"""
-        try:
-            bullish_signals = 0
-            bearish_signals = 0
-            total_signals = 0
-            
-            # Analyze SPY trend (equity market)
-            if 'spy_trend' in macro_data:
-                total_signals += 1
-                if macro_data['spy_trend'] > 0.7:
-                    bullish_signals += 1
-                elif macro_data['spy_trend'] < 0.3:
-                    bearish_signals += 1
-            
-            # Analyze DXY trend (dollar strength - inverse for crypto)
-            if 'dxy_trend' in macro_data:
-                total_signals += 1
-                if macro_data['dxy_trend'] > 0.7:
-                    bearish_signals += 1  # Strong dollar often bearish for crypto
-                elif macro_data['dxy_trend'] < 0.3:
-                    bullish_signals += 1
-            
-            # Analyze Gold trend (safe haven)
-            if 'gold_trend' in macro_data:
-                total_signals += 1
-                if macro_data['gold_trend'] > 0.7:
-                    bearish_signals += 1  # Gold strength often indicates risk-off
-                elif macro_data['gold_trend'] < 0.3:
-                    bullish_signals += 1
-            
-            # Analyze VIX (volatility index)
-            if 'vix_level' in macro_data:
-                total_signals += 1
-                if macro_data['vix_level'] > 30:
-                    bearish_signals += 1  # High volatility often bearish
-                elif macro_data['vix_level'] < 15:
-                    bullish_signals += 1  # Low volatility often bullish
-            
-            # Analyze yield curve
-            if 'yield_curve' in macro_data:
-                total_signals += 1
-                if macro_data['yield_curve'] < 0:
-                    bearish_signals += 1  # Inverted yield curve often bearish
-                elif macro_data['yield_curve'] > 0.5:
-                    bullish_signals += 1  # Steep yield curve often bullish
-            
-            # Analyze news sentiment
-            if 'news_sentiment' in macro_data:
-                total_signals += 1
-                news_sentiment = macro_data['news_sentiment'].get('overall_sentiment', 'neutral')
-                if news_sentiment == 'positive':
-                    bullish_signals += 1
-                elif news_sentiment == 'negative':
-                    bearish_signals += 1
-            
-            # Analyze economic events
-            if 'economic_events' in macro_data:
-                total_signals += 1
-                high_importance_events = [e for e in macro_data['economic_events'] if e.get('importance') == 'high']
-                if len(high_importance_events) > 2:
-                    bearish_signals += 1  # Many high-importance events can create uncertainty
-            
-            # Determine sentiment based on signal ratio
-            if total_signals == 0:
-                return 'neutral'
-            
-            bullish_ratio = bullish_signals / total_signals
-            bearish_ratio = bearish_signals / total_signals
-            
-            if bullish_ratio > 0.6:
-                return 'bullish'
-            elif bearish_ratio > 0.6:
-                return 'bearish'
-            else:
-                return 'neutral'
+            if total_mcap > 0 and btc_mcap > 0:
+                btc_dominance = (btc_mcap / total_mcap) * 100
                 
-        except Exception as e:
-            logger.error(f"❌ Enhanced macro sentiment calculation error: {e}")
-            return 'neutral'
-    
-    async def _analyze_news_sentiment(self) -> Dict[str, Any]:
-        """Analyze news sentiment for crypto and macro markets"""
-        try:
-            # This should be implemented with real news API (e.g., NewsAPI, Alpha Vantage News)
-            # For now, simulate news sentiment analysis
-            
-            import random
-            from datetime import datetime, timedelta
-            
-            # Simulate news sentiment data
-            news_sources = ['Reuters', 'Bloomberg', 'CNBC', 'CoinDesk', 'Cointelegraph']
-            crypto_keywords = ['Bitcoin', 'Ethereum', 'crypto', 'blockchain', 'DeFi', 'NFT']
-            macro_keywords = ['Fed', 'ECB', 'inflation', 'interest rates', 'GDP', 'employment']
-            
-            # Simulate recent news articles
-            recent_news = []
-            for i in range(10):
-                source = random.choice(news_sources)
-                keyword = random.choice(crypto_keywords + macro_keywords)
-                sentiment = random.choice(['positive', 'negative', 'neutral'])
-                confidence = random.uniform(0.6, 0.9)
-                
-                recent_news.append({
-                    'source': source,
-                    'title': f"Sample news about {keyword}",
-                    'sentiment': sentiment,
-                    'confidence': confidence,
-                    'timestamp': datetime.now() - timedelta(hours=random.randint(0, 24))
-                })
-            
-            # Calculate overall sentiment
-            sentiment_scores = []
-            for news in recent_news:
-                if news['sentiment'] == 'positive':
-                    sentiment_scores.append(news['confidence'])
-                elif news['sentiment'] == 'negative':
-                    sentiment_scores.append(-news['confidence'])
-                else:
-                    sentiment_scores.append(0)
-            
-            overall_sentiment_score = np.mean(sentiment_scores) if sentiment_scores else 0
-            
-            # Determine sentiment category
-            if overall_sentiment_score > 0.2:
-                overall_sentiment = 'positive'
-            elif overall_sentiment_score < -0.2:
-                overall_sentiment = 'negative'
-            else:
-                overall_sentiment = 'neutral'
-            
-            return {
-                'overall_sentiment': overall_sentiment,
-                'sentiment_score': overall_sentiment_score,
-                'recent_news_count': len(recent_news),
-                'positive_news_count': len([n for n in recent_news if n['sentiment'] == 'positive']),
-                'negative_news_count': len([n for n in recent_news if n['sentiment'] == 'negative']),
-                'neutral_news_count': len([n for n in recent_news if n['sentiment'] == 'neutral']),
-                'average_confidence': np.mean([n['confidence'] for n in recent_news]),
-                'recent_news': recent_news[:5]  # Return top 5 recent news
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ News sentiment analysis error: {e}")
-            return {
-                'overall_sentiment': 'neutral',
-                'sentiment_score': 0,
-                'recent_news_count': 0,
-                'positive_news_count': 0,
-                'negative_news_count': 0,
-                'neutral_news_count': 0,
-                'average_confidence': 0.5,
-                'recent_news': []
-            }
-    
-    async def _get_economic_calendar(self) -> List[Dict[str, Any]]:
-        """Get upcoming economic calendar events"""
-        try:
-            # This should be implemented with real economic calendar API
-            # For now, simulate economic calendar data
-            
-            import random
-            from datetime import datetime, timedelta
-            
-            # Simulate economic events
-            economic_events = [
-                {
-                    'event': 'FOMC Meeting',
-                    'date': datetime.now() + timedelta(days=random.randint(1, 7)),
-                    'importance': 'high',
-                    'currency': 'USD',
-                    'description': 'Federal Reserve interest rate decision'
-                },
-                {
-                    'event': 'CPI Data',
-                    'date': datetime.now() + timedelta(days=random.randint(1, 14)),
-                    'importance': 'medium',
-                    'currency': 'USD',
-                    'description': 'Consumer Price Index release'
-                },
-                {
-                    'event': 'Non-Farm Payrolls',
-                    'date': datetime.now() + timedelta(days=random.randint(1, 30)),
-                    'importance': 'high',
-                    'currency': 'USD',
-                    'description': 'Employment data release'
-                },
-                {
-                    'event': 'ECB Meeting',
-                    'date': datetime.now() + timedelta(days=random.randint(1, 14)),
-                    'importance': 'high',
-                    'currency': 'EUR',
-                    'description': 'European Central Bank policy decision'
+                return {
+                    'symbol': 'BTC',
+                    'dominance': btc_dominance,
+                    'btc_mcap': btc_mcap,
+                    'total_mcap': total_mcap,
+                    'timestamp': datetime.now(),
+                    'source': 'bybit'
                 }
-            ]
             
-            # Filter events happening in next 7 days
-            upcoming_events = [
-                event for event in economic_events
-                if event['date'] <= datetime.now() + timedelta(days=7)
-            ]
-            
-            return upcoming_events
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Economic calendar error: {e}")
-            return []
+            logger.error(f"❌ BTC dominance calculation error: {e}")
+            return None
     
-    async def _get_central_bank_events(self) -> List[Dict[str, Any]]:
-        """Get central bank announcements and events"""
+    async def _get_eth_dominance_binance(self) -> Optional[Dict[str, Any]]:
+        """Get ETH dominance from Binance public API"""
         try:
-            # This should be implemented with real central bank data API
-            # For now, simulate central bank events
+            if not self.exchange_manager:
+                return None
             
-            import random
-            from datetime import datetime, timedelta
+            # Get ETH and total market data from Binance
+            eth_data = await self.exchange_manager.get_ticker('ETH/USDT', 'binance')
+            if not eth_data:
+                return None
             
-            central_banks = ['Fed', 'ECB', 'BoE', 'BoJ', 'PBOC']
+            # Get top 20 crypto market caps from Binance
+            top_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT', 
+                          'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
+                          'LINK/USDT', 'UNI/USDT', 'LTC/USDT', 'BCH/USDT', 'XLM/USDT',
+                          'ATOM/USDT', 'ETC/USDT', 'FIL/USDT', 'TRX/USDT', 'NEAR/USDT']
             
-            events = []
-            for bank in central_banks:
-                if random.random() < 0.3:  # 30% chance of having an event
-                    events.append({
-                        'bank': bank,
-                        'event_type': random.choice(['rate_decision', 'speech', 'minutes', 'policy_statement']),
-                        'date': datetime.now() + timedelta(days=random.randint(1, 14)),
-                        'importance': random.choice(['low', 'medium', 'high']),
-                        'description': f"{bank} {random.choice(['rate_decision', 'speech', 'minutes', 'policy_statement'])}"
-                    })
+            total_mcap = 0
+            eth_mcap = 0
             
-            return events
+            for symbol in top_symbols:
+                try:
+                    ticker = await self.exchange_manager.get_ticker(symbol, 'binance')
+                    if ticker and 'last' in ticker and 'quoteVolume' in ticker:
+                        price = ticker['last']
+                        volume_24h = ticker['quoteVolume']
+                        
+                        # Estimate market cap from 24h volume (rough approximation)
+                        estimated_mcap = volume_24h * 30  # 30x volume as rough mcap estimate
+                        
+                        if symbol == 'ETH/USDT':
+                            eth_mcap = estimated_mcap
+                        
+                        total_mcap += estimated_mcap
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get {symbol} data: {e}")
+                    continue
+            
+            if total_mcap > 0 and eth_mcap > 0:
+                eth_dominance = (eth_mcap / total_mcap) * 100
+                
+                return {
+                    'symbol': 'ETH',
+                    'dominance': eth_dominance,
+                    'eth_mcap': eth_mcap,
+                    'total_mcap': total_mcap,
+                    'timestamp': datetime.now(),
+                    'source': 'binance'
+                }
+            
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Central bank events error: {e}")
-            return []
+            logger.error(f"❌ ETH dominance calculation error: {e}")
+            return None
+    
+    async def _get_total_market_cap_bybit(self) -> Optional[Dict[str, Any]]:
+        """Get total market cap from Bybit public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Get top 50 crypto market caps from Bybit
+            top_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT', 
+                          'XRP/USDT', 'DOT/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT',
+                          'LINK/USDT', 'UNI/USDT', 'LTC/USDT', 'BCH/USDT', 'XLM/USDT',
+                          'ATOM/USDT', 'ETC/USDT', 'FIL/USDT', 'TRX/USDT', 'NEAR/USDT',
+                          'FTM/USDT', 'ALGO/USDT', 'VET/USDT', 'ICP/USDT', 'THETA/USDT',
+                          'XMR/USDT', 'EOS/USDT', 'AAVE/USDT', 'CAKE/USDT', 'MKR/USDT',
+                          'SUSHI/USDT', 'COMP/USDT', 'YFI/USDT', 'SNX/USDT', 'CRV/USDT',
+                          '1INCH/USDT', 'ZEC/USDT', 'DASH/USDT', 'WAVES/USDT', 'NEO/USDT',
+                          'QTUM/USDT', 'IOTA/USDT', 'XTZ/USDT', 'ZRX/USDT', 'BAT/USDT',
+                          'OMG/USDT', 'ZIL/USDT', 'ENJ/USDT', 'MANA/USDT', 'SAND/USDT']
+            
+            total_mcap = 0
+            market_data = {}
+            
+            for symbol in top_symbols:
+                try:
+                    ticker = await self.exchange_manager.get_ticker(symbol, 'bybit')
+                    if ticker and 'last' in ticker and 'quoteVolume' in ticker:
+                        price = ticker['last']
+                        volume_24h = ticker['quoteVolume']
+                        
+                        # Estimate market cap from 24h volume (rough approximation)
+                        estimated_mcap = volume_24h * 30  # 30x volume as rough mcap estimate
+                        
+                        market_data[symbol] = {
+                            'price': price,
+                            'volume_24h': volume_24h,
+                            'estimated_mcap': estimated_mcap
+                        }
+                        
+                        total_mcap += estimated_mcap
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get {symbol} data: {e}")
+                    continue
+            
+            if total_mcap > 0:
+                return {
+                    'total_mcap': total_mcap,
+                    'market_data': market_data,
+                    'timestamp': datetime.now(),
+                    'source': 'bybit'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Total market cap calculation error: {e}")
+            return None
+    
+    async def _get_fear_greed_index(self) -> Optional[Dict[str, Any]]:
+        """Get Fear & Greed Index from public API"""
+        try:
+            import aiohttp
+            
+            # Alternative Fear & Greed Index API (public)
+            url = "https://api.alternative.me/fng/"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if 'data' in data and len(data['data']) > 0:
+                            latest = data['data'][0]
+                            
+                            return {
+                                'value': int(latest['value']),
+                                'classification': latest['value_classification'],
+                                'timestamp': latest['timestamp'],
+                                'source': 'alternative.me'
+                            }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Fear & Greed Index error: {e}")
+            return None
+    
+    async def _get_crypto_market_volatility_binance(self) -> Optional[Dict[str, Any]]:
+        """Get crypto market volatility from Binance public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Get volatility for major pairs
+            major_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+            
+            volatilities = []
+            
+            for pair in major_pairs:
+                try:
+                    # Get historical data for volatility calculation
+                    hist_data = await self.exchange_manager.get_historical_data(pair, '1h', limit=24, exchange='binance')
+                    
+                    if hist_data is not None and len(hist_data) > 0:
+                        # Calculate hourly volatility
+                        returns = hist_data['close'].pct_change().dropna()
+                        volatility = returns.std() * np.sqrt(24)  # Annualized
+                        volatilities.append(volatility)
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to calculate volatility for {pair}: {e}")
+                    continue
+            
+            if volatilities:
+                avg_volatility = np.mean(volatilities)
+                vol_std = np.std(volatilities)
+                
+                return {
+                    'average_volatility': avg_volatility,
+                    'volatility_std': vol_std,
+                    'volatilities': volatilities,
+                    'timestamp': datetime.now(),
+                    'source': 'binance'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Crypto market volatility error: {e}")
+            return None
+    
+    async def _get_defi_tvl_public(self) -> Optional[Dict[str, Any]]:
+        """Get DeFi TVL from public sources"""
+        try:
+            import aiohttp
+            
+            # DeFi Llama public API
+            url = "https://api.llama.fi/protocols"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Calculate total TVL
+                        total_tvl = 0
+                        for protocol in data:
+                            if 'tvl' in protocol and protocol['tvl']:
+                                total_tvl += protocol['tvl']
+                        
+                        return {
+                            'total_tvl': total_tvl,
+                            'protocol_count': len(data),
+                            'timestamp': datetime.now(),
+                            'source': 'defillama'
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ DeFi TVL error: {e}")
+            return None
+    
+    async def _get_stablecoin_market_cap_bybit(self) -> Optional[Dict[str, Any]]:
+        """Get stablecoin market cap from Bybit public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Major stablecoins
+            stablecoins = ['USDT/USDT', 'USDC/USDT', 'BUSD/USDT', 'DAI/USDT', 'TUSD/USDT']
+            
+            total_stablecoin_mcap = 0
+            stablecoin_data = {}
+            
+            for stablecoin in stablecoins:
+                try:
+                    ticker = await self.exchange_manager.get_ticker(stablecoin, 'bybit')
+                    if ticker and 'last' in ticker and 'quoteVolume' in ticker:
+                        price = ticker['last']
+                        volume_24h = ticker['quoteVolume']
+                        
+                        # Estimate market cap from 24h volume
+                        estimated_mcap = volume_24h * 30
+                        
+                        stablecoin_data[stablecoin] = {
+                            'price': price,
+                            'volume_24h': volume_24h,
+                            'estimated_mcap': estimated_mcap
+                        }
+                        
+                        total_stablecoin_mcap += estimated_mcap
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get {stablecoin} data: {e}")
+                    continue
+            
+            if total_stablecoin_mcap > 0:
+                return {
+                    'total_stablecoin_mcap': total_stablecoin_mcap,
+                    'stablecoin_data': stablecoin_data,
+                    'timestamp': datetime.now(),
+                    'source': 'bybit'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Stablecoin market cap error: {e}")
+            return None
+    
+    async def _get_exchange_flows_binance(self) -> Optional[Dict[str, Any]]:
+        """Get exchange flows from Binance public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Get BTC and ETH flows (simplified approach)
+            btc_ticker = await self.exchange_manager.get_ticker('BTC/USDT', 'binance')
+            eth_ticker = await self.exchange_manager.get_ticker('ETH/USDT', 'binance')
+            
+            flows = {}
+            
+            if btc_ticker and 'quoteVolume' in btc_ticker:
+                flows['BTC'] = {
+                    'volume_24h': btc_ticker['quoteVolume'],
+                    'price': btc_ticker.get('last', 0),
+                    'timestamp': datetime.now()
+                }
+            
+            if eth_ticker and 'quoteVolume' in eth_ticker:
+                flows['ETH'] = {
+                    'volume_24h': eth_ticker['quoteVolume'],
+                    'price': eth_ticker.get('last', 0),
+                    'timestamp': datetime.now()
+                }
+            
+            if flows:
+                return {
+                    'flows': flows,
+                    'total_volume': sum(f['volume_24h'] for f in flows.values()),
+                    'timestamp': datetime.now(),
+                    'source': 'binance'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange flows error: {e}")
+            return None
+    
+    async def _get_funding_rates_bybit(self) -> Optional[Dict[str, Any]]:
+        """Get funding rates from Bybit public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Get funding rates for major pairs
+            major_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+            
+            funding_rates = {}
+            
+            for pair in major_pairs:
+                try:
+                    # Get funding rate from Bybit
+                    funding_info = await self.exchange_manager.get_funding_rate(pair, 'bybit')
+                    
+                    if funding_info:
+                        funding_rates[pair] = {
+                            'funding_rate': funding_info.get('fundingRate', 0),
+                            'next_funding_time': funding_info.get('nextFundingTime', 0),
+                            'timestamp': datetime.now()
+                        }
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get funding rate for {pair}: {e}")
+                    continue
+            
+            if funding_rates:
+                avg_funding_rate = np.mean([f['funding_rate'] for f in funding_rates.values()])
+                
+                return {
+                    'funding_rates': funding_rates,
+                    'average_funding_rate': avg_funding_rate,
+                    'timestamp': datetime.now(),
+                    'source': 'bybit'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Funding rates error: {e}")
+            return None
+    
+    async def _get_open_interest_binance(self) -> Optional[Dict[str, Any]]:
+        """Get open interest from Binance public API"""
+        try:
+            if not self.exchange_manager:
+                return None
+            
+            # Get open interest for major pairs
+            major_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+            
+            open_interest_data = {}
+            
+            for pair in major_pairs:
+                try:
+                    # Get open interest from Binance
+                    oi_info = await self.exchange_manager.get_open_interest(pair, 'binance')
+                    
+                    if oi_info:
+                        open_interest_data[pair] = {
+                            'open_interest': oi_info.get('openInterest', 0),
+                            'timestamp': datetime.now()
+                        }
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get open interest for {pair}: {e}")
+                    continue
+            
+            if open_interest_data:
+                total_oi = sum(oi['open_interest'] for oi in open_interest_data.values())
+                
+                return {
+                    'open_interest_data': open_interest_data,
+                    'total_open_interest': total_oi,
+                    'timestamp': datetime.now(),
+                    'source': 'binance'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Open interest error: {e}")
+            return None
     
     def _calculate_sentiment_score(self, macro_data: Dict[str, Any]) -> float:
         """Calculate numerical sentiment score (0-1)"""
@@ -1860,3 +1812,293 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Enhanced live status error: {e}")
             return {'status': 'ERROR', 'error': str(e)}
+    
+    def _interpret_fear_greed(self, fear_greed_data: Dict[str, Any]) -> str:
+        """Interpret Fear & Greed Index for market sentiment"""
+        try:
+            value = fear_greed_data.get('value', 50)
+            classification = fear_greed_data.get('classification', 'Neutral')
+            
+            # Adaptive interpretation based on value ranges
+            if value >= 75:
+                return 'extreme_greed'
+            elif value >= 60:
+                return 'greed'
+            elif value >= 45:
+                return 'neutral'
+            elif value >= 25:
+                return 'fear'
+            else:
+                return 'extreme_fear'
+                
+        except Exception as e:
+            logger.error(f"❌ Fear & Greed interpretation error: {e}")
+            return 'neutral'
+    
+    def _classify_volatility_regime(self, volatility_data: Dict[str, Any]) -> str:
+        """Classify volatility regime based on market conditions"""
+        try:
+            avg_volatility = volatility_data.get('average_volatility', 0.5)
+            vol_std = volatility_data.get('volatility_std', 0.1)
+            
+            # Adaptive volatility classification
+            if avg_volatility > 0.8:
+                return 'extreme_volatility'
+            elif avg_volatility > 0.6:
+                return 'high_volatility'
+            elif avg_volatility > 0.4:
+                return 'moderate_volatility'
+            elif avg_volatility > 0.2:
+                return 'low_volatility'
+            else:
+                return 'very_low_volatility'
+                
+        except Exception as e:
+            logger.error(f"❌ Volatility regime classification error: {e}")
+            return 'moderate_volatility'
+    
+    def _interpret_exchange_flows(self, flows_data: Dict[str, Any]) -> str:
+        """Interpret exchange flows for market sentiment"""
+        try:
+            total_volume = flows_data.get('total_volume', 0)
+            flows = flows_data.get('flows', {})
+            
+            if not flows:
+                return 'neutral'
+            
+            # Calculate volume-weighted sentiment
+            btc_volume = flows.get('BTC', {}).get('volume_24h', 0)
+            eth_volume = flows.get('ETH', {}).get('volume_24h', 0)
+            
+            # Adaptive interpretation based on volume patterns
+            if total_volume > 1000000000:  # > 1B volume
+                if btc_volume > eth_volume * 2:
+                    return 'btc_dominant_high_volume'
+                elif eth_volume > btc_volume * 1.5:
+                    return 'eth_dominant_high_volume'
+                else:
+                    return 'balanced_high_volume'
+            elif total_volume > 500000000:  # > 500M volume
+                return 'moderate_volume'
+            else:
+                return 'low_volume'
+                
+        except Exception as e:
+            logger.error(f"❌ Exchange flows interpretation error: {e}")
+            return 'neutral'
+    
+    def _interpret_funding_rates(self, funding_data: Dict[str, Any]) -> str:
+        """Interpret funding rates for market sentiment"""
+        try:
+            avg_funding_rate = funding_data.get('average_funding_rate', 0)
+            funding_rates = funding_data.get('funding_rates', {})
+            
+            # Adaptive funding rate interpretation
+            if avg_funding_rate > 0.01:  # > 1%
+                return 'extreme_bullish_funding'
+            elif avg_funding_rate > 0.005:  # > 0.5%
+                return 'bullish_funding'
+            elif avg_funding_rate > 0.001:  # > 0.1%
+                return 'slightly_bullish_funding'
+            elif avg_funding_rate > -0.001:  # > -0.1%
+                return 'neutral_funding'
+            elif avg_funding_rate > -0.005:  # > -0.5%
+                return 'slightly_bearish_funding'
+            elif avg_funding_rate > -0.01:  # > -1%
+                return 'bearish_funding'
+            else:
+                return 'extreme_bearish_funding'
+                
+        except Exception as e:
+            logger.error(f"❌ Funding rates interpretation error: {e}")
+            return 'neutral_funding'
+    
+    def _calculate_macro_sentiment(self, macro_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate overall macro sentiment using adaptive algorithms"""
+        try:
+            sentiment_scores = []
+            confidence_factors = []
+            
+            # BTC Dominance sentiment (inverse relationship - lower dominance often bullish)
+            if 'btc_dominance' in macro_data:
+                btc_dom = macro_data['btc_dominance'].get('dominance', 50)
+                if btc_dom < 40:
+                    sentiment_scores.append(0.8)  # Bullish
+                    confidence_factors.append(0.7)
+                elif btc_dom < 50:
+                    sentiment_scores.append(0.6)  # Slightly bullish
+                    confidence_factors.append(0.6)
+                elif btc_dom < 60:
+                    sentiment_scores.append(0.4)  # Neutral
+                    confidence_factors.append(0.5)
+                else:
+                    sentiment_scores.append(0.2)  # Bearish
+                    confidence_factors.append(0.7)
+            
+            # Fear & Greed sentiment
+            if 'fear_greed_index' in macro_data:
+                fg_value = macro_data['fear_greed_index'].get('value', 50)
+                if fg_value >= 75:
+                    sentiment_scores.append(0.2)  # Extreme greed = bearish
+                    confidence_factors.append(0.8)
+                elif fg_value >= 60:
+                    sentiment_scores.append(0.3)  # Greed = slightly bearish
+                    confidence_factors.append(0.7)
+                elif fg_value >= 45:
+                    sentiment_scores.append(0.5)  # Neutral
+                    confidence_factors.append(0.5)
+                elif fg_value >= 25:
+                    sentiment_scores.append(0.7)  # Fear = slightly bullish
+                    confidence_factors.append(0.7)
+                else:
+                    sentiment_scores.append(0.9)  # Extreme fear = bullish
+                    confidence_factors.append(0.8)
+            
+            # Volatility sentiment (high volatility can be both bullish and bearish)
+            if 'crypto_volatility' in macro_data:
+                vol_regime = macro_data.get('volatility_regime', 'moderate_volatility')
+                if vol_regime == 'extreme_volatility':
+                    sentiment_scores.append(0.4)  # Neutral (uncertain)
+                    confidence_factors.append(0.6)
+                elif vol_regime == 'high_volatility':
+                    sentiment_scores.append(0.5)  # Neutral
+                    confidence_factors.append(0.5)
+                elif vol_regime == 'moderate_volatility':
+                    sentiment_scores.append(0.6)  # Slightly bullish
+                    confidence_factors.append(0.6)
+                elif vol_regime == 'low_volatility':
+                    sentiment_scores.append(0.7)  # Bullish
+                    confidence_factors.append(0.7)
+                else:
+                    sentiment_scores.append(0.8)  # Very bullish
+                    confidence_factors.append(0.8)
+            
+            # DeFi TVL sentiment
+            if 'defi_tvl' in macro_data:
+                defi_trend = macro_data.get('defi_trend', 0)
+                if defi_trend > 0.05:
+                    sentiment_scores.append(0.8)  # Bullish
+                    confidence_factors.append(0.7)
+                elif defi_trend > 0:
+                    sentiment_scores.append(0.6)  # Slightly bullish
+                    confidence_factors.append(0.6)
+                elif defi_trend > -0.05:
+                    sentiment_scores.append(0.4)  # Neutral
+                    confidence_factors.append(0.5)
+                else:
+                    sentiment_scores.append(0.2)  # Bearish
+                    confidence_factors.append(0.7)
+            
+            # Stablecoin ratio sentiment (high ratio can indicate bearish sentiment)
+            if 'stablecoin_ratio' in macro_data:
+                stable_ratio = macro_data['stablecoin_ratio']
+                if stable_ratio > 0.3:
+                    sentiment_scores.append(0.2)  # Bearish (high stablecoin ratio)
+                    confidence_factors.append(0.6)
+                elif stable_ratio > 0.2:
+                    sentiment_scores.append(0.4)  # Neutral
+                    confidence_factors.append(0.5)
+                else:
+                    sentiment_scores.append(0.7)  # Bullish (low stablecoin ratio)
+                    confidence_factors.append(0.6)
+            
+            # Funding rates sentiment
+            if 'funding_sentiment' in macro_data:
+                funding_sentiment = macro_data['funding_sentiment']
+                if 'extreme_bullish' in funding_sentiment:
+                    sentiment_scores.append(0.9)
+                    confidence_factors.append(0.8)
+                elif 'bullish' in funding_sentiment:
+                    sentiment_scores.append(0.7)
+                    confidence_factors.append(0.7)
+                elif 'slightly_bullish' in funding_sentiment:
+                    sentiment_scores.append(0.6)
+                    confidence_factors.append(0.6)
+                elif 'neutral' in funding_sentiment:
+                    sentiment_scores.append(0.5)
+                    confidence_factors.append(0.5)
+                elif 'slightly_bearish' in funding_sentiment:
+                    sentiment_scores.append(0.4)
+                    confidence_factors.append(0.6)
+                elif 'bearish' in funding_sentiment:
+                    sentiment_scores.append(0.3)
+                    confidence_factors.append(0.7)
+                else:
+                    sentiment_scores.append(0.1)
+                    confidence_factors.append(0.8)
+            
+            # Calculate weighted average sentiment
+            if sentiment_scores:
+                # Weight by confidence factors
+                weighted_sentiment = sum(s * c for s, c in zip(sentiment_scores, confidence_factors))
+                total_weight = sum(confidence_factors)
+                final_sentiment_score = weighted_sentiment / total_weight if total_weight > 0 else 0.5
+                
+                # Calculate overall confidence
+                avg_confidence = np.mean(confidence_factors) if confidence_factors else 0.5
+                
+                # Determine sentiment category
+                if final_sentiment_score >= 0.7:
+                    sentiment = 'bullish'
+                elif final_sentiment_score >= 0.6:
+                    sentiment = 'slightly_bullish'
+                elif final_sentiment_score >= 0.4:
+                    sentiment = 'neutral'
+                elif final_sentiment_score >= 0.3:
+                    sentiment = 'slightly_bearish'
+                else:
+                    sentiment = 'bearish'
+                
+                return {
+                    'sentiment': sentiment,
+                    'score': final_sentiment_score,
+                    'confidence': avg_confidence,
+                    'factors_count': len(sentiment_scores),
+                    'individual_scores': sentiment_scores,
+                    'confidence_factors': confidence_factors
+                }
+            else:
+                return {
+                    'sentiment': 'neutral',
+                    'score': 0.5,
+                    'confidence': 0.3,
+                    'factors_count': 0,
+                    'individual_scores': [],
+                    'confidence_factors': []
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Macro sentiment calculation error: {e}")
+            return {
+                'sentiment': 'neutral',
+                'score': 0.5,
+                'confidence': 0.3,
+                'factors_count': 0,
+                'individual_scores': [],
+                'confidence_factors': []
+            }
+    
+    def _get_fallback_macro_data(self) -> Dict[str, Any]:
+        """Get fallback macro data when primary sources fail"""
+        try:
+            return {
+                'sentiment': 'neutral',
+                'sentiment_score': 0.5,
+                'sentiment_confidence': 0.3,
+                'btc_dominance': {'dominance': 50.0},
+                'fear_greed_index': {'value': 50, 'classification': 'Neutral'},
+                'crypto_volatility': {'average_volatility': 0.5},
+                'volatility_regime': 'moderate_volatility',
+                'defi_tvl': {'total_tvl': 50000000000},
+                'stablecoin_ratio': 0.15,
+                'note': 'Using fallback data - primary sources unavailable'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Fallback macro data error: {e}")
+            return {
+                'sentiment': 'neutral',
+                'sentiment_score': 0.5,
+                'sentiment_confidence': 0.3,
+                'note': 'Fallback data generation failed'
+            }

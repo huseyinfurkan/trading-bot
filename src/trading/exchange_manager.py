@@ -730,3 +730,319 @@ class ExchangeManager:
         df = pd.DataFrame(data)
         df.set_index('timestamp', inplace=True)
         return df
+    
+    async def get_funding_rate(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Get funding rate for a symbol from Bybit or Binance"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            if exchange == 'bybit':
+                # Bybit funding rate
+                try:
+                    funding_info = await exchange_instance.fetch_funding_rate(symbol)
+                    return {
+                        'fundingRate': funding_info.get('fundingRate', 0),
+                        'nextFundingTime': funding_info.get('nextFundingTime', 0),
+                        'fundingDatetime': funding_info.get('fundingDatetime'),
+                        'previousFundingRate': funding_info.get('previousFundingRate', 0)
+                    }
+                except Exception as e:
+                    logger.warning(f"⚠️ Bybit funding rate error for {symbol}: {e}")
+                    return None
+            
+            elif exchange == 'binance':
+                # Binance funding rate
+                try:
+                    funding_info = await exchange_instance.fetch_funding_rate(symbol)
+                    return {
+                        'fundingRate': funding_info.get('fundingRate', 0),
+                        'nextFundingTime': funding_info.get('nextFundingTime', 0),
+                        'fundingDatetime': funding_info.get('fundingDatetime'),
+                        'previousFundingRate': funding_info.get('previousFundingRate', 0)
+                    }
+                except Exception as e:
+                    logger.warning(f"⚠️ Binance funding rate error for {symbol}: {e}")
+                    return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Funding rate error: {e}")
+            return None
+    
+    async def get_open_interest(self, symbol: str, exchange: str = 'binance') -> Optional[Dict[str, Any]]:
+        """Get open interest for a symbol from Binance or Bybit"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            if exchange == 'binance':
+                # Binance open interest
+                try:
+                    oi_info = await exchange_instance.fetch_open_interest(symbol)
+                    return {
+                        'openInterest': oi_info.get('openInterestAmount', 0),
+                        'openInterestValue': oi_info.get('openInterestValue', 0),
+                        'timestamp': oi_info.get('timestamp', 0)
+                    }
+                except Exception as e:
+                    logger.warning(f"⚠️ Binance open interest error for {symbol}: {e}")
+                    return None
+            
+            elif exchange == 'bybit':
+                # Bybit open interest
+                try:
+                    oi_info = await exchange_instance.fetch_open_interest(symbol)
+                    return {
+                        'openInterest': oi_info.get('openInterestAmount', 0),
+                        'openInterestValue': oi_info.get('openInterestValue', 0),
+                        'timestamp': oi_info.get('timestamp', 0)
+                    }
+                except Exception as e:
+                    logger.warning(f"⚠️ Bybit open interest error for {symbol}: {e}")
+                    return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Open interest error: {e}")
+            return None
+    
+    async def get_order_book(self, symbol: str, exchange: str = 'bybit', limit: int = 20) -> Optional[Dict[str, Any]]:
+        """Get order book for a symbol from Bybit or Binance"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            try:
+                order_book = await exchange_instance.fetch_order_book(symbol, limit)
+                
+                return {
+                    'bids': order_book.get('bids', []),
+                    'asks': order_book.get('asks', []),
+                    'timestamp': order_book.get('timestamp', 0),
+                    'datetime': order_book.get('datetime'),
+                    'nonce': order_book.get('nonce', 0),
+                    'bid_ask_spread': self._calculate_bid_ask_spread(order_book),
+                    'order_book_depth': self._calculate_order_book_depth(order_book)
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Order book error for {symbol} on {exchange}: {e}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"❌ Order book error: {e}")
+            return None
+    
+    async def get_ticker(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Get ticker information for a symbol from Bybit or Binance"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            try:
+                ticker = await exchange_instance.fetch_ticker(symbol)
+                
+                return {
+                    'symbol': ticker.get('symbol'),
+                    'last': ticker.get('last'),
+                    'bid': ticker.get('bid'),
+                    'ask': ticker.get('ask'),
+                    'high': ticker.get('high'),
+                    'low': ticker.get('low'),
+                    'volume': ticker.get('baseVolume'),
+                    'quoteVolume': ticker.get('quoteVolume'),
+                    'change': ticker.get('change'),
+                    'percentage': ticker.get('percentage'),
+                    'average': ticker.get('average'),
+                    'timestamp': ticker.get('timestamp'),
+                    'datetime': ticker.get('datetime'),
+                    'vwap': ticker.get('vwap'),
+                    'open': ticker.get('open'),
+                    'close': ticker.get('close'),
+                    'previousClose': ticker.get('previousClose')
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Ticker error for {symbol} on {exchange}: {e}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"❌ Ticker error: {e}")
+            return None
+    
+    async def get_markets(self, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Get all available markets from Bybit or Binance"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            try:
+                markets = await exchange_instance.load_markets()
+                
+                # Filter for USDT pairs
+                usdt_pairs = {}
+                for symbol, market in markets.items():
+                    if market.get('quote') == 'USDT' and market.get('active'):
+                        usdt_pairs[symbol] = {
+                            'symbol': market.get('symbol'),
+                            'base': market.get('base'),
+                            'quote': market.get('quote'),
+                            'type': market.get('type'),
+                            'spot': market.get('spot', False),
+                            'margin': market.get('margin', False),
+                            'swap': market.get('swap', False),
+                            'future': market.get('future', False),
+                            'option': market.get('option', False),
+                            'active': market.get('active', False),
+                            'contract': market.get('contract', False),
+                            'linear': market.get('linear', False),
+                            'inverse': market.get('inverse', False),
+                            'contractSize': market.get('contractSize'),
+                            'expiry': market.get('expiry'),
+                            'strike': market.get('strike'),
+                            'optionType': market.get('optionType'),
+                            'settleType': market.get('settleType'),
+                            'status': market.get('status')
+                        }
+                
+                return {
+                    'total_markets': len(markets),
+                    'usdt_pairs': len(usdt_pairs),
+                    'markets': usdt_pairs,
+                    'exchange': exchange,
+                    'timestamp': datetime.now()
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Markets error for {exchange}: {e}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"❌ Markets error: {e}")
+            return None
+    
+    def _calculate_bid_ask_spread(self, order_book: Dict[str, Any]) -> float:
+        """Calculate bid-ask spread from order book"""
+        try:
+            bids = order_book.get('bids', [])
+            asks = order_book.get('asks', [])
+            
+            if not bids or not asks:
+                return 0.0
+            
+            best_bid = bids[0][0] if bids else 0
+            best_ask = asks[0][0] if asks else 0
+            
+            if best_bid > 0 and best_ask > 0:
+                spread = (best_ask - best_bid) / best_bid
+                return spread
+            
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"❌ Bid-ask spread calculation error: {e}")
+            return 0.0
+    
+    def _calculate_order_book_depth(self, order_book: Dict[str, Any], depth_levels: int = 5) -> Dict[str, Any]:
+        """Calculate order book depth at different levels"""
+        try:
+            bids = order_book.get('bids', [])
+            asks = order_book.get('asks', [])
+            
+            depth_data = {
+                'bid_depth': {},
+                'ask_depth': {},
+                'total_bid_volume': 0,
+                'total_ask_volume': 0,
+                'bid_ask_ratio': 0
+            }
+            
+            # Calculate bid depth
+            for i, (price, volume) in enumerate(bids[:depth_levels]):
+                depth_data['bid_depth'][f'level_{i+1}'] = {
+                    'price': price,
+                    'volume': volume,
+                    'value': price * volume
+                }
+                depth_data['total_bid_volume'] += volume
+            
+            # Calculate ask depth
+            for i, (price, volume) in enumerate(asks[:depth_levels]):
+                depth_data['ask_depth'][f'level_{i+1}'] = {
+                    'price': price,
+                    'volume': volume,
+                    'value': price * volume
+                }
+                depth_data['total_ask_volume'] += volume
+            
+            # Calculate bid-ask ratio
+            if depth_data['total_ask_volume'] > 0:
+                depth_data['bid_ask_ratio'] = depth_data['total_bid_volume'] / depth_data['total_ask_volume']
+            
+            return depth_data
+            
+        except Exception as e:
+            logger.error(f"❌ Order book depth calculation error: {e}")
+            return {}
+    
+    async def get_24hr_stats(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+        """Get 24-hour statistics for a symbol"""
+        try:
+            if exchange not in self.exchanges:
+                logger.error(f"❌ Exchange {exchange} not initialized")
+                return None
+            
+            exchange_instance = self.exchanges[exchange]
+            
+            try:
+                ticker = await exchange_instance.fetch_ticker(symbol)
+                
+                return {
+                    'symbol': ticker.get('symbol'),
+                    'price_change': ticker.get('change'),
+                    'price_change_percent': ticker.get('percentage'),
+                    'weighted_avg_price': ticker.get('average'),
+                    'prev_close_price': ticker.get('previousClose'),
+                    'last_price': ticker.get('last'),
+                    'last_qty': ticker.get('lastQty'),
+                    'bid_price': ticker.get('bid'),
+                    'ask_price': ticker.get('ask'),
+                    'open_price': ticker.get('open'),
+                    'high_price': ticker.get('high'),
+                    'low_price': ticker.get('low'),
+                    'volume': ticker.get('baseVolume'),
+                    'quote_volume': ticker.get('quoteVolume'),
+                    'open_time': ticker.get('openTime'),
+                    'close_time': ticker.get('closeTime'),
+                    'first_id': ticker.get('firstId'),
+                    'last_id': ticker.get('lastId'),
+                    'count': ticker.get('count'),
+                    'timestamp': ticker.get('timestamp'),
+                    'datetime': ticker.get('datetime')
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 24hr stats error for {symbol} on {exchange}: {e}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"❌ 24hr stats error: {e}")
+            return None
