@@ -59,16 +59,8 @@ class ConfigManager:
         """Kapsamlı konfigürasyon doğrulaması - tip kontrolü ve tutarlılık"""
         logger.info("🔍 Kapsamlı konfigürasyon doğrulaması başlatılıyor...")
         
-        # 1. DEEP TYPE VALIDATION SCHEMA
-        validation_schema = {
-            'exchanges': {
-                'type': dict,
-                'required_keys': ['api_key', 'secret'],
-                'optional_keys': ['sandbox', 'passphrase']
-            },
-            'strategies': {
-                'type': dict,
-                'required_strategies': ['alligator_ma_momentum', 'bollinger_rsi_stochrsi'],
+                # 1. DYNAMIC TYPE VALIDATION SCHEMA
+        validation_schema = await self._get_dynamic_validation_schema()
                 'strategy_params': {
                     'alligator_ma_momentum': {
                         'jaw_period': {'type': int, 'min': 5, 'max': 20},
@@ -376,6 +368,96 @@ class ConfigManager:
         if strategy_name not in strategies:
             raise KeyError(f"Strateji bulunamadı: {strategy_name}")
         return strategies[strategy_name]
+    
+    async def _get_dynamic_validation_schema(self) -> Dict[str, Any]:
+        """Get dynamic validation schema based on current market conditions"""
+        try:
+            from datetime import datetime
+            
+            # Dynamic schema that adapts to market conditions
+            schema = {
+                'exchanges': {
+                    'type': dict,
+                    'required_keys': ['api_key', 'secret'],
+                    'optional_keys': ['sandbox', 'passphrase', 'testnet']
+                },
+                'strategies': {
+                    'type': dict,
+                    'required_strategies': ['alligator_ma_momentum', 'bollinger_rsi_stochrsi'],
+                    'strategy_params': {
+                        'alligator_ma_momentum': {
+                            'jaw_period': {'type': int, 'min': 5, 'max': 20},
+                            'teeth_period': {'type': int, 'min': 3, 'max': 15},
+                            'lips_period': {'type': int, 'min': 2, 'max': 10},
+                            'fast_sma': {'type': int, 'min': 5, 'max': 20},
+                            'slow_sma': {'type': int, 'min': 10, 'max': 50},
+                            'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
+                        },
+                        'bollinger_rsi_stochrsi': {
+                            'bb_period': {'type': int, 'min': 10, 'max': 30},
+                            'bb_std_dev': {'type': float, 'min': 1.0, 'max': 3.0},
+                            'rsi_period': {'type': int, 'min': 10, 'max': 20},
+                            'rsi_oversold': {'type': int, 'min': 10, 'max': 40},
+                            'rsi_overbought': {'type': int, 'min': 60, 'max': 90},
+                            'stochrsi_period': {'type': int, 'min': 10, 'max': 20},
+                            'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
+                        }
+                    }
+                },
+                'risk_management': {
+                    'type': dict,
+                    'required_params': {
+                        'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
+                        'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
+                        'max_positions': {'type': int, 'min': 1, 'max': 20}
+                    }
+                },
+                'ai': {
+                    'type': dict,
+                    'required_params': {
+                        'confidence_threshold': {'type': float, 'min': 0.1, 'max': 0.9},
+                        'learning_rate': {'type': float, 'min': 0.001, 'max': 0.1},
+                        'performance_window': {'type': int, 'min': 10, 'max': 1000}
+                    }
+                }
+            }
+            
+            # Add dynamic validation based on current time and market conditions
+            current_hour = datetime.now().hour
+            if current_hour >= 22 or current_hour <= 6:  # Night hours
+                # More conservative validation during low liquidity hours
+                schema['risk_management']['required_params']['max_daily_loss']['max'] = 0.15
+                schema['risk_management']['required_params']['max_portfolio_risk']['max'] = 0.25
+            
+            logger.info("✅ Dynamic validation schema generated")
+            return schema
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic validation schema error: {e}")
+            # Fallback to static schema
+            return self._get_static_validation_schema()
+    
+    def _get_static_validation_schema(self) -> Dict[str, Any]:
+        """Get static validation schema as fallback"""
+        return {
+            'exchanges': {
+                'type': dict,
+                'required_keys': ['api_key', 'secret'],
+                'optional_keys': ['sandbox', 'passphrase']
+            },
+            'strategies': {
+                'type': dict,
+                'required_strategies': ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']
+            },
+            'risk_management': {
+                'type': dict,
+                'required_params': {
+                    'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
+                    'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
+                    'max_positions': {'type': int, 'min': 1, 'max': 20}
+                }
+            }
+        }
     
     def _validate_type_deep(self, value, expected_type, path=""):
         """Derin tip kontrolü - nested structures için"""

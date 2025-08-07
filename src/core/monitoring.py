@@ -26,10 +26,10 @@ class MonitoringSystem:
         self.db_manager = db_manager
         self.notification_manager = notification_manager
         
-        # System thresholds
-        self.cpu_threshold = config.get('cpu_threshold', 80)
-        self.memory_threshold = config.get('memory_threshold', 80)
-        self.disk_threshold = config.get('disk_threshold', 90)
+        # Dynamic system thresholds based on system performance
+        self.cpu_threshold = await self._get_dynamic_cpu_threshold(config)
+        self.memory_threshold = await self._get_dynamic_memory_threshold(config)
+        self.disk_threshold = await self._get_dynamic_disk_threshold(config)
         
         # Performance tracking
         self.performance_metrics = {
@@ -39,13 +39,13 @@ class MonitoringSystem:
             'last_alert_time': {}
         }
         
-        # Alert cooldown (prevent spam)
-        self.alert_cooldown = 300  # 5 minutes
+        # Dynamic alert cooldown based on error frequency
+        self.alert_cooldown = await self._get_dynamic_alert_cooldown(config)
         
-        # Health check intervals
-        self.system_check_interval = 60  # 1 minute
-        self.performance_check_interval = 300  # 5 minutes
-        self.error_check_interval = 30  # 30 seconds
+        # Dynamic health check intervals based on system load
+        self.system_check_interval = await self._get_dynamic_check_interval(config, 'system')
+        self.performance_check_interval = await self._get_dynamic_check_interval(config, 'performance')
+        self.error_check_interval = await self._get_dynamic_check_interval(config, 'error')
         
         logger.info("🔍 Enhanced Monitoring System initialized")
     
@@ -355,6 +355,121 @@ class MonitoringSystem:
         except Exception as e:
             logger.error(f"❌ System status error: {e}")
             return {'error': str(e)}
+    
+    async def _get_dynamic_cpu_threshold(self, config: Dict[str, Any]) -> int:
+        """Get dynamic CPU threshold based on system performance"""
+        try:
+            # Get current CPU usage to adjust threshold
+            current_cpu = psutil.cpu_percent(interval=1)
+            base_threshold = config.get('cpu_threshold', 80)
+            
+            # Adjust threshold based on current load
+            if current_cpu > 70:
+                # High load - increase threshold to avoid false alarms
+                return min(95, base_threshold + 10)
+            elif current_cpu < 30:
+                # Low load - decrease threshold for better monitoring
+                return max(60, base_threshold - 10)
+            else:
+                return base_threshold
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic CPU threshold: {e}")
+            return config.get('cpu_threshold', 80)
+    
+    async def _get_dynamic_memory_threshold(self, config: Dict[str, Any]) -> int:
+        """Get dynamic memory threshold based on system memory"""
+        try:
+            memory = psutil.virtual_memory()
+            base_threshold = config.get('memory_threshold', 80)
+            
+            # Adjust based on available memory
+            if memory.available < memory.total * 0.1:  # Less than 10% available
+                return min(95, base_threshold + 10)
+            elif memory.available > memory.total * 0.5:  # More than 50% available
+                return max(60, base_threshold - 10)
+            else:
+                return base_threshold
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic memory threshold: {e}")
+            return config.get('memory_threshold', 80)
+    
+    async def _get_dynamic_disk_threshold(self, config: Dict[str, Any]) -> int:
+        """Get dynamic disk threshold based on disk usage"""
+        try:
+            disk = psutil.disk_usage('/')
+            base_threshold = config.get('disk_threshold', 90)
+            
+            # Adjust based on disk usage
+            usage_percent = (disk.used / disk.total) * 100
+            if usage_percent > 85:
+                return min(98, base_threshold + 5)
+            elif usage_percent < 50:
+                return max(80, base_threshold - 10)
+            else:
+                return base_threshold
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic disk threshold: {e}")
+            return config.get('disk_threshold', 90)
+    
+    async def _get_dynamic_alert_cooldown(self, config: Dict[str, Any]) -> int:
+        """Get dynamic alert cooldown based on error frequency"""
+        try:
+            base_cooldown = config.get('alert_cooldown', 300)
+            
+            # Check recent error frequency
+            recent_errors = len([e for e in self.performance_metrics.get('error_counts', {}) 
+                               if time.time() - e.get('timestamp', 0) < 3600])  # Last hour
+            
+            if recent_errors > 10:
+                # High error frequency - increase cooldown
+                return min(600, base_cooldown * 2)
+            elif recent_errors < 2:
+                # Low error frequency - decrease cooldown
+                return max(60, base_cooldown // 2)
+            else:
+                return base_cooldown
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic alert cooldown: {e}")
+            return config.get('alert_cooldown', 300)
+    
+    async def _get_dynamic_check_interval(self, config: Dict[str, Any], check_type: str) -> int:
+        """Get dynamic check interval based on system load"""
+        try:
+            current_cpu = psutil.cpu_percent(interval=1)
+            
+            if check_type == 'system':
+                base_interval = config.get('system_check_interval', 60)
+            elif check_type == 'performance':
+                base_interval = config.get('performance_check_interval', 300)
+            elif check_type == 'error':
+                base_interval = config.get('error_check_interval', 30)
+            else:
+                base_interval = 60
+            
+            # Adjust interval based on CPU load
+            if current_cpu > 80:
+                # High load - increase interval to reduce overhead
+                return min(base_interval * 2, 600)
+            elif current_cpu < 30:
+                # Low load - decrease interval for better monitoring
+                return max(base_interval // 2, 15)
+            else:
+                return base_interval
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic check interval: {e}")
+            if check_type == 'system':
+                return config.get('system_check_interval', 60)
+            elif check_type == 'performance':
+                return config.get('performance_check_interval', 300)
+            elif check_type == 'error':
+                return config.get('error_check_interval', 30)
+            else:
+                return 60
     
     async def close(self):
         """Monitoring sistemini kapat"""

@@ -58,13 +58,31 @@ class DatabaseManager:
             # Create main connection
             self.connection = await aiosqlite.connect(str(self.db_path))
             
-            # Configure for better performance
+            # Configure for better performance with dynamic values
             await self.connection.execute("PRAGMA journal_mode=WAL")
             await self.connection.execute("PRAGMA synchronous=NORMAL")
             await self.connection.execute("PRAGMA temp_store=MEMORY")
-            await self.connection.execute("PRAGMA mmap_size=268435456")  # 256MB
-            await self.connection.execute("PRAGMA cache_size=10000")
-            await self.connection.execute("PRAGMA page_size=4096")
+            
+            # Dynamic PRAGMA values based on system memory
+            try:
+                import psutil
+                system_memory = psutil.virtual_memory().total
+                # Calculate dynamic values based on available memory
+                mmap_size = min(system_memory // 4, 268435456)  # 25% of system memory, max 256MB
+                cache_size = min(system_memory // (1024 * 1024 * 100), 10000)  # Dynamic cache size
+                
+                await self.connection.execute(f"PRAGMA mmap_size={mmap_size}")
+                await self.connection.execute(f"PRAGMA cache_size={cache_size}")
+                await self.connection.execute("PRAGMA page_size=4096")
+                
+                logger.info(f"📊 Dynamic PRAGMA values - mmap_size: {mmap_size}, cache_size: {cache_size}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not set dynamic PRAGMA values: {e}")
+                # Fallback to static values
+                await self.connection.execute("PRAGMA mmap_size=268435456")  # 256MB
+                await self.connection.execute("PRAGMA cache_size=10000")
+                await self.connection.execute("PRAGMA page_size=4096")
             
             # Create additional connections for pool
             for i in range(self.max_connections - 1):

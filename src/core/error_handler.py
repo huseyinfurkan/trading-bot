@@ -39,25 +39,16 @@ class ErrorHandler:
         self.error_counts = {}
         self.last_error_time = {}
         
-        # Circuit breaker configuration
+        # Dynamic circuit breaker configuration
         self.circuit_breakers = {}
-        self.circuit_breaker_config = {
-            'failure_threshold': config.get('circuit_breaker', {}).get('failure_threshold', 5),
-            'recovery_timeout': config.get('circuit_breaker', {}).get('recovery_timeout', 60),
-            'success_threshold': config.get('circuit_breaker', {}).get('success_threshold', 2)
-        }
+        self.circuit_breaker_config = await self._get_dynamic_circuit_breaker_config(config)
         
-        # Error severity thresholds
-        self.severity_thresholds = {
-            'low': config.get('error_thresholds', {}).get('low', 10),
-            'medium': config.get('error_thresholds', {}).get('medium', 5),
-            'high': config.get('error_thresholds', {}).get('high', 3),
-            'critical': config.get('error_thresholds', {}).get('critical', 1)
-        }
+        # Dynamic error severity thresholds
+        self.severity_thresholds = await self._get_dynamic_severity_thresholds(config)
         
-        # Alert configuration
+        # Dynamic alert configuration
         self.alert_enabled = config.get('alerts', {}).get('enabled', True)
-        self.alert_cooldown = config.get('alerts', {}).get('cooldown_seconds', 300)
+        self.alert_cooldown = await self._get_dynamic_alert_cooldown(config)
         self.last_alert_time = {}
         
         logger.info("🛡️ Enhanced Error Handler initialized")
@@ -417,6 +408,106 @@ class ErrorHandler:
             cb['failure_count'] = 0
             cb['success_count'] = 0
             logger.info(f"🔄 Circuit breaker manually reset for {component}")
+    
+    async def _get_dynamic_circuit_breaker_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Get dynamic circuit breaker configuration based on error patterns"""
+        try:
+            base_config = {
+                'failure_threshold': config.get('circuit_breaker', {}).get('failure_threshold', 5),
+                'recovery_timeout': config.get('circuit_breaker', {}).get('recovery_timeout', 60),
+                'success_threshold': config.get('circuit_breaker', {}).get('success_threshold', 2)
+            }
+            
+            # Adjust based on recent error patterns
+            recent_errors = len([e for e in self.error_history 
+                               if (datetime.now() - e['timestamp']).total_seconds() < 3600])  # Last hour
+            
+            if recent_errors > 20:
+                # High error frequency - more conservative settings
+                base_config['failure_threshold'] = max(3, base_config['failure_threshold'] - 2)
+                base_config['recovery_timeout'] = min(120, base_config['recovery_timeout'] * 2)
+                base_config['success_threshold'] = max(1, base_config['success_threshold'] - 1)
+            elif recent_errors < 5:
+                # Low error frequency - more aggressive settings
+                base_config['failure_threshold'] = min(10, base_config['failure_threshold'] + 2)
+                base_config['recovery_timeout'] = max(30, base_config['recovery_timeout'] // 2)
+                base_config['success_threshold'] = min(5, base_config['success_threshold'] + 1)
+            
+            logger.info(f"📊 Dynamic circuit breaker config - failure_threshold: {base_config['failure_threshold']}, "
+                       f"recovery_timeout: {base_config['recovery_timeout']}, success_threshold: {base_config['success_threshold']}")
+            
+            return base_config
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic circuit breaker config: {e}")
+            return {
+                'failure_threshold': config.get('circuit_breaker', {}).get('failure_threshold', 5),
+                'recovery_timeout': config.get('circuit_breaker', {}).get('recovery_timeout', 60),
+                'success_threshold': config.get('circuit_breaker', {}).get('success_threshold', 2)
+            }
+    
+    async def _get_dynamic_severity_thresholds(self, config: Dict[str, Any]) -> Dict[str, int]:
+        """Get dynamic severity thresholds based on error patterns"""
+        try:
+            base_thresholds = {
+                'low': config.get('error_thresholds', {}).get('low', 10),
+                'medium': config.get('error_thresholds', {}).get('medium', 5),
+                'high': config.get('error_thresholds', {}).get('high', 3),
+                'critical': config.get('error_thresholds', {}).get('critical', 1)
+            }
+            
+            # Adjust based on recent error severity distribution
+            recent_errors = [e for e in self.error_history 
+                           if (datetime.now() - e['timestamp']).total_seconds() < 3600]  # Last hour
+            
+            if recent_errors:
+                critical_count = len([e for e in recent_errors if e['severity'] == 'CRITICAL'])
+                high_count = len([e for e in recent_errors if e['severity'] == 'HIGH'])
+                
+                if critical_count > 2 or high_count > 5:
+                    # High severity errors - lower thresholds
+                    base_thresholds['critical'] = max(1, base_thresholds['critical'])
+                    base_thresholds['high'] = max(2, base_thresholds['high'] - 1)
+                    base_thresholds['medium'] = max(3, base_thresholds['medium'] - 2)
+                elif critical_count == 0 and high_count == 0:
+                    # Low severity errors - higher thresholds
+                    base_thresholds['critical'] = min(3, base_thresholds['critical'] + 1)
+                    base_thresholds['high'] = min(5, base_thresholds['high'] + 1)
+                    base_thresholds['medium'] = min(8, base_thresholds['medium'] + 2)
+            
+            logger.info(f"📊 Dynamic severity thresholds - {base_thresholds}")
+            return base_thresholds
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic severity thresholds: {e}")
+            return {
+                'low': config.get('error_thresholds', {}).get('low', 10),
+                'medium': config.get('error_thresholds', {}).get('medium', 5),
+                'high': config.get('error_thresholds', {}).get('high', 3),
+                'critical': config.get('error_thresholds', {}).get('critical', 1)
+            }
+    
+    async def _get_dynamic_alert_cooldown(self, config: Dict[str, Any]) -> int:
+        """Get dynamic alert cooldown based on error frequency"""
+        try:
+            base_cooldown = config.get('alerts', {}).get('cooldown_seconds', 300)
+            
+            # Check recent error frequency
+            recent_errors = len([e for e in self.error_history 
+                               if (datetime.now() - e['timestamp']).total_seconds() < 1800])  # Last 30 minutes
+            
+            if recent_errors > 15:
+                # High error frequency - increase cooldown
+                return min(600, base_cooldown * 2)
+            elif recent_errors < 3:
+                # Low error frequency - decrease cooldown
+                return max(60, base_cooldown // 2)
+            else:
+                return base_cooldown
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic alert cooldown: {e}")
+            return config.get('alerts', {}).get('cooldown_seconds', 300)
     
     def clear_error_history(self):
         """Clear error history"""
