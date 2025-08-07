@@ -86,7 +86,15 @@ class PositionManager:
                 # Get account balance for position sizing
                 try:
                     balance = await self.exchange_manager.get_balance()
-                    account_balance = balance.get('USDT', 0) if balance else 0
+                    if balance and 'USDT' in balance:
+                        # Handle nested balance structure
+                        usdt_balance = balance['USDT']
+                        if isinstance(usdt_balance, dict):
+                            account_balance = usdt_balance.get('free', usdt_balance.get('total', 0))
+                        else:
+                            account_balance = float(usdt_balance)
+                    else:
+                        account_balance = 0
                     
                     if account_balance <= 0:
                         logger.error(f"❌ {symbol} için yeterli bakiye yok: {account_balance}")

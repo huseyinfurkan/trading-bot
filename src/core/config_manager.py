@@ -315,10 +315,9 @@ class ConfigManager:
             logger.error(f"❌ Konfigürasyon kaydetme hatası: {e}")
             raise
     
-    def reload_config(self) -> Dict[str, Any]:
+    async def reload_config(self) -> Dict[str, Any]:
         """Konfigürasyonu yeniden yükle"""
-        import asyncio
-        return asyncio.run(self.load_config())
+        return await self.load_config()
     
     def get_exchange_config(self, exchange_name: str) -> Dict[str, Any]:
         """Belirli bir exchange konfigürasyonunu al"""
@@ -374,7 +373,7 @@ class ConfigManager:
                     'required_params': {
                         'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
                         'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
-                        'max_positions': {'type': int, 'min': 1, 'max': 20}
+                        'max_open_positions': {'type': int, 'min': 1, 'max': 20}
                     }
                 },
                 'ai': {
@@ -419,7 +418,7 @@ class ConfigManager:
                 'required_params': {
                     'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
                     'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
-                    'max_positions': {'type': int, 'min': 1, 'max': 20}
+                    'max_open_positions': {'type': int, 'min': 1, 'max': 20}
                 }
             }
         }
@@ -456,7 +455,7 @@ class ConfigManager:
             logger.error(f"❌ Range validation failed: {e}")
             return False
     
-    async def reload_config(self):
+    async def hot_reload_config(self):
         """HOT-RELOAD: Konfigürasyonu yeniden yükle"""
         try:
             logger.info("🔄 Hot-reloading configuration...")

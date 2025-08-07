@@ -86,6 +86,99 @@ class RiskManager:
         logger.info("🔒 RiskManager initialized with config parameters")
         logger.info(f"📊 Risk settings: Portfolio={self.max_portfolio_risk:.1%}, Position={self.max_position_risk:.1%}, Daily Loss={self.max_daily_loss:.1%}")
     
+    async def calculate_position_size(self, symbol: str = None, entry_price: float = None,
+                                    stop_loss: float = None, leverage: float = 1.0,
+                                    confidence: float = 0.5, strategy: str = "default") -> Dict[str, Any]:
+        """Calculate position size based on risk parameters and market conditions"""
+        try:
+            # Validate inputs
+            if not entry_price or entry_price <= 0:
+                return {'allowed': False, 'size': 0, 'leverage_used': 1.0, 'reason': 'Invalid entry price'}
+            
+            if not stop_loss or stop_loss <= 0:
+                return {'allowed': False, 'size': 0, 'leverage_used': 1.0, 'reason': 'Invalid stop loss'}
+            
+            # Calculate risk amount based on confidence and strategy
+            risk_amount = self._calculate_risk_amount(confidence, strategy)
+            
+            # Get account balance
+            account_balance = self.account_balance
+            
+            # Calculate position size with leverage
+            position_size = self._calculate_position_size_with_leverage(
+                entry_price, stop_loss, risk_amount, account_balance, strategy
+            )
+            
+            # Apply leverage
+            leverage_used = min(leverage, self._get_strategy_leverage(strategy))
+            position_size *= leverage_used
+            
+            # Check position limits
+            limits_check = await self._check_position_limits(symbol, position_size, entry_price)
+            if not limits_check.get('allowed', True):
+                return {
+                    'allowed': False,
+                    'size': 0,
+                    'leverage_used': leverage_used,
+                    'reason': limits_check.get('reason', 'Position limits exceeded')
+                }
+            
+            # Check correlation
+            correlation_check = await self._check_correlation(symbol)
+            if not correlation_check.get('allowed', True):
+                return {
+                    'allowed': False,
+                    'size': 0,
+                    'leverage_used': leverage_used,
+                    'reason': correlation_check.get('reason', 'Correlation limit exceeded')
+                }
+            
+            return {
+                'allowed': True,
+                'size': position_size,
+                'leverage_used': leverage_used,
+                'risk_amount': risk_amount,
+                'account_balance': account_balance
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Position size calculation error: {e}")
+            return {'allowed': False, 'size': 0, 'leverage_used': 1.0, 'reason': f'Calculation error: {e}'}
+    
+    async def get_risk_status(self) -> Dict[str, Any]:
+        """Get current risk status for monitoring"""
+        try:
+            # Get current portfolio risk
+            portfolio_risk = self.daily_pnl / self.account_balance if self.account_balance > 0 else 0
+            
+            # Get open positions count
+            open_positions = len(await self.get_open_positions())
+            
+            # Get daily loss
+            daily_loss = abs(self.daily_pnl) / self.account_balance if self.account_balance > 0 else 0
+            
+            return {
+                'portfolio_risk': portfolio_risk,
+                'open_positions': open_positions,
+                'daily_loss': daily_loss,
+                'account_balance': self.account_balance,
+                'max_open_positions': self.max_open_positions,
+                'max_daily_loss': self.max_daily_loss,
+                'max_portfolio_risk': self.max_portfolio_risk
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Risk status error: {e}")
+            return {
+                'portfolio_risk': 0,
+                'open_positions': 0,
+                'daily_loss': 0,
+                'account_balance': self.account_balance,
+                'max_open_positions': self.max_open_positions,
+                'max_daily_loss': self.max_daily_loss,
+                'max_portfolio_risk': self.max_portfolio_risk
+            }
+    
     async def update_config_parameters(self, new_config: Dict[str, Any]):
         """Update risk parameters from new config"""
         try:

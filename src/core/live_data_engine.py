@@ -64,6 +64,10 @@ class LiveDataEngine:
         self.market_volatility = 0.5
         self.interval_multiplier = 1.0
         
+        # Add missing properties
+        self.config = {}  # Will be set from external config
+        self.websocket_data = {}  # WebSocket data storage
+        
         logger.info("🔥 Enhanced Live Data Engine initialized")
     
     async def initialize(self):

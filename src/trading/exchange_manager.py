@@ -45,6 +45,47 @@ class ExchangeManager:
         
         logger.info("📡 Exchange Manager initialized")
     
+    async def get_exchange_status(self) -> Dict[str, Any]:
+        """Get exchange connection status"""
+        try:
+            status = {}
+            for exchange_name, exchange_obj in self.exchanges.items():
+                try:
+                    # Test connection by fetching markets
+                    await exchange_obj.load_markets()
+                    status[exchange_name] = {
+                        'connected': True,
+                        'markets_count': len(exchange_obj.markets),
+                        'last_check': datetime.now()
+                    }
+                except Exception as e:
+                    status[exchange_name] = {
+                        'connected': False,
+                        'error': str(e),
+                        'last_check': datetime.now()
+                    }
+            
+            # Overall status
+            connected_exchanges = sum(1 for s in status.values() if s.get('connected', False))
+            total_exchanges = len(status)
+            
+            return {
+                'connected': connected_exchanges > 0,
+                'connected_count': connected_exchanges,
+                'total_count': total_exchanges,
+                'exchanges': status
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange status check error: {e}")
+            return {
+                'connected': False,
+                'connected_count': 0,
+                'total_count': 0,
+                'exchanges': {},
+                'error': str(e)
+            }
+    
     async def initialize(self) -> None:
         """Exchange bağlantılarını başlat"""
         try:
