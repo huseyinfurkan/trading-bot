@@ -72,7 +72,7 @@ class ExchangeManager:
             
             # Debug API credentials
             api_key = config.get('api_key', '')
-            secret = config.get('secret', '')
+            secret = config.get('api_secret', '')
             logger.debug(f"🔐 {exchange_name} credentials: apiKey={bool(api_key)}, secret={bool(secret)}")
             logger.debug(f"🔍 {exchange_name} API key first 8 chars: {api_key[:8] if api_key else 'EMPTY'}")
             logger.debug(f"🔍 {exchange_name} Secret first 8 chars: {secret[:8] if secret else 'EMPTY'}")
