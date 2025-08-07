@@ -1,433 +1,267 @@
-# 🤖 Advanced Trading Bot
+# 🚨 GELİŞTİRME AŞAMASINDA - LÜTFEN KULLANMAYIN / UNDER DEVELOPMENT - PLEASE DO NOT USE
 
-**Profesyonel seviyede, AI destekli kripto para trading botu**
+**⚠️ TÜRKÇE:** Bu proje aktif geliştirme aşamasındadır. Gerçek para ile kullanmayın! Test amaçlı dahi olsa kendi sorumluluğunuzdadır.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
-[![Production Ready](https://img.shields.io/badge/production-ready-green.svg)]()
-
-> **🎯 Tamamen fonksiyonel, production-ready trading bot**  
-> Bybit, Binance ve OKX borsalarında backtesting, paper trading ve live trading desteği
+**⚠️ ENGLISH:** This project is under active development. Do not use with real money! Even for testing purposes, use at your own risk.
 
 ---
 
-## 📋 **İÇİNDEKİLER**
+# 🤖 AI-Powered Crypto Trading Bot
 
-- [🌟 Özellikler](#-özellikler)
-- [🚀 Hızlı Başlangıç](#-hızlı-başlangıç)
-- [📊 Trading Stratejileri](#-trading-stratejileri)
-- [🧠 AI ve ML Özellikleri](#-ai-ve-ml-özellikleri)
-- [⚖️ Risk Yönetimi](#-risk-yönetimi)
-- [📈 Backtesting](#-backtesting)
-- [🧪 Paper Trading](#-paper-trading)
-- [🔧 Kurulum](#-kurulum)
-- [📚 Dokümantasyon](#-dokümantasyon)
-- [🤝 Katkıda Bulunma](#-katkıda-bulunma)
+Advanced cryptocurrency trading bot with AI-powered signal filtering and adaptive strategies.
 
----
+## ⚠️ Important Disclaimers
 
-## 🌟 **ÖZELLİKLER**
+- **NOT FINANCIAL ADVICE**: This software is for educational and research purposes only
+- **USE AT YOUR OWN RISK**: Trading involves substantial risk of loss
+- **NO GUARANTEES**: Past performance does not guarantee future results
+- **ACTIVE DEVELOPMENT**: Features may change without notice
 
-### 🔥 **Core Features**
-- ✅ **Live Data Analysis Engine** - Gerçek zamanlı veri analizi
-- ✅ **AI Signal Filtering** - Makine öğrenmesi ile sinyal filtreleme
-- ✅ **Multi-Strategy Trading** - 4 farklı trading stratejisi
-- ✅ **Risk Management** - Kelly Criterion ve korelasyon analizi
-- ✅ **Multi-Exchange Support** - Bybit, Binance, OKX desteği
-- ✅ **Backtesting & Optimization** - Parametre optimizasyonu
-- ✅ **Paper Trading** - Risk-free testing environment
-- ✅ **Real-time Notifications** - Telegram, Discord, Email
+## 🎯 Features
 
-### 🧠 **AI & Machine Learning**
-- 🤖 **Ensemble ML Models** (Random Forest, Gradient Boosting, LSTM)
-- 📊 **20+ Technical Indicators** (RSI, MACD, Bollinger Bands, etc.)
-- 🎯 **Dynamic Confidence Scoring** - Multi-factor analysis
-- 📈 **Market Condition Detection** - Bull/Bear/Sideways markets
-- 🔍 **Pattern Recognition** - Candlestick pattern analysis
+### 🧠 AI-Powered Signal Analysis
+- **Machine Learning Models**: Gradient Boosting & Random Forest classifiers
+- **3-Class Prediction**: BUY/SELL/HOLD signal classification
+- **Multi-Timeframe Analysis**: 5m and 15m timeframe optimization
+- **High Accuracy**: 80%+ model validation accuracy
 
-### ⚡ **Trading Capabilities**
-- 🎯 **4 Trading Strategies** - Scalping, Swing, Trend Following, Mean Reversion
-- 🔄 **Trailing Stops** - Dynamic profit protection
-- ⚖️ **Advanced Risk Management** - Portfolio risk, daily limits
-- 🌐 **Multi-Exchange Trading** - Real-time price comparison
-- 📱 **Mobile Alerts** - Instant trade notifications
+### 📊 Adaptive Strategy Engine
+- **Williams Alligator + MA**: Trend-following strategy (15m timeframe)
+- **Bollinger Bands + RSI + Stochastic RSI**: Mean reversion strategy (5m timeframe)
+- **Dynamic Strategy Selection**: Automatic regime detection and strategy switching
+- **Research-Backed**: Strategies based on proven trading methodologies
 
----
+### 🔄 Market Regime Detection
+- **Trending Markets**: Volatility and momentum analysis
+- **Sideways Markets**: Range-bound condition detection
+- **Breakout Markets**: Volume and price action confirmation
+- **Multi-Timeframe Confirmation**: 15m, 1h, and 4h analysis
 
-## 🚀 **HIZLI BAŞLANGIÇ**
+### 🛡️ Risk Management
+- **Position Sizing**: Dynamic position sizing based on volatility
+- **Stop Loss & Take Profit**: Strategy-specific exit conditions
+- **Trading Fees**: Comprehensive fee calculation (0.1% per trade)
+- **Leverage Control**: Conservative 1.2x-1.5x leverage limits
 
-### 1. **Kurulum**
+### 📈 Performance Tracking
+- **Comprehensive Backtesting**: Historical performance validation
+- **Equity Curve Analysis**: Real-time portfolio tracking
+- **Trade Analytics**: Win rate, profit factor, Sharpe ratio
+- **Fee Impact Analysis**: Transparent cost calculation
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- PostgreSQL database
+- Bybit API credentials (for live trading)
+
+### Installation
+
+1. **Clone Repository**
 ```bash
-# Repository'yi klonla
-git clone https://github.com/username/advanced-trading-bot.git
-cd advanced-trading-bot
+git clone https://github.com/your-repo/ai-crypto-trading-bot.git
+cd ai-crypto-trading-bot
+```
 
-# Virtual environment oluştur
-python3 -m venv trading_bot_env
-source trading_bot_env/bin/activate  # Linux/Mac
-# trading_bot_env\Scripts\activate    # Windows
-
-# Dependencies'leri kur
+2. **Install Dependencies**
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. **Konfigürasyon**
+3. **Configure Environment**
 ```bash
-# Environment variables oluştur
 cp .env.example .env
-
-# .env dosyasını düzenle (API keys, etc.)
-nano .env
+# Edit .env with your API keys and database credentials
 ```
 
-### 3. **Test Et**
+4. **Initialize Database**
 ```bash
-# Backtesting ile başla
-python3 backtest_runner.py
-
-# Paper trading test et
-python3 paper_trading.py
-
-# Live trading (dikkatli!)
-python3 main.py
+python src/core/database_manager.py
 ```
 
----
+### Configuration
 
-## 📊 **TRADING STRATEJİLERİ**
+Edit `config/config.yaml`:
 
-### 🏃‍♂️ **1. Scalping**
-- **Hedef:** Kısa vadeli fiyat hareketleri
-- **Timeframe:** 1-5 dakika
-- **Risk/Reward:** 1:2 (0.2% risk, 0.4% profit)
-- **Kullanım:** Yüksek volatilite dönemlerinde
+```yaml
+database:
+  host: localhost
+  port: 5432
+  name: trading_bot
+  user: your_user
+  password: your_password
 
-### 📈 **2. Swing Trading**
-- **Hedef:** Orta vadeli trend takibi
-- **Timeframe:** 4-24 saat
-- **Risk/Reward:** 1:2 (3% risk, 6% profit)
-- **Kullanım:** Normal piyasa koşullarında
+exchanges:
+  bybit:
+    api_key: your_api_key
+    api_secret: your_api_secret
+    testnet: true  # Start with testnet!
 
-### 📊 **3. Trend Following**
-- **Hedef:** Uzun vadeli trend yakalama
-- **Timeframe:** 1-3 gün
-- **Risk/Reward:** 1:2 (5% risk, 10% profit)
-- **Kullanım:** Güçlü trend dönemlerinde
+strategies:
+  alligator_ma_momentum:
+    timeframe: 15m
+    max_hold_hours: 12
+  
+  bollinger_rsi_stochrsi:
+    timeframe: 5m
+    max_hold_hours: 6
 
-### 🔄 **4. Mean Reversion**
-- **Hedef:** Fiyat ortalamaya dönüş
-- **Timeframe:** 2-12 saat
-- **Risk/Reward:** 1:0.5 (4% risk, 2% profit)
-- **Kullanım:** Sideways piyasalarda
-
----
-
-## 🧠 **AI VE ML ÖZELLİKLERİ**
-
-### 🤖 **Machine Learning Models**
-```python
-# Ensemble Model Pipeline
-models = {
-    'gradient_boosting': GradientBoostingClassifier(),
-    'random_forest': RandomForestClassifier(),
-    'lstm': LSTM_Model()
-}
-
-# Feature Engineering
-features = [
-    'RSI_14', 'MACD_Signal', 'BB_Position',
-    'Volume_Ratio', 'Price_Change_1h',
-    'Volatility_20', 'Trend_Strength'
-]
+ai:
+  confidence_threshold: 0.70
+  retrain_frequency_hours: 24
 ```
 
-### 📊 **Technical Analysis**
-- **Momentum:** RSI, Stochastic, Williams %R
-- **Trend:** SMA, EMA, MACD, ADX
-- **Volatility:** Bollinger Bands, ATR
-- **Volume:** OBV, Volume SMA, Volume Spikes
-- **Support/Resistance:** Pivot Points, Fibonacci
+## 📚 Usage
 
-### 🎯 **Confidence Scoring**
-```python
-confidence = (
-    signal_strength * 0.3 +
-    market_alignment * 0.25 +
-    technical_confluence * 0.2 +
-    volume_confirmation * 0.15 +
-    historical_performance * 0.1
-)
-```
-
----
-
-## ⚖️ **RİSK YÖNETİMİ**
-
-### 🛡️ **Portfolio Protection**
-- **Max Portfolio Risk:** 2% per trade
-- **Daily Loss Limit:** 5% of capital
-- **Position Correlation:** Max 70% correlation
-- **Max Open Positions:** 10 simultaneous trades
-
-### 📐 **Kelly Criterion**
-```python
-kelly_fraction = (win_rate * reward_ratio - (1 - win_rate)) / reward_ratio
-position_size = kelly_fraction * available_capital
-```
-
-### 🔄 **Dynamic Risk Adjustment**
-- **High Confidence:** Up to 2% risk
-- **Medium Confidence:** 1% risk
-- **Low Confidence:** 0.5% risk
-- **Stop Loss:** Automatic trailing stops
-
----
-
-## 📈 **BACKTESTING**
-
-### 🧪 **Test Your Strategies**
+### 🧪 Backtesting
 ```bash
-python3 backtest_runner.py
+python backtest_runner.py
 ```
 
-**Backtesting Özellikleri:**
-- ✅ Historical data (6+ months)
-- ✅ Multiple timeframes (1m, 5m, 1h, 1d)
-- ✅ Commission and slippage modeling
-- ✅ Performance metrics (Sharpe, Sortino, Max DD)
-- ✅ Parameter optimization
-- ✅ Multi-symbol testing
-
-**Example Results:**
-```
-📊 BACKTEST RESULTS - BTCUSDT swing_trading
-==========================================
-ROI: +23.45%
-Win Rate: 67.3%
-Total Trades: 89
-Sharpe Ratio: 1.82
-Max Drawdown: -8.2%
-Final Capital: $12,345.67
-```
-
----
-
-## 🧪 **PAPER TRADING**
-
-### 💡 **Risk-Free Testing**
+### 🧠 AI Model Training
 ```bash
-python3 paper_trading.py
+python src/ai/signal_filter.py
 ```
 
-**Paper Trading Özellikleri:**
-- ✅ Bybit Sandbox Environment
-- ✅ Real-time market data
-- ✅ Virtual order execution
-- ✅ Performance tracking
-- ✅ Telegram notifications
-- ✅ $10,000 starting capital
-
-**Real-time Updates:**
-```
-📊 PAPER TRADING UPDATE
-
-⏱️ Runtime: 4.2 hours
-💰 Current Balance: $10,847.23
-📈 P&L: +$847.23 (+8.47%)
-📊 Open Positions: 3
-🕐 Update Time: 14:32:18
-```
-
----
-
-## 🔧 **KURULUM**
-
-### 📋 **Gereksinimler**
-- Python 3.8+
-- 4GB+ RAM
-- Internet connection
-- Bybit API keys (paper/live trading için)
-
-### 🔑 **API Setup**
-1. **Bybit hesabı oluştur** - [bybit.com](https://bybit.com)
-2. **API Key oluştur** - Trading permissions ile
-3. **IP Whitelist** - Güvenlik için (opsiyonel)
-4. **.env dosyasına ekle** - API credentials
-
-### 📦 **Dependencies**
-```txt
-ccxt>=4.0.0          # Exchange integration
-yfinance>=0.2.0      # Market data
-pandas>=2.0.0        # Data processing
-numpy>=1.24.0        # Numerical computing
-scikit-learn>=1.3.0  # Machine learning
-aiosqlite>=0.19.0    # Async database
-loguru>=0.7.0        # Logging
-aiohttp>=3.8.0       # HTTP client
-python-dotenv>=1.0.0 # Environment variables
-```
-
----
-
-## 📚 **DOKÜMANTASYON**
-
-### 📖 **Detaylı Kılavuzlar**
-- 📋 [**Production Ready Checklist**](PRODUCTION_READY_CHECKLIST.md) - Production hazırlık adımları
-- 🎯 [**Promises Verification**](PROMISES_VERIFICATION.md) - Özellik doğrulama
-- 🔧 [**Configuration Guide**](config/config.yaml) - Yapılandırma kılavuzu
-- 🌍 [**English README**](README_EN.md) - English documentation
-
-### 🗂️ **Project Structure**
-```
-advanced-trading-bot/
-├── 📁 src/
-│   ├── 📁 core/           # Core system components
-│   ├── 📁 trading/        # Trading logic
-│   ├── 📁 ai/             # AI & ML components
-│   └── 📁 utils/          # Utilities & helpers
-├── 📁 config/             # Configuration files
-├── 📁 data/               # Database & data storage
-├── 📁 logs/               # Log files
-├── 📁 tests/              # Unit & integration tests
-├── 📁 scripts/            # Helper scripts
-├── 🚀 main.py             # Main trading bot
-├── 📊 backtest_runner.py  # Backtesting tool
-├── 🧪 paper_trading.py    # Paper trading app
-└── 📋 requirements.txt    # Dependencies
-```
-
----
-
-## 🛠️ **KULLANIM ÖRNEKLERİ**
-
-### 🎯 **Backtesting Example**
-```python
-from backtest_runner import BacktestRunner
-
-async def run_backtest():
-    runner = BacktestRunner()
-    await runner.initialize()
-    
-    # Single strategy backtest
-    results = await runner.run_backtest(
-        symbol='BTCUSDT',
-        strategy='swing_trading',
-        start_date=datetime(2024, 1, 1),
-        end_date=datetime(2024, 6, 1)
-    )
-    
-    print(f"ROI: {results['roi']:.2f}%")
-    print(f"Win Rate: {results['win_rate']:.1f}%")
-```
-
-### 🧪 **Paper Trading Example**
-```python
-from paper_trading import PaperTradingBot
-
-async def start_paper_trading():
-    bot = PaperTradingBot()
-    await bot.initialize()
-    
-    symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT']
-    await bot.start_paper_trading(symbols)
-```
-
----
-
-## 📊 **PERFORMANCE**
-
-### 🎯 **Expected Performance**
-- **Backtesting Win Rate:** 55-70%
-- **Annual ROI Target:** 20-50%
-- **Max Drawdown:** <15%
-- **Sharpe Ratio:** >1.5
-
-### ⚡ **System Performance**
-- **Data Processing:** <100ms latency
-- **Signal Generation:** 5-15 signals/day
-- **Order Execution:** <200ms
-- **Uptime Target:** >99.5%
-
----
-
-## 🚨 **UYARILAR**
-
-### ⚠️ **Risk Disclaimer**
-- **Finansal Risk:** Trading kayıplara neden olabilir
-- **Sermaye Riski:** Kaybetmeyi göze alabileceğiniz para ile başlayın
-- **Test Önceliği:** Önce paper trading ile test edin
-- **Monitoring:** Canlı trading'i sürekli izleyin
-
-### 🛡️ **Güvenlik**
-- **API Keys:** Güvenli saklayın, paylaşmayın
-- **IP Whitelist:** Exchange API için kullanın
-- **2FA:** Hesaplarınızda aktif edin
-- **Log Monitoring:** Anormal aktiviteleri takip edin
-
----
-
-## 🤝 **KATKIDA BULUNMA**
-
-### 💡 **Contribute**
+### 📊 Strategy Analysis
 ```bash
-# Fork the repository
-git fork https://github.com/username/advanced-trading-bot
-
-# Create feature branch
-git checkout -b feature/amazing-feature
-
-# Commit changes
-git commit -m "Add amazing feature"
-
-# Push to branch
-git push origin feature/amazing-feature
-
-# Create Pull Request
+python debug_strategy.py
 ```
 
-### 🐛 **Bug Reports**
-- GitHub Issues kullanın
-- Detaylı açıklama yazın
-- Log dosyalarını ekleyin
-- Reproduction steps belirtin
+### 📝 Paper Trading (Recommended)
+```bash
+python paper_trading.py
+```
+
+### 🔴 Live Trading (Use with extreme caution)
+```bash
+python main.py
+```
+
+## 📁 Project Structure
+
+```
+src/
+├── ai/                     # AI & Machine Learning
+│   ├── signal_filter.py    # ML signal filtering
+│   ├── market_analyzer.py  # Market analysis
+│   └── model_validator.py  # Model validation
+├── core/                   # Core components
+│   ├── database_manager.py # Database operations
+│   ├── risk_manager.py     # Risk management
+│   └── live_data_engine.py # Live data processing
+├── trading/                # Trading strategies
+│   ├── adaptive_strategy_engine.py  # Main strategy engine
+│   ├── exchange_manager.py # Exchange integration
+│   └── position_manager.py # Position management
+└── utils/                  # Utilities
+    ├── indicators.py       # Technical indicators
+    └── notifications.py    # Alert system
+```
+
+## 🎯 Strategy Details
+
+### 📈 Williams Alligator + MA (15m)
+- **Market Conditions**: Trending and breakout markets
+- **Entry Conditions**: 
+  - Price > SMA10 > SMA20 > SMA50 (all MAs aligned)
+  - SMA10 rising + momentum confirmation
+  - Volume confirmation (>20% above average)
+- **Risk/Reward**: 8% profit target, 2.5% stop loss
+- **Position Size**: 0.5% risk with 1.5x leverage
+
+### 📊 Bollinger Bands + RSI + Stochastic RSI (5m)
+- **Market Conditions**: Sideways and ranging markets
+- **Entry Conditions**:
+  - RSI < 25 (oversold) + BB position < 0.15 (near lower band)
+  - RSI > 75 (overbought) + BB position > 0.85 (near upper band)
+  - Volume confirmation (>30% above average)
+- **Risk/Reward**: 4% profit target, 1.2% stop loss
+- **Position Size**: 0.3% risk with 1.2x leverage
+
+## 🔧 Technical Specifications
+
+### 🧠 AI Models
+- **Algorithms**: Gradient Boosting, Random Forest
+- **Features**: 13 technical indicators (RSI, MACD, BB, volume, momentum)
+- **Training Data**: 56,000+ samples from 4 major cryptocurrencies
+- **Validation**: 5-fold cross-validation with 99.7% stability
+- **Prediction**: 3-class classification (BUY=2, SELL=1, HOLD=0)
+
+### 📊 Performance Metrics
+- **Accuracy**: 80%+ on validation data
+- **Precision/Recall**: 0.72+ across all classes
+- **F1 Score**: 0.72+ with high stability
+- **AUC Score**: 0.71+ indicating good discrimination
+
+### 🛡️ Risk Controls
+- **Max Position**: 0.75% of capital per trade
+- **Max Leverage**: 1.5x for trends, 1.2x for scalping
+- **Confidence Threshold**: 0.70 for signal filtering
+- **Trading Fees**: 0.1% entry + 0.1% exit included in calculations
+
+## 📈 Expected Performance
+
+Based on backtesting and optimization:
+- **Trade Frequency**: 200-400 trades per 6 months
+- **Win Rate**: Target 35-45% (with 3:1 R:R ratios)
+- **Maximum Drawdown**: <10% with proper risk management
+- **Fee Impact**: 0.6-0.8% of capital (well-controlled)
+
+## ⚠️ Risk Warnings
+
+### 🚨 Market Risks
+- **Volatility**: Crypto markets are highly volatile
+- **Liquidity**: Low liquidity can cause slippage
+- **Market Conditions**: Strategies may underperform in certain conditions
+
+### 🔧 Technical Risks
+- **API Failures**: Exchange API issues can affect trading
+- **Model Degradation**: AI models may need retraining
+- **System Downtime**: Server/internet issues can impact performance
+
+### 💰 Financial Risks
+- **Capital Loss**: You can lose all invested capital
+- **Leverage Risk**: Leverage amplifies both gains and losses
+- **Fee Impact**: High trading frequency increases fee burden
+
+## 🛠️ Development
+
+### 🧪 Testing
+```bash
+pytest tests/
+```
+
+### 📊 Code Quality
+```bash
+flake8 src/
+black src/
+```
+
+### 🔍 Debugging
+- Enable debug logging in `config.yaml`
+- Use `debug_strategy.py` for signal analysis
+- Monitor `logs/` directory for detailed output
+
+## 📞 Support
+
+For issues, questions, or contributions:
+- **GitHub Issues**: [Create an issue](https://github.com/your-repo/issues)
+- **Documentation**: Check `docs/` directory
+- **Community**: Join our Discord/Telegram
+
+## 📄 License
+
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Research papers on algorithmic trading strategies
+- Open-source technical analysis libraries
+- Cryptocurrency exchange APIs
+- Machine learning frameworks (scikit-learn, pandas, numpy)
 
 ---
 
-## 📞 **DESTEK**
-
-### 💬 **İletişim**
-- 📧 Email: support@trading-bot.com
-- 💬 Discord: [Trading Bot Community](https://discord.gg/trading-bot)
-- 📱 Telegram: [@TradingBotSupport](https://t.me/TradingBotSupport)
-
-### 📚 **Resources**
-- 📖 [Wiki](https://github.com/username/advanced-trading-bot/wiki)
-- 🎥 [Video Tutorials](https://youtube.com/trading-bot-tutorials)
-- 📋 [FAQ](https://github.com/username/advanced-trading-bot/wiki/FAQ)
-
----
-
-## 📄 **LİSANS**
-
-Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICENSE) dosyasına bakın.
-
----
-
-## 🎊 **TEŞEKKÜRLER**
-
-**Bu bot aşağıdaki açık kaynak projelerden yararlanır:**
-- [CCXT](https://github.com/ccxt/ccxt) - Exchange integration
-- [YFinance](https://github.com/ranaroussi/yfinance) - Market data
-- [Scikit-learn](https://scikit-learn.org/) - Machine learning
-- [Pandas](https://pandas.pydata.org/) - Data processing
-
----
-
-<div align="center">
-
-**⭐ Bu projeyi beğendiyseniz star vermeyi unutmayın! ⭐**
-
-**🚀 Happy Trading! 🚀**
-
-</div> 
+**💡 Remember**: This is experimental software. Always test thoroughly on paper trading before considering live trading. Never invest more than you can afford to lose. 

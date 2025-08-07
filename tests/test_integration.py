@@ -18,10 +18,11 @@ from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager
 from src.core.risk_manager import RiskManager
 from src.trading.exchange_manager import ExchangeManager
-from src.trading.strategy_engine import StrategyEngine
+
 from src.trading.position_manager import PositionManager
 from src.ai.signal_filter import AISignalFilter
 from src.ai.market_analyzer import MarketAnalyzer
+from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
 
 
 @pytest.fixture

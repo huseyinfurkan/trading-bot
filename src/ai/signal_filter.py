@@ -80,11 +80,11 @@ class AISignalFilter:
             # 4. Combine all signals
             all_signals = technical_signals + ml_signals + volume_signals
             
-            # 5. Calculate overall confidence
-            confidence = self._calculate_signal_confidence(all_signals, dataframe)
-            
-            # 6. Filter signals by confidence
+            # 5. Filter signals by confidence FIRST
             filtered_signals = [s for s in all_signals if s.get('strength', 0) > 0.5]
+            
+            # 6. Calculate overall confidence using ONLY filtered signals
+            confidence = self._calculate_signal_confidence(filtered_signals, dataframe)
             
             result = {
                 'symbol': symbol,
@@ -166,7 +166,7 @@ class AISignalFilter:
             result = {
                 'signal': signal_type,
                 'confidence': final_confidence,
-                'ml_probability': signal_prob[1],
+                'ml_probability': signal_prob[predicted_class],  # Fixed: Use actual predicted class probability
                 'regime': regime,
                 'features_used': len(features),
                 'model_used': model_key,
@@ -307,62 +307,10 @@ class AISignalFilter:
         return signals
     
     def _get_ml_signals(self, df: pd.DataFrame, symbol: str) -> List[Dict[str, Any]]:
-        """ML tabanlı sinyaller (basitleştirilmiş)"""
-        signals = []
-        
-        try:
-            # Simple ML simulation - gerçek implementation için model training gerekli
-            features = self._extract_features(df)
-            
-            if len(features) > 0:
-                # Mock ML prediction
-                import random
-                
-                # Simulate different ML model predictions
-                predictions = []
-                
-                # Random Forest simulation
-                rf_pred = random.choice(['BUY', 'SELL', 'HOLD'])
-                rf_conf = random.uniform(0.6, 0.9)
-                predictions.append((rf_pred, rf_conf, 'RandomForest'))
-                
-                # Gradient Boosting simulation  
-                gb_pred = random.choice(['BUY', 'SELL', 'HOLD'])
-                gb_conf = random.uniform(0.6, 0.9)
-                predictions.append((gb_pred, gb_conf, 'GradientBoosting'))
-                
-                # LSTM simulation
-                lstm_pred = random.choice(['BUY', 'SELL', 'HOLD'])
-                lstm_conf = random.uniform(0.5, 0.8)
-                predictions.append((lstm_pred, lstm_conf, 'LSTM'))
-                
-                # Ensemble voting
-                buy_votes = sum(1 for pred, _, _ in predictions if pred == 'BUY')
-                sell_votes = sum(1 for pred, _, _ in predictions if pred == 'SELL')
-                
-                if buy_votes > sell_votes:
-                    avg_conf = np.mean([conf for pred, conf, _ in predictions if pred == 'BUY'])
-                    signals.append({
-                        'type': 'BUY',
-                        'source': 'ML_ENSEMBLE',
-                        'strength': avg_conf,
-                        'value': df['close'].iloc[-1],
-                        'reason': f'ML Ensemble: {buy_votes}/3 models predict BUY'
-                    })
-                elif sell_votes > buy_votes:
-                    avg_conf = np.mean([conf for pred, conf, _ in predictions if pred == 'SELL'])
-                    signals.append({
-                        'type': 'SELL',
-                        'source': 'ML_ENSEMBLE',
-                        'strength': avg_conf,
-                        'value': df['close'].iloc[-1],
-                        'reason': f'ML Ensemble: {sell_votes}/3 models predict SELL'
-                    })
-                
-        except Exception as e:
-            logger.error(f"❌ ML signals error: {e}")
-        
-        return signals
+        """ML tabanlı sinyaller - DISABLED (fake random signals removed)"""
+        # DISABLED: Fake random ML signals removed for accurate backtesting
+        # Real ML signals come from trained models via filter_signal() method
+        return []
     
     def _get_volume_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Volume tabanlı sinyaller"""

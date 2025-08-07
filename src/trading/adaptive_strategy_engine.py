@@ -511,6 +511,7 @@ class AdaptiveStrategyEngine:
             position = None
             position_size = 0
             entry_price = 0
+            entry_bar = 0  # Track when position was entered
             trades = []
             equity_curve = []
             
@@ -619,6 +620,7 @@ class AdaptiveStrategyEngine:
                             position = 'SHORT'
                             
                         entry_price = current_price
+                        entry_bar = i  # Record entry bar for duration calculation
                         
                         # Apply entry fee
                         entry_fee = position_value * trading_fee
@@ -659,7 +661,7 @@ class AdaptiveStrategyEngine:
                     elif pnl_pct < -stop_loss:
                         should_exit = True
                         exit_reason = "Stop loss"
-                    elif (i - len(trades)) > params['max_hold_hours']:  # Time limit
+                    elif (i - entry_bar) > params['max_hold_hours']:  # Time limit (bars, not hours)
                         should_exit = True
                         exit_reason = "Time limit"
                 
@@ -683,7 +685,7 @@ class AdaptiveStrategyEngine:
                             'pnl': pnl,
                             'pnl_pct': pnl_pct,
                             'reason': exit_reason,
-                            'duration': i - len([t for t in trades if t['exit_price'] == 0]),
+                            'duration': i - entry_bar,  # Fixed: Actual position duration in bars
                             'exit_fee': exit_fee
                         }
                         trades.append(trade)
@@ -693,6 +695,7 @@ class AdaptiveStrategyEngine:
                         position = None
                         position_size = 0
                         entry_price = 0
+                        entry_bar = 0  # Reset entry bar
                 
                 # Track equity with correct unrealized PnL for LONG/SHORT
                 current_equity = capital

@@ -1,11 +1,13 @@
-"""Trading modules for the bot"""
+"""
+Trading module for automated cryptocurrency trading
+"""
 
+from .adaptive_strategy_engine import AdaptiveStrategyEngine
 from .exchange_manager import ExchangeManager
-from .strategy_engine import StrategyEngine
 from .position_manager import PositionManager
 
 __all__ = [
-    'ExchangeManager',
-    'StrategyEngine',
+    'AdaptiveStrategyEngine',
+    'ExchangeManager', 
     'PositionManager'
 ]

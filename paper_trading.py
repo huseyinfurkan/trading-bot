@@ -17,7 +17,7 @@ from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager
 from src.core.risk_manager import RiskManager
 from src.trading.exchange_manager import ExchangeManager
-from src.trading.strategy_engine import StrategyEngine
+from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
 from src.trading.position_manager import PositionManager
 from src.ai.signal_filter import AISignalFilter
 from src.ai.market_analyzer import MarketAnalyzer
@@ -85,11 +85,10 @@ class PaperTradingBot:
             self.confidence_calculator = ConfidenceCalculator(config['ai'], self.db_manager)
             
             # Initialize trading components
-            self.strategy_engine = StrategyEngine(
+            self.strategy_engine = AdaptiveStrategyEngine(
                 config['strategies'],
-                self.ai_signal_filter,
-                self.market_analyzer,
-                self.confidence_calculator
+                self.exchange_manager,
+                self.ai_signal_filter
             )
             
             self.position_manager = PositionManager(
