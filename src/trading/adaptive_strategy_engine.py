@@ -241,9 +241,9 @@ class AdaptiveStrategyEngine:
             
             # Route to appropriate research-backed strategy
             if recommended_strategy == 'alligator_ma_momentum':
-                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8}, current_df_slice)
+                signal = await self._alligator_ma_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.0}, current_df_slice)
             else:
-                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.8}, current_df_slice)
+                signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, ai_analysis if ai_analysis else {'confidence': 0.0}, current_df_slice)
             
             # Apply AI filter to final signal (only if AI analysis succeeded)
             if signal['action'] != 'HOLD' and ai_analysis is not None:
@@ -592,36 +592,23 @@ class AdaptiveStrategyEngine:
                     # IMPORTANT: Pass df slice to prevent API calls during backtest
                     signal = await self.get_entry_signal(symbol, market_data, regime, current_df_slice=df.iloc[:i+1])
                     
-                    # IMPROVED FALLBACK: Always ensure we have a signal, even if AI is not working
-                    if signal.get('action') == 'HOLD':
-                        # Pass current historical data slice to avoid API calls
-                        current_df_slice = df.iloc[:i+1]  # Up to current point
-                        
-                        if actual_strategy == 'alligator_ma_momentum':
-                            signal = await self._alligator_ma_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
-                        elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
-                        else:
-                            # Default to bollinger strategy
-                            signal = await self._bollinger_rsi_stochrsi_signal(symbol, market_data, {'confidence': 0.8}, current_df_slice)
-                
                     # Use combined_confidence if available, otherwise use raw confidence
                     signal_confidence = signal.get('combined_confidence', signal.get('confidence', 0.0))
                     
                     if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold:
                         # Enter position with strategy-specific sizing for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
-                            # Moderate sizing for 15m trend following (less aggressive than before)
-                            risk_per_trade = 0.02   # 2% risk (reasonable for 15m)
-                            leverage = 3.0          # Moderate leverage for trend following
+                            # Much more conservative sizing for 15m trend following
+                            risk_per_trade = 0.005  # 0.5% risk (very conservative)
+                            leverage = 1.5          # Lower leverage for trend following
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            # Conservative sizing for 5m mean reversion scalping
-                            risk_per_trade = 0.015  # 1.5% risk (conservative for fast scalping)
-                            leverage = 2.5          # Lower leverage for quick trades
+                            # Very conservative sizing for 5m mean reversion scalping
+                            risk_per_trade = 0.003  # 0.3% risk (ultra conservative for fast scalping)
+                            leverage = 1.2          # Minimal leverage for quick trades
                         else:
-                            # Default moderate sizing
-                            risk_per_trade = 0.02
-                            leverage = 3.0
+                            # Default conservative sizing
+                            risk_per_trade = 0.005
+                            leverage = 1.5
                         
                         position_value = capital * risk_per_trade * leverage
                         position_size = position_value / current_price
