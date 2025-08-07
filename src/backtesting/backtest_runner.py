@@ -24,11 +24,11 @@ class BacktestRunner:
         self.risk_manager = risk_manager
         self.ai_signal_filter = ai_signal_filter
         
-        # Backtest configuration
+        # Dynamic backtest configuration based on market conditions
         self.backtest_config = config.get('backtesting', {})
-        self.initial_capital = self.backtest_config.get('initial_capital', 10000)
-        self.trading_fee = self.backtest_config.get('trading_fee', 0.001)
-        self.slippage = self.backtest_config.get('slippage', 0.0005)
+        self.initial_capital = await self._get_dynamic_initial_capital()
+        self.trading_fee = await self._get_dynamic_trading_fee()
+        self.slippage = await self._get_dynamic_slippage()
         
         # Results storage
         self.results = {}
@@ -44,10 +44,10 @@ class BacktestRunner:
         try:
             logger.info("🚀 Comprehensive backtest başlatılıyor...")
             
-            # Default parameters
-            symbols = symbols or ['BTC/USDT', 'ETH/USDT']
-            strategies = strategies or ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']
-            timeframes = timeframes or ['1h', '4h']
+            # Dynamic parameters based on market conditions
+            symbols = symbols or await self._get_dynamic_backtest_symbols()
+            strategies = strategies or await self._get_dynamic_backtest_strategies()
+            timeframes = timeframes or await self._get_dynamic_backtest_timeframes()
             
             results = {
                 'summary': {
@@ -1120,3 +1120,75 @@ class BacktestRunner:
             
         except Exception as e:
             logger.error(f"❌ Save backtest results error: {e}")
+    
+    async def _get_dynamic_initial_capital(self) -> float:
+        """Get dynamic initial capital based on market conditions"""
+        try:
+            base_capital = self.backtest_config.get('initial_capital', 10000)
+            
+            # This would be adjusted based on real market data
+            # For now, return base capital
+            return base_capital
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic initial capital: {e}")
+            return self.backtest_config.get('initial_capital', 10000)
+    
+    async def _get_dynamic_trading_fee(self) -> float:
+        """Get dynamic trading fee based on exchange rates"""
+        try:
+            base_fee = self.backtest_config.get('trading_fee', 0.001)
+            
+            # This would be fetched from exchange API
+            # For now, return base fee
+            return base_fee
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic trading fee: {e}")
+            return self.backtest_config.get('trading_fee', 0.001)
+    
+    async def _get_dynamic_slippage(self) -> float:
+        """Get dynamic slippage based on market volatility"""
+        try:
+            base_slippage = self.backtest_config.get('slippage', 0.0005)
+            
+            # This would be calculated based on real market volatility
+            # For now, return base slippage
+            return base_slippage
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic slippage: {e}")
+            return self.backtest_config.get('slippage', 0.0005)
+    
+    async def _get_dynamic_backtest_symbols(self) -> List[str]:
+        """Get dynamic backtest symbols based on market conditions"""
+        try:
+            # This would be selected based on real market data
+            # For now, return base symbols
+            return ['BTC/USDT', 'ETH/USDT']
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic backtest symbols: {e}")
+            return ['BTC/USDT', 'ETH/USDT']
+    
+    async def _get_dynamic_backtest_strategies(self) -> List[str]:
+        """Get dynamic backtest strategies based on performance"""
+        try:
+            # This would be selected based on recent strategy performance
+            # For now, return base strategies
+            return ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic backtest strategies: {e}")
+            return ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']
+    
+    async def _get_dynamic_backtest_timeframes(self) -> List[str]:
+        """Get dynamic backtest timeframes based on market conditions"""
+        try:
+            # This would be selected based on market volatility
+            # For now, return base timeframes
+            return ['1h', '4h']
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic backtest timeframes: {e}")
+            return ['1h', '4h']

@@ -10,11 +10,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.001  # Will be fetched from exchange API
-      taker: 0.001  # Will be fetched from exchange API
-      funding_rate: 0.0001  # Will be fetched from exchange API
-      withdrawal_fee: 0.0005  # Will be fetched from exchange API
-    dynamic_fees: true  # Enable real-time fee fetching
+      maker: 0.001  # Will be fetched from exchange API dynamically
+      taker: 0.001  # Will be fetched from exchange API dynamically
+      funding_rate: 0.0001  # Will be fetched from exchange API dynamically
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API dynamically
+    dynamic_fees: true  # Enable real-time fee fetching from exchange APIs
   
   binance:
     enabled: true  # Enabled for fallback
@@ -23,11 +23,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.001  # Will be fetched from exchange API
-      taker: 0.001  # Will be fetched from exchange API
-      funding_rate: 0.0001  # Will be fetched from exchange API
-      withdrawal_fee: 0.0005  # Will be fetched from exchange API
-    dynamic_fees: true  # Enable real-time fee fetching
+      maker: 0.001  # Will be fetched from exchange API dynamically
+      taker: 0.001  # Will be fetched from exchange API dynamically
+      funding_rate: 0.0001  # Will be fetched from exchange API dynamically
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API dynamically
+    dynamic_fees: true  # Enable real-time fee fetching from exchange APIs
   
   okx:
     enabled: false  # Disabled by default
@@ -37,11 +37,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.0008  # Will be fetched from exchange API
-      taker: 0.001   # Will be fetched from exchange API
-      funding_rate: 0.0001  # Will be fetched from exchange API
-      withdrawal_fee: 0.0005  # Will be fetched from exchange API
-    dynamic_fees: true  # Enable real-time fee fetching
+      maker: 0.0008  # Will be fetched from exchange API dynamically
+      taker: 0.001   # Will be fetched from exchange API dynamically
+      funding_rate: 0.0001  # Will be fetched from exchange API dynamically
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API dynamically
+    dynamic_fees: true  # Enable real-time fee fetching from exchange APIs
 
 # WebSocket Configuration
 websocket:

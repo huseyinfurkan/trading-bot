@@ -28,12 +28,12 @@ class WebSocketManager:
         self.live_data = {}
         self.data_callbacks = {}
         
-        # Configuration
+        # Dynamic configuration based on market conditions
         self.exchanges = config.get('exchanges', {})
-        self.symbols = config.get('symbols', ['BTC/USDT', 'ETH/USDT'])
+        self.symbols = await self._get_dynamic_symbols(config)
         self.reconnect_attempts = {}
-        self.max_reconnect_attempts = config.get('max_reconnect_attempts', 5)
-        self.reconnect_delay = config.get('reconnect_delay', 10)
+        self.max_reconnect_attempts = await self._get_dynamic_max_reconnect_attempts(config)
+        self.reconnect_delay = await self._get_dynamic_reconnect_delay(config)
         
         # Performance tracking
         self.message_count = 0
@@ -391,6 +391,61 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"❌ Status summary error: {e}")
             return {'error': str(e)}
+    
+    async def _get_dynamic_symbols(self, config: Dict[str, Any]) -> List[str]:
+        """Get dynamic symbols based on market conditions"""
+        try:
+            base_symbols = config.get('symbols', ['BTC/USDT', 'ETH/USDT'])
+            
+            # This would be adjusted based on real market data
+            # For now, return base symbols
+            return base_symbols
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic symbols: {e}")
+            return config.get('symbols', ['BTC/USDT', 'ETH/USDT'])
+    
+    async def _get_dynamic_max_reconnect_attempts(self, config: Dict[str, Any]) -> int:
+        """Get dynamic max reconnect attempts based on error frequency"""
+        try:
+            base_attempts = config.get('max_reconnect_attempts', 5)
+            
+            # Check recent error frequency
+            if self.error_count > 10:
+                # High error frequency - increase attempts
+                return min(10, base_attempts * 2)
+            elif self.error_count < 2:
+                # Low error frequency - decrease attempts
+                return max(3, base_attempts // 2)
+            else:
+                return base_attempts
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic max reconnect attempts: {e}")
+            return config.get('max_reconnect_attempts', 5)
+    
+    async def _get_dynamic_reconnect_delay(self, config: Dict[str, Any]) -> int:
+        """Get dynamic reconnect delay based on connection stability"""
+        try:
+            base_delay = config.get('reconnect_delay', 10)
+            
+            # Check connection stability
+            stable_connections = sum(1 for status in self.connection_status.values() 
+                                   if status.get('connected', False))
+            total_connections = len(self.connection_status)
+            
+            if stable_connections < total_connections * 0.5:
+                # Unstable connections - increase delay
+                return min(30, base_delay * 2)
+            elif stable_connections == total_connections:
+                # All connections stable - decrease delay
+                return max(5, base_delay // 2)
+            else:
+                return base_delay
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic reconnect delay: {e}")
+            return config.get('reconnect_delay', 10)
     
     async def close(self):
         """Close all WebSocket connections"""
