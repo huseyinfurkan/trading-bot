@@ -53,7 +53,7 @@ websocket:
 
 # Trading Configuration
 trading:
-  mode: "paper"  # paper, live
+  mode: "live"  # live trading mode - real money
   symbols:
     - "BTC/USDT"
     - "ETH/USDT"

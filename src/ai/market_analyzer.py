@@ -75,9 +75,9 @@ class MarketAnalyzer:
             else:
                 overall_condition = {
                     'regime': 'unknown',
-                    'volatility': 0.5,
-                    'trend_strength': 0.5,
-                    'note': 'Insufficient data for analysis'
+                    'volatility': 0.0,  # No volatility data available
+                    'trend_strength': 0.0,  # No trend data available
+                    'note': 'Insufficient data for analysis - no trading signals'
                 }
             
             return {

@@ -947,17 +947,19 @@ class AISignalFilter:
             return 0.02
     
     def _get_default_signals(self, symbol: str) -> Dict[str, Any]:
-        """Varsayılan sinyal sonucu"""
+        """Get default signals when no real data available"""
         return {
             'symbol': symbol,
             'signals': [],
-            'confidence': 0.3,
+            'confidence': 0.0,  # No confidence when no real data
             'signal_count': 0,
             'buy_signals': 0,
             'sell_signals': 0,
             'neutral_signals': 0,
             'timestamp': datetime.now(),
-            'data_quality_score': 0.3
+            'data_quality_score': 0.0,  # No data quality when no real data
+            'action': 'HOLD',  # Default to HOLD when no real data
+            'reason': 'No real market data available'
         }
     
     async def _load_existing_models(self):

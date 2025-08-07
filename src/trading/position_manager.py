@@ -66,11 +66,14 @@ class PositionManager:
                 # Stop loss validation
                 stop_loss = action.get('stop_loss')
                 if not stop_loss or stop_loss <= 0:
-                    # Calculate default stop loss based on strategy
+                    # Calculate dynamic stop loss based on volatility and strategy
+                    volatility = await self._get_market_volatility(symbol)
+                    volatility_multiplier = max(1.5, min(3.0, volatility * 10))  # 1.5x to 3x based on volatility
+                    
                     if action['action'] == 'BUY':
-                        stop_loss = adjusted_entry_price * 0.97  # 3% stop loss for long
+                        stop_loss = adjusted_entry_price * (1 - (0.02 * volatility_multiplier))  # Dynamic stop loss for long
                     else:
-                        stop_loss = adjusted_entry_price * 1.03  # 3% stop loss for short
+                        stop_loss = adjusted_entry_price * (1 + (0.02 * volatility_multiplier))  # Dynamic stop loss for short
                 
                 # Validate stop loss direction
                 if action['action'] == 'BUY' and stop_loss >= adjusted_entry_price:
