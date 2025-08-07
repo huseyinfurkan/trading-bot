@@ -378,7 +378,7 @@ class RiskManager:
                     # Get volume from historical data
                     volume = historical_data['volume'].iloc[-1] if 'volume' in historical_data.columns else 1000000
                     
-                                # Calculate bid-ask spread estimate from high-low range
+                    # Calculate bid-ask spread estimate from high-low range
                     high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
                     bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
                     
