@@ -635,33 +635,26 @@ class RiskManager:
             return {'max_correlation': 0, 'correlated_symbol': None}
     
     async def _get_price_history(self, symbol: str, days: int = 30) -> Optional[pd.DataFrame]:
-        """Sembol için fiyat geçmişi al"""
+        """Get real price history for symbol"""
         try:
-            # Try to get from database first
+            # Try to get from exchange manager first
+            if self.exchange_manager:
+                data = await self.exchange_manager.get_historical_data(
+                    symbol=symbol,
+                    timeframe='1h',
+                    limit=days * 24  # 24 hours per day
+                )
+                
+                if data is not None and len(data) > 0:
+                    return data
+            
+            # Try to get from database as fallback
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days)
             
-            # Mock implementation - gerçekte database'den alınacak
-            dates = pd.date_range(start=start_date, end=end_date, freq='H')
-            
-            # Generate mock price data
-            import random
-            base_price = 50000 if 'BTC' in symbol else 3000
-            prices = []
-            
-            for i, date in enumerate(dates):
-                # Random walk
-                change_pct = random.uniform(-0.02, 0.02)  # ±2% change
-                if i == 0:
-                    price = base_price
-                else:
-                    price = prices[-1] * (1 + change_pct)
-                prices.append(price)
-            
-            return pd.DataFrame({
-                'timestamp': dates,
-                'close': prices
-            })
+            # If no real data available, return None instead of mock data
+            logger.warning(f"⚠️ No real price history available for {symbol}")
+            return None
             
         except Exception as e:
             logger.error(f"❌ Price history error for {symbol}: {e}")
