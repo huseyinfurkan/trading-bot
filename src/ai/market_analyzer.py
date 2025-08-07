@@ -576,28 +576,27 @@ class MarketAnalyzer:
             logger.error(f"❌ Real market data fallback error for {symbol}: {e}")
             return None
     
-    def _get_base_price_for_symbol(self, symbol: str) -> float:
-        """Get base price for symbol - used for error handling only"""
+    async def _get_base_price_for_symbol(self, symbol: str) -> float:
+        """Get real base price for symbol from exchange"""
         try:
-            # Return realistic base prices for common symbols (for error handling only)
-            base_prices = {
-                'BTC/USDT': 50000.0,
-                'ETH/USDT': 3000.0,
-                'BNB/USDT': 300.0,
-                'ADA/USDT': 0.5,
-                'SOL/USDT': 100.0,
-                'DOT/USDT': 7.0,
-                'LINK/USDT': 15.0,
-                'MATIC/USDT': 1.0,
-                'AVAX/USDT': 30.0,
-                'UNI/USDT': 8.0
-            }
+            # Try to get real current price from exchange
+            if self.exchange_manager:
+                market_data = await self.exchange_manager.get_market_data(symbol)
+                if market_data and 'current_price' in market_data:
+                    return market_data['current_price']
+                
+                # Try to get from ticker
+                ticker = await self.exchange_manager.get_ticker(symbol)
+                if ticker and 'last' in ticker:
+                    return ticker['last']
             
-            return base_prices.get(symbol, 100.0)  # Default price
+            # If no real data available, return None instead of static values
+            logger.warning(f"⚠️ No real price data available for {symbol}")
+            return None
             
         except Exception as e:
             logger.error(f"❌ Base price lookup error: {e}")
-            return 100.0
+            return None
     
     async def _fetch_symbol_data_alternative(self, symbol: str) -> Optional[pd.DataFrame]:
         """Fetch data with alternative parameters"""

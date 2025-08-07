@@ -263,8 +263,81 @@ class AdaptiveStrategyEngine:
             logger.error(f"❌ Parameter validation error for {strategy_name}: {e}")
             return params
     
-    def _get_default_params(self) -> Dict[str, Dict]:
-        """Get default strategy parameters"""
+    async def _get_dynamic_default_params(self) -> Dict[str, Dict]:
+        """Get dynamic default strategy parameters based on market conditions"""
+        try:
+            # Get current market volatility and trend
+            market_volatility = 0.5  # Default
+            market_trend = 0.5       # Default
+            
+            if self.exchange_manager:
+                # Try to get real market data for dynamic parameters
+                try:
+                    btc_data = await self.exchange_manager.get_historical_data('BTC/USDT', '1h', 100)
+                    if btc_data is not None and len(btc_data) > 20:
+                        # Calculate real market volatility
+                        returns = btc_data['close'].pct_change().dropna()
+                        market_volatility = returns.std() * np.sqrt(24)  # Annualized
+                        
+                        # Calculate real market trend
+                        sma_20 = btc_data['close'].rolling(20).mean()
+                        current_price = btc_data['close'].iloc[-1]
+                        market_trend = (current_price - sma_20.iloc[-1]) / sma_20.iloc[-1]
+                        
+                        logger.info(f"📊 Dynamic params - Volatility: {market_volatility:.4f}, Trend: {market_trend:.4f}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not calculate dynamic params: {e}")
+            
+            # Adjust parameters based on market conditions
+            volatility_multiplier = max(0.5, min(2.0, market_volatility * 10))
+            trend_multiplier = 1.0 + abs(market_trend) * 0.5
+            
+            return {
+                'alligator_ma_momentum': {
+                    'profit_target': 0.03 * trend_multiplier,
+                    'stop_loss': 0.02 * volatility_multiplier,
+                    'risk_per_trade': 0.02 * volatility_multiplier,
+                    'leverage': 1.0,
+                    'trailing_stop_enabled': True,
+                    'trailing_stop_activation': 0.01 * trend_multiplier,
+                    'trailing_stop_distance': 0.015 * volatility_multiplier,
+                    'atr_stop_multiplier': 2.0 * volatility_multiplier,
+                    'max_hold_bars': int(48 * (1 / volatility_multiplier)),
+                    'optimization_ranges': {
+                        'profit_target': [0.02 * trend_multiplier, 0.03 * trend_multiplier, 0.04 * trend_multiplier, 0.05 * trend_multiplier],
+                        'stop_loss': [0.015 * volatility_multiplier, 0.02 * volatility_multiplier, 0.025 * volatility_multiplier, 0.03 * volatility_multiplier],
+                        'risk_per_trade': [0.015 * volatility_multiplier, 0.02 * volatility_multiplier, 0.025 * volatility_multiplier],
+                        'trailing_stop_distance': [0.01 * volatility_multiplier, 0.015 * volatility_multiplier, 0.02 * volatility_multiplier],
+                        'atr_stop_multiplier': [1.5 * volatility_multiplier, 2.0 * volatility_multiplier, 2.5 * volatility_multiplier]
+                    }
+                },
+                'bollinger_rsi_stochrsi': {
+                    'profit_target': 0.025 * trend_multiplier,
+                    'stop_loss': 0.015 * volatility_multiplier,
+                    'risk_per_trade': 0.015 * volatility_multiplier,
+                    'leverage': 1.0,
+                    'trailing_stop_enabled': True,
+                    'trailing_stop_activation': 0.008 * trend_multiplier,
+                    'trailing_stop_distance': 0.012 * volatility_multiplier,
+                    'atr_stop_multiplier': 1.8 * volatility_multiplier,
+                    'max_hold_bars': int(24 * (1 / volatility_multiplier)),
+                    'optimization_ranges': {
+                        'profit_target': [0.02 * trend_multiplier, 0.025 * trend_multiplier, 0.03 * trend_multiplier, 0.035 * trend_multiplier],
+                        'stop_loss': [0.01 * volatility_multiplier, 0.015 * volatility_multiplier, 0.02 * volatility_multiplier, 0.025 * volatility_multiplier],
+                        'risk_per_trade': [0.01 * volatility_multiplier, 0.015 * volatility_multiplier, 0.02 * volatility_multiplier],
+                        'trailing_stop_distance': [0.008 * volatility_multiplier, 0.012 * volatility_multiplier, 0.016 * volatility_multiplier],
+                        'atr_stop_multiplier': [1.5 * volatility_multiplier, 1.8 * volatility_multiplier, 2.2 * volatility_multiplier]
+                    }
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic default params error: {e}")
+            # Fallback to static params if dynamic calculation fails
+            return self._get_static_default_params()
+    
+    def _get_static_default_params(self) -> Dict[str, Dict]:
+        """Get static default strategy parameters as fallback"""
         return {
             'alligator_ma_momentum': {
                 'profit_target': 0.03,

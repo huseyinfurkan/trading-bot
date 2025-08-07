@@ -144,15 +144,38 @@ class ModelTrainer:
             
             for timeframe in self.timeframes:
                 try:
-                    # Calculate limit based on timeframe
-                    if timeframe == '1h':
-                        limit = min(1000, self.lookback_days * 24)
-                    elif timeframe == '4h':
-                        limit = min(1000, self.lookback_days * 6)
-                    elif timeframe == '1d':
-                        limit = min(1000, self.lookback_days)
-                    else:
-                        limit = 1000
+                    # Calculate dynamic limit based on timeframe and exchange limits
+                    try:
+                        # Get exchange limits dynamically
+                        exchange_limits = self.bybit_exchange.rateLimit
+                        max_requests = exchange_limits.get('requests', 1000)
+                        
+                        # Calculate optimal limit based on timeframe and available data
+                        if timeframe == '1h':
+                            optimal_limit = self.lookback_days * 24
+                        elif timeframe == '4h':
+                            optimal_limit = self.lookback_days * 6
+                        elif timeframe == '1d':
+                            optimal_limit = self.lookback_days
+                        else:
+                            optimal_limit = self.lookback_days * 24
+                        
+                        # Use dynamic limit with exchange constraints
+                        limit = min(max_requests, optimal_limit, 2000)  # Max 2000 for safety
+                        
+                        logger.debug(f"📊 Dynamic limit for {timeframe}: {limit} (optimal: {optimal_limit}, max: {max_requests})")
+                        
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not get dynamic limits: {e}")
+                        # Fallback to static limits
+                        if timeframe == '1h':
+                            limit = min(1000, self.lookback_days * 24)
+                        elif timeframe == '4h':
+                            limit = min(1000, self.lookback_days * 6)
+                        elif timeframe == '1d':
+                            limit = min(1000, self.lookback_days)
+                        else:
+                            limit = 1000
                     
                     # Fetch data from Bybit
                     ohlcv = await self.bybit_exchange.fetch_ohlcv(

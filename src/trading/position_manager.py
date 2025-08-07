@@ -367,12 +367,38 @@ class PositionManager:
             elif volatility < 0.3:  # Low volatility
                 volatility_multiplier = 0.7
             
-            # Volume adjustment
+            # Volume adjustment - Dynamic thresholds based on symbol
             volume_multiplier = 1.0
-            if volume > 5000000:  # High volume
-                volume_multiplier = 0.9  # Tighter stops in high volume
-            elif volume < 100000:  # Low volume
-                volume_multiplier = 1.3  # Wider stops in low volume
+            
+            # Get dynamic volume thresholds based on symbol and market conditions
+            if self.exchange_manager:
+                try:
+                    # Get recent volume data for dynamic thresholds
+                    market_data = await self.exchange_manager.get_market_data(symbol)
+                    if market_data and 'volume' in market_data:
+                        avg_volume = market_data.get('volume_24h', 0)
+                        if avg_volume > 0:
+                            # Calculate dynamic thresholds
+                            high_volume_threshold = avg_volume * 0.1  # 10% of 24h volume
+                            low_volume_threshold = avg_volume * 0.01   # 1% of 24h volume
+                            
+                            if volume > high_volume_threshold:
+                                volume_multiplier = 0.9  # Tighter stops in high volume
+                            elif volume < low_volume_threshold:
+                                volume_multiplier = 1.3  # Wider stops in low volume
+                        else:
+                            # Fallback to static thresholds if no volume data
+                            if volume > 5000000:
+                                volume_multiplier = 0.9
+                            elif volume < 100000:
+                                volume_multiplier = 1.3
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not calculate dynamic volume thresholds: {e}")
+                    # Fallback to static thresholds
+                    if volume > 5000000:
+                        volume_multiplier = 0.9
+                    elif volume < 100000:
+                        volume_multiplier = 1.3
             
             # Trend strength adjustment
             trend_multiplier = 1.0

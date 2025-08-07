@@ -1484,10 +1484,38 @@ class AISignalFilter:
         return upper_band, lower_band
     
     async def get_signal_history(self, symbol: str, days: int = 7) -> List[Dict[str, Any]]:
-        """Sinyal geçmişi"""
+        """Get real signal history from database"""
         try:
-            # Mock implementation
-            return []
+            if not self.db_manager:
+                logger.warning("⚠️ No database manager available for signal history")
+                return []
+            
+            # Get real signal history from database
+            query = """
+                SELECT * FROM signals 
+                WHERE symbol = ? AND timestamp >= datetime('now', '-{} days')
+                ORDER BY timestamp DESC
+            """.format(days)
+            
+            async with self.db_manager.get_connection() as conn:
+                cursor = await conn.execute(query, (symbol,))
+                rows = await cursor.fetchall()
+                
+                if rows:
+                    signals = []
+                    for row in rows:
+                        signals.append({
+                            'symbol': row[0],
+                            'action': row[1],
+                            'confidence': row[2],
+                            'timestamp': row[3],
+                            'strategy': row[4] if len(row) > 4 else 'unknown'
+                        })
+                    logger.info(f"📊 Retrieved {len(signals)} real signals for {symbol}")
+                    return signals
+                else:
+                    logger.info(f"📊 No signal history found for {symbol}")
+                    return []
             
         except Exception as e:
             logger.error(f"❌ Signal history error: {e}")
