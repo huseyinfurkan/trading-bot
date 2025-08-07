@@ -20,28 +20,45 @@ class AISignalFilter:
         Args:
             ai_config: AI konfigürasyonu
             db_manager: Veritabanı yöneticisi
-            exchange_manager: Exchange manager for data fetching
+            exchange_manager: Exchange yöneticisi (opsiyonel)
         """
         self.config = ai_config
         self.db_manager = db_manager
         self.exchange_manager = exchange_manager
-        self.confidence_threshold = ai_config.get('confidence_threshold', 0.75)
-        self.retrain_frequency = ai_config.get('retrain_frequency_hours', 24)
         
         # Model storage
         self.models = {}
         self.scalers = {}
         self.feature_columns = []
         
+        # Adaptive learning parameters
+        self.adaptive_weights = {
+            'technical': 0.3,
+            'ml': 0.4,
+            'volume': 0.2,
+            'regime': 0.1
+        }
+        
+        self.adaptive_thresholds = {
+            'confidence_min': 0.6,
+            'signal_strength_min': 0.5,
+            'ml_probability_min': 0.7
+        }
+        
+        # Model versioning
+        self.model_versions = {}
+        self.current_model_version = 'v1.0'
+        self.model_performance_history = {}
+        
+        # Learning rate for adaptive adjustments
+        self.learning_rate = ai_config.get('learning_rate', 0.01)
+        self.performance_window = ai_config.get('performance_window', 100)  # trades
+        
         # Signal cache
         self.signal_cache = {}
-        self.cache_expiry = 300  # 5 minutes
+        self.cache_duration = 300  # 5 minutes
         
-        # Initialize model validator for performance monitoring
-        from .model_validator import ModelValidator
-        self.model_validator = ModelValidator()
-        
-        logger.info("🧠 AI Signal Filter initialized")
+        logger.info("🤖 AI Signal Filter initialized with adaptive learning")
     
     async def initialize(self) -> None:
         """AI bileşenlerini başlat"""
@@ -1741,3 +1758,132 @@ class AISignalFilter:
         except Exception as e:
             logger.error(f"❌ ML signal strength calculation error: {e}")
             return prediction.get('confidence', 0.5)
+    
+    async def update_adaptive_parameters(self, performance_metrics: Dict[str, Any]):
+        """Update adaptive weights and thresholds based on performance"""
+        try:
+            # Extract performance metrics
+            win_rate = performance_metrics.get('win_rate', 0.5)
+            avg_return = performance_metrics.get('avg_return', 0)
+            sharpe_ratio = performance_metrics.get('sharpe_ratio', 0)
+            
+            # Calculate performance score
+            performance_score = (win_rate * 0.4 + max(0, avg_return) * 0.3 + max(0, sharpe_ratio) * 0.3)
+            
+            # Adjust weights based on performance
+            if performance_score > 0.7:  # Good performance
+                # Increase ML weight, decrease technical
+                self.adaptive_weights['ml'] = min(0.6, self.adaptive_weights['ml'] + self.learning_rate)
+                self.adaptive_weights['technical'] = max(0.2, self.adaptive_weights['technical'] - self.learning_rate * 0.5)
+            elif performance_score < 0.3:  # Poor performance
+                # Increase technical weight, decrease ML
+                self.adaptive_weights['technical'] = min(0.5, self.adaptive_weights['technical'] + self.learning_rate)
+                self.adaptive_weights['ml'] = max(0.2, self.adaptive_weights['ml'] - self.learning_rate * 0.5)
+            
+            # Adjust thresholds based on performance
+            if win_rate < 0.4:  # Low win rate
+                # Increase confidence threshold
+                self.adaptive_thresholds['confidence_min'] = min(0.8, self.adaptive_thresholds['confidence_min'] + self.learning_rate)
+            elif win_rate > 0.6:  # High win rate
+                # Decrease confidence threshold
+                self.adaptive_thresholds['confidence_min'] = max(0.4, self.adaptive_thresholds['confidence_min'] - self.learning_rate)
+            
+            # Normalize weights
+            total_weight = sum(self.adaptive_weights.values())
+            for key in self.adaptive_weights:
+                self.adaptive_weights[key] /= total_weight
+            
+            logger.info(f"🔄 Adaptive parameters updated - Performance: {performance_score:.3f}, Weights: {self.adaptive_weights}")
+            
+        except Exception as e:
+            logger.error(f"❌ Adaptive parameters update error: {e}")
+    
+    async def save_model_version(self, model_name: str, model_data: Dict[str, Any], performance: Dict[str, Any]):
+        """Save model version with performance metrics"""
+        try:
+            version = f"v{len(self.model_versions.get(model_name, [])) + 1}.0"
+            
+            # Create version directory
+            version_dir = Path(f'models/{model_name}/{version}')
+            version_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save model files
+            import joblib
+            joblib.dump(model_data['model'], version_dir / 'model.pkl')
+            joblib.dump(model_data['scaler'], version_dir / 'scaler.pkl')
+            
+            # Save performance metrics
+            performance_file = version_dir / 'performance.json'
+            import json
+            with open(performance_file, 'w') as f:
+                json.dump(performance, f, indent=2)
+            
+            # Update version tracking
+            if model_name not in self.model_versions:
+                self.model_versions[model_name] = []
+            self.model_versions[model_name].append({
+                'version': version,
+                'created_at': datetime.now().isoformat(),
+                'performance': performance
+            })
+            
+            logger.info(f"💾 Model version saved: {model_name}/{version}")
+            
+        except Exception as e:
+            logger.error(f"❌ Model version save error: {e}")
+    
+    async def load_best_model_version(self, model_name: str) -> Optional[Dict[str, Any]]:
+        """Load the best performing model version"""
+        try:
+            if model_name not in self.model_versions:
+                return None
+            
+            # Find best performing version
+            best_version = None
+            best_score = -np.inf
+            
+            for version_info in self.model_versions[model_name]:
+                performance = version_info['performance']
+                score = self._calculate_model_score(performance)
+                
+                if score > best_score:
+                    best_score = score
+                    best_version = version_info['version']
+            
+            if best_version:
+                # Load best version
+                version_dir = Path(f'models/{model_name}/{best_version}')
+                import joblib
+                
+                model = joblib.load(version_dir / 'model.pkl')
+                scaler = joblib.load(version_dir / 'scaler.pkl')
+                
+                return {
+                    'model': model,
+                    'scaler': scaler,
+                    'version': best_version,
+                    'performance': next(v['performance'] for v in self.model_versions[model_name] if v['version'] == best_version)
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Best model version load error: {e}")
+            return None
+    
+    def _calculate_model_score(self, performance: Dict[str, Any]) -> float:
+        """Calculate model performance score"""
+        try:
+            accuracy = performance.get('accuracy', 0.5)
+            precision = performance.get('precision', 0.5)
+            recall = performance.get('recall', 0.5)
+            f1_score = performance.get('f1_score', 0.5)
+            
+            # Weighted score
+            score = (accuracy * 0.3 + precision * 0.25 + recall * 0.25 + f1_score * 0.2)
+            
+            return score
+            
+        except Exception as e:
+            logger.error(f"❌ Model score calculation error: {e}")
+            return 0.5

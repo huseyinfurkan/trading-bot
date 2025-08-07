@@ -17,17 +17,41 @@ class RiskManager:
     def __init__(self, risk_config: Dict[str, Any], db_manager):
         """
         Args:
-            risk_config: Risk yönetimi konfigürasyonu
+            risk_config: Risk konfigürasyonu
             db_manager: Veritabanı yöneticisi
         """
-        self.config = risk_config
         self.db_manager = db_manager
         
-        # Risk parametreleri
-        self.max_portfolio_risk = risk_config.get('max_portfolio_risk', 0.02)  # %2
-        self.max_daily_loss = risk_config.get('max_daily_loss', 0.05)  # %5
+        # Risk parametreleri - config'den yükleniyor
+        self.max_portfolio_risk = risk_config.get('max_portfolio_risk', 0.02)
+        self.max_position_risk = risk_config.get('max_position_risk', 0.01)
+        self.max_daily_loss = risk_config.get('max_daily_loss', 0.05)
         self.max_open_positions = risk_config.get('max_open_positions', 5)
-        self.correlation_limit = risk_config.get('correlation_limit', 0.7)
+        self.correlation_threshold = risk_config.get('correlation_threshold', 0.7)
+        self.position_sizing_method = risk_config.get('position_sizing_method', 'kelly')
+        
+        # Dinamik korelasyon eşiği - piyasa koşullarına göre ayarlanıyor
+        self.dynamic_correlation_threshold = self.correlation_threshold
+        self.correlation_adjustment_factor = risk_config.get('correlation_adjustment_factor', 0.1)
+        
+        # Borsa bazlı trading costs - config'den yükleniyor
+        self.exchange_fees = risk_config.get('exchange_fees', {
+            'binance': {'maker': 0.001, 'taker': 0.001},
+            'bybit': {'maker': 0.001, 'taker': 0.001},
+            'okx': {'maker': 0.001, 'taker': 0.001}
+        })
+        
+        self.slippage_config = risk_config.get('slippage_config', {
+            'base_slippage': 0.0005,
+            'volatility_multiplier': 2.0,
+            'volume_multiplier': 1.0
+        })
+        
+        self.funding_fee_config = risk_config.get('funding_fee_config', {
+            'base_rate': 0.0001,
+            'max_rate': 0.001,
+            'adjustment_period': 8  # hours
+        })
         
         # Position sizing parametreleri
         self.default_risk_per_trade = risk_config.get('default_risk_per_trade', 0.01)  # %1
@@ -40,10 +64,105 @@ class RiskManager:
         self.avg_win_loss_ratio = risk_config.get('avg_win_loss_ratio', 1.5)  # 1.5:1 oran
         
         # Portfolio tracking
-        self.portfolio_value = 100000.0  # Default başlangıç değeri
+        self.portfolio_value = risk_config.get('initial_portfolio_value', 10000)
+        self.daily_pnl = 0
         self.open_positions_count = 0
         
-        logger.info("⚖️ Risk Manager initialized")
+        # Performance tracking
+        self.risk_metrics = {
+            'total_trades': 0,
+            'winning_trades': 0,
+            'losing_trades': 0,
+            'max_drawdown': 0,
+            'sharpe_ratio': 0
+        }
+        
+        logger.info("🛡️ Risk Manager initialized with dynamic configuration")
+    
+    async def update_dynamic_correlation_threshold(self, market_volatility: float, market_trend: float):
+        """Update correlation threshold based on market conditions"""
+        try:
+            # Base threshold from config
+            base_threshold = self.correlation_threshold
+            
+            # Adjust based on volatility
+            volatility_adjustment = market_volatility * self.correlation_adjustment_factor
+            
+            # Adjust based on trend strength
+            trend_adjustment = (1 - market_trend) * self.correlation_adjustment_factor * 0.5
+            
+            # Calculate new threshold
+            new_threshold = base_threshold + volatility_adjustment - trend_adjustment
+            
+            # Keep within reasonable bounds
+            self.dynamic_correlation_threshold = max(0.3, min(0.9, new_threshold))
+            
+            logger.debug(f"🔄 Dynamic correlation threshold updated: {self.dynamic_correlation_threshold:.3f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic correlation threshold update error: {e}")
+    
+    async def get_exchange_specific_costs(self, exchange: str, symbol: str, order_type: str = 'market') -> Dict[str, Any]:
+        """Get exchange-specific trading costs"""
+        try:
+            # Get exchange fees
+            exchange_config = self.exchange_fees.get(exchange, self.exchange_fees['binance'])
+            trading_fee = exchange_config['taker'] if order_type == 'market' else exchange_config['maker']
+            
+            # Get market data for slippage calculation
+            market_data = await self._get_market_data_for_costs(symbol)
+            volume = market_data.get('volume', 1000000)
+            volatility = market_data.get('volatility', 0.5)
+            
+            # Calculate dynamic slippage
+            base_slippage = self.slippage_config['base_slippage']
+            volatility_mult = self.slippage_config['volatility_multiplier']
+            volume_mult = self.slippage_config['volume_multiplier']
+            
+            slippage = base_slippage * (1 + volatility * volatility_mult) * (volume_mult / max(volume / 1000000, 0.1))
+            
+            # Calculate funding fee (for perpetual futures)
+            funding_fee = self.funding_fee_config['base_rate']
+            if market_data.get('funding_rate'):
+                funding_fee = market_data['funding_rate']
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage': slippage,
+                'funding_fee': funding_fee,
+                'total_cost_pct': trading_fee + slippage + funding_fee,
+                'exchange': exchange,
+                'order_type': order_type
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange-specific costs calculation error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage': 0.0005,
+                'funding_fee': 0.0001,
+                'total_cost_pct': 0.0016,
+                'exchange': exchange,
+                'order_type': order_type
+            }
+    
+    async def _get_market_data_for_costs(self, symbol: str) -> Dict[str, Any]:
+        """Get market data for cost calculations"""
+        try:
+            # This should be implemented to get real market data
+            # For now, return default values
+            return {
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001
+            }
+        except Exception as e:
+            logger.error(f"❌ Market data for costs error: {e}")
+            return {
+                'volume': 1000000,
+                'volatility': 0.5,
+                'funding_rate': 0.0001
+            }
     
     async def calculate_position_size(self, symbol: str, entry_price: float, stop_loss: float, 
                                     confidence: float = 0.5, strategy: str = None, 
@@ -196,7 +315,7 @@ class RiskManager:
                     correlations.append(correlation)
                     
                     # If correlation is high, add to correlated exposure
-                    if correlation > self.correlation_threshold:
+                    if correlation > self.dynamic_correlation_threshold: # Use dynamic threshold
                         pos_value = position.get('size', 0) * position.get('entry_price', 0)
                         total_correlated_exposure += pos_value
             
@@ -258,25 +377,18 @@ class RiskManager:
         try:
             position_value = position_size * price
             
-            # Trading fees (typically 0.1% for spot trading)
-            trading_fee = position_value * 0.001
+            # Get exchange-specific costs
+            exchange_specific_costs = await self.get_exchange_specific_costs(symbol.split('/')[0], symbol) # Assuming symbol is like BTC/USDT
             
-            # Slippage estimation (0.05% for liquid pairs)
-            slippage = position_value * 0.0005
-            
-            # Funding fees (for perpetual futures, 0.01% per 8 hours)
-            funding_fee = position_value * 0.0001  # Simplified
-            
-            # Total costs
-            total_cost = trading_fee + slippage + funding_fee
-            total_cost_pct = total_cost / position_value
+            # Apply exchange-specific costs
+            total_cost = exchange_specific_costs['total_cost_pct'] * position_value
             
             return {
-                'trading_fee': trading_fee,
-                'slippage': slippage,
-                'funding_fee': funding_fee,
+                'trading_fee': exchange_specific_costs['trading_fee'],
+                'slippage': exchange_specific_costs['slippage'],
+                'funding_fee': exchange_specific_costs['funding_fee'],
                 'total_cost': total_cost,
-                'total_cost_pct': total_cost_pct
+                'total_cost_pct': exchange_specific_costs['total_cost_pct']
             }
             
         except Exception as e:
@@ -626,7 +738,7 @@ class RiskManager:
                 'max_daily_loss': self.max_daily_loss,
                 'max_open_positions': self.max_open_positions,
                 'current_open_positions': self.open_positions_count,
-                'correlation_limit': self.correlation_limit,
+                'correlation_limit': self.correlation_threshold, # Use correlation_threshold from config
                 'kelly_fraction': self.kelly_fraction,
                 'win_rate': self.win_rate,
                 'avg_win_loss_ratio': self.avg_win_loss_ratio,

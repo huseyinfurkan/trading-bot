@@ -365,40 +365,41 @@ class LiveDataEngine:
             return 0.5
     
     async def _perform_enhanced_live_analysis(self, symbol: str, live_data: Dict) -> Optional[Dict]:
-        """Enhanced live analysis with comprehensive market assessment"""
+        """Enhanced live analysis with macro data and liquidity indicators"""
         try:
-            # Check if live_data is None or empty
-            if live_data is None or not live_data:
-                logger.warning(f"⚠️ {symbol} live data not available")
-                return None
-                
-            dataframe = live_data.get('dataframe')
-            if dataframe is None or len(dataframe) < 50:
-                logger.warning(f"⚠️ {symbol} insufficient dataframe ({len(dataframe) if dataframe is not None else 0} candles)")
-                return None
+            # Market condition analysis
+            market_condition = await self._analyze_market_condition(symbol, live_data.get('dataframe', pd.DataFrame()))
             
-            # Prepare market data for analysis
-            market_data = {
-                'symbol': symbol,
-                'price': live_data.get('current_price', 0),
-                'bid': live_data.get('bid'),
-                'ask': live_data.get('ask'),
-                'volume': live_data.get('volume', 0),
-                'dataframe': dataframe,
-                'timestamp': live_data.get('timestamp', datetime.now())
-            }
+            # AI signal analysis
+            ai_signals = await self._analyze_ai_signals(symbol, live_data)
             
-            # Comprehensive analysis
+            # Technical analysis
+            technical_analysis = self._calculate_enhanced_technical_summary(live_data.get('dataframe', pd.DataFrame()))
+            
+            # Risk assessment
+            risk_assessment = await self._assess_enhanced_current_risk(symbol, live_data)
+            
+            # Macro data analysis
+            macro_analysis = await self._analyze_macro_conditions()
+            
+            # Liquidity analysis
+            liquidity_analysis = await self._analyze_liquidity_conditions(symbol)
+            
+            # Recommended strategy
+            recommended_strategy = await self._get_recommended_strategy(symbol, live_data)
+            
+            # Combine all analyses
             analysis_result = {
                 'symbol': symbol,
                 'timestamp': datetime.now(),
-                'market_condition': await self._analyze_market_condition(symbol, dataframe),
-                'ai_signals': await self._analyze_ai_signals(symbol, market_data),
-                'technical_analysis': self._calculate_enhanced_technical_summary(dataframe),
-                'risk_assessment': await self._assess_enhanced_current_risk(symbol, live_data),
-                'recommended_strategy': await self._get_recommended_strategy(symbol, market_data),
-                'data_quality': self._assess_data_quality(dataframe),
-                'websocket_status': self.websocket_status.get(symbol, {})
+                'market_condition': market_condition,
+                'ai_signals': ai_signals,
+                'technical_analysis': technical_analysis,
+                'risk_assessment': risk_assessment,
+                'macro_analysis': macro_analysis,
+                'liquidity_analysis': liquidity_analysis,
+                'recommended_strategy': recommended_strategy,
+                'data_quality': self._assess_data_quality(live_data.get('dataframe', pd.DataFrame()))
             }
             
             return analysis_result
@@ -614,6 +615,156 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Strategy recommendation error: {e}")
             return 'bollinger_rsi_stochrsi'
+    
+    async def _analyze_macro_conditions(self) -> Dict[str, Any]:
+        """Analyze macro market conditions"""
+        try:
+            macro_data = {}
+            
+            # Try to get macro indicators (SPY, DXY, etc.)
+            try:
+                # SPY (S&P 500) analysis
+                spy_data = await self._get_macro_data('SPY')
+                if spy_data:
+                    macro_data['spy_trend'] = self._calculate_trend_strength(spy_data)
+                    macro_data['spy_volatility'] = self._calculate_volatility(spy_data, period=20)
+                
+                # DXY (Dollar Index) analysis
+                dxy_data = await self._get_macro_data('DXY')
+                if dxy_data:
+                    macro_data['dxy_trend'] = self._calculate_trend_strength(dxy_data)
+                    macro_data['dxy_volatility'] = self._calculate_volatility(dxy_data, period=20)
+                
+                # Gold analysis
+                gold_data = await self._get_macro_data('GLD')
+                if gold_data:
+                    macro_data['gold_trend'] = self._calculate_trend_strength(gold_data)
+                    macro_data['gold_volatility'] = self._calculate_volatility(gold_data, period=20)
+                
+            except Exception as e:
+                logger.debug(f"⚠️ Macro data analysis failed: {e}")
+            
+            # Calculate macro sentiment
+            if macro_data:
+                macro_sentiment = self._calculate_macro_sentiment(macro_data)
+                macro_data['sentiment'] = macro_sentiment
+            else:
+                macro_data['sentiment'] = 'neutral'
+                macro_data['note'] = 'Macro data unavailable'
+            
+            return macro_data
+            
+        except Exception as e:
+            logger.error(f"❌ Macro conditions analysis error: {e}")
+            return {'sentiment': 'neutral', 'note': 'Analysis failed'}
+    
+    async def _get_macro_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Get macro market data"""
+        try:
+            # This should be implemented to get real macro data
+            # For now, return None to indicate unavailability
+            return None
+        except Exception as e:
+            logger.error(f"❌ Macro data retrieval error: {e}")
+            return None
+    
+    def _calculate_macro_sentiment(self, macro_data: Dict[str, Any]) -> str:
+        """Calculate macro market sentiment"""
+        try:
+            bullish_signals = 0
+            bearish_signals = 0
+            
+            # Analyze SPY trend
+            if 'spy_trend' in macro_data:
+                if macro_data['spy_trend'] > 0.7:
+                    bullish_signals += 1
+                elif macro_data['spy_trend'] < 0.3:
+                    bearish_signals += 1
+            
+            # Analyze DXY trend (inverse relationship with crypto)
+            if 'dxy_trend' in macro_data:
+                if macro_data['dxy_trend'] > 0.7:
+                    bearish_signals += 1  # Strong dollar often bearish for crypto
+                elif macro_data['dxy_trend'] < 0.3:
+                    bullish_signals += 1
+            
+            # Analyze Gold trend (safe haven)
+            if 'gold_trend' in macro_data:
+                if macro_data['gold_trend'] > 0.7:
+                    bearish_signals += 1  # Gold strength often indicates risk-off
+                elif macro_data['gold_trend'] < 0.3:
+                    bullish_signals += 1
+            
+            # Determine sentiment
+            if bullish_signals > bearish_signals:
+                return 'bullish'
+            elif bearish_signals > bullish_signals:
+                return 'bearish'
+            else:
+                return 'neutral'
+                
+        except Exception as e:
+            logger.error(f"❌ Macro sentiment calculation error: {e}")
+            return 'neutral'
+    
+    async def _analyze_liquidity_conditions(self, symbol: str) -> Dict[str, Any]:
+        """Analyze liquidity and order book conditions"""
+        try:
+            liquidity_data = {}
+            
+            # Try to get order book data
+            try:
+                order_book = await self._get_order_book_data(symbol)
+                if order_book:
+                    # Calculate bid-ask spread
+                    best_bid = order_book.get('bids', [[0, 0]])[0][0] if order_book.get('bids') else 0
+                    best_ask = order_book.get('asks', [[0, 0]])[0][0] if order_book.get('asks') else 0
+                    
+                    if best_bid > 0 and best_ask > 0:
+                        spread = (best_ask - best_bid) / best_bid
+                        liquidity_data['bid_ask_spread'] = spread
+                        
+                        # Calculate depth
+                        bid_depth = sum(bid[1] for bid in order_book.get('bids', [])[:10])
+                        ask_depth = sum(ask[1] for ask in order_book.get('asks', [])[:10])
+                        liquidity_data['bid_depth'] = bid_depth
+                        liquidity_data['ask_depth'] = ask_depth
+                        liquidity_data['total_depth'] = bid_depth + ask_depth
+                        
+                        # Determine liquidity level
+                        if spread < 0.001 and liquidity_data['total_depth'] > 1000:
+                            liquidity_data['liquidity_level'] = 'high'
+                        elif spread < 0.005 and liquidity_data['total_depth'] > 100:
+                            liquidity_data['liquidity_level'] = 'medium'
+                        else:
+                            liquidity_data['liquidity_level'] = 'low'
+                    else:
+                        liquidity_data['liquidity_level'] = 'unknown'
+                        liquidity_data['note'] = 'Invalid order book data'
+                else:
+                    liquidity_data['liquidity_level'] = 'unknown'
+                    liquidity_data['note'] = 'Order book data unavailable'
+                    
+            except Exception as e:
+                logger.debug(f"⚠️ Order book analysis failed: {e}")
+                liquidity_data['liquidity_level'] = 'unknown'
+                liquidity_data['note'] = f'Analysis failed: {str(e)}'
+            
+            return liquidity_data
+            
+        except Exception as e:
+            logger.error(f"❌ Liquidity conditions analysis error: {e}")
+            return {'liquidity_level': 'unknown', 'note': 'Analysis failed'}
+    
+    async def _get_order_book_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get order book data for liquidity analysis"""
+        try:
+            # This should be implemented to get real order book data
+            # For now, return None to indicate unavailability
+            return None
+        except Exception as e:
+            logger.error(f"❌ Order book data retrieval error: {e}")
+            return None
     
     def _assess_data_quality(self, dataframe: pd.DataFrame) -> float:
         """Assess data quality"""

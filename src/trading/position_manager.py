@@ -8,6 +8,7 @@ import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
+import numpy as np
 
 
 class PositionManager:
@@ -265,52 +266,119 @@ class PositionManager:
             return False
     
     async def update_trailing_stops(self) -> None:
-        """Trailing stop'ları güncelle"""
+        """Enhanced trailing stop management with dynamic adjustments"""
         try:
-            for position_id, position in self.open_positions.items():
-                if position_id not in self.trailing_stops:
-                    continue
-                
-                symbol = position['symbol']
-                current_price = await self._get_current_price(symbol)
-                
-                if not current_price:
-                    continue
-                
-                trailing_config = self.trailing_stops[position_id]
-                side = position['side']
-                
-                # Calculate new trailing stop
-                if side == 'BUY':
-                    # For long positions
-                    new_stop = current_price * (1 - trailing_config['distance'])
+            async with self.position_update_lock:
+                for position_id, position in self.open_positions.items():
+                    if not position.get('trailing_stop_enabled', False):
+                        continue
                     
-                    # Update if price moved favorably
-                    if new_stop > position['stop_loss']:
-                        position['stop_loss'] = new_stop
+                    try:
+                        # Get current price
+                        current_price = await self._get_current_price(position['symbol'])
+                        if not current_price:
+                            continue
                         
-                        await self.db_manager.update_position(position_id, {
-                            'stop_loss': new_stop
-                        })
+                        # Calculate dynamic trailing stop
+                        new_stop_loss = await self._calculate_dynamic_trailing_stop(
+                            position, current_price
+                        )
                         
-                        logger.debug(f"📈 {symbol} trailing stop updated: {new_stop:.4f}")
-                
-                else:  # SELL
-                    # For short positions
-                    new_stop = current_price * (1 + trailing_config['distance'])
+                        if new_stop_loss:
+                            # Update stop loss if it's better
+                            old_stop_loss = position['stop_loss']
+                            
+                            if position['side'] == 'BUY' and new_stop_loss > old_stop_loss:
+                                position['stop_loss'] = new_stop_loss
+                                await self._update_position_stop_loss(position_id, new_stop_loss)
+                                logger.info(f"🔄 {position['symbol']} trailing stop updated: {old_stop_loss:.4f} -> {new_stop_loss:.4f}")
+                            
+                            elif position['side'] == 'SELL' and new_stop_loss < old_stop_loss:
+                                position['stop_loss'] = new_stop_loss
+                                await self._update_position_stop_loss(position_id, new_stop_loss)
+                                logger.info(f"🔄 {position['symbol']} trailing stop updated: {old_stop_loss:.4f} -> {new_stop_loss:.4f}")
                     
-                    # Update if price moved favorably
-                    if new_stop < position['stop_loss']:
-                        position['stop_loss'] = new_stop
+                    except Exception as e:
+                        logger.error(f"❌ Trailing stop update error for position {position_id}: {e}")
+                        continue
                         
-                        await self.db_manager.update_position(position_id, {
-                            'stop_loss': new_stop
-                        })
-                        
-                        logger.debug(f"📉 {symbol} trailing stop updated: {new_stop:.4f}")
-                
         except Exception as e:
-            logger.error(f"❌ Trailing stop update error: {e}")
+            logger.error(f"❌ Trailing stops update error: {e}")
+    
+    async def _calculate_dynamic_trailing_stop(self, position: Dict[str, Any], current_price: float) -> Optional[float]:
+        """Calculate dynamic trailing stop based on market conditions"""
+        try:
+            entry_price = position['entry_price']
+            side = position['side']
+            trailing_distance = position.get('trailing_stop_distance', 0.02)
+            
+            # Get market volatility for dynamic adjustment
+            volatility = await self._get_market_volatility(position['symbol'])
+            
+            # Adjust trailing distance based on volatility
+            if volatility > 0.8:  # High volatility
+                adjusted_distance = trailing_distance * 1.5
+            elif volatility < 0.3:  # Low volatility
+                adjusted_distance = trailing_distance * 0.7
+            else:
+                adjusted_distance = trailing_distance
+            
+            # Calculate profit percentage
+            if side == 'BUY':
+                profit_pct = (current_price - entry_price) / entry_price
+            else:  # SELL
+                profit_pct = (entry_price - current_price) / entry_price
+            
+            # Check if trailing stop should be activated
+            activation_threshold = position.get('trailing_stop_activation', 0.01)
+            
+            if profit_pct < activation_threshold:
+                return None  # Don't activate trailing stop yet
+            
+            # Calculate new stop loss
+            if side == 'BUY':
+                new_stop_loss = current_price * (1 - adjusted_distance)
+                # Ensure stop loss is not below entry price (for long positions)
+                new_stop_loss = max(new_stop_loss, entry_price * 0.98)
+            else:  # SELL
+                new_stop_loss = current_price * (1 + adjusted_distance)
+                # Ensure stop loss is not above entry price (for short positions)
+                new_stop_loss = min(new_stop_loss, entry_price * 1.02)
+            
+            return new_stop_loss
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic trailing stop calculation error: {e}")
+            return None
+    
+    async def _get_market_volatility(self, symbol: str) -> float:
+        """Get market volatility for dynamic adjustments"""
+        try:
+            # Get recent price data
+            market_data = await self.exchange_manager.get_market_data(symbol)
+            if not market_data or 'dataframe' not in market_data:
+                return 0.5  # Default volatility
+            
+            df = market_data['dataframe']
+            if len(df) < 20:
+                return 0.5
+            
+            # Calculate volatility as standard deviation of returns
+            returns = df['close'].pct_change().dropna()
+            volatility = returns.std() * np.sqrt(24)  # Annualized from hourly data
+            
+            return min(volatility, 1.0)  # Cap at 1.0
+            
+        except Exception as e:
+            logger.error(f"❌ Market volatility calculation error: {e}")
+            return 0.5
+    
+    async def _update_position_stop_loss(self, position_id: int, new_stop_loss: float):
+        """Update stop loss in database"""
+        try:
+            await self.db_manager.update_position_stop_loss(position_id, new_stop_loss)
+        except Exception as e:
+            logger.error(f"❌ Database stop loss update error: {e}")
     
     async def enable_trailing_stop(self, position_id: int, trailing_distance: float = 0.02) -> bool:
         """Pozisyon için trailing stop'u aktifleştir"""
@@ -599,3 +667,83 @@ class PositionManager:
                 'total_cost_pct': 0.0016,
                 'volume_multiplier': 1.0
             }
+    
+    async def place_order(self, symbol: str, side: str, size: float, order_type: str = 'MARKET',
+                         price: float = None, stop_price: float = None, time_in_force: str = 'GTC') -> Optional[Dict]:
+        """Place order with different order types"""
+        try:
+            # Validate order parameters
+            if order_type not in ['MARKET', 'LIMIT', 'STOP_LIMIT', 'STOP_MARKET']:
+                logger.error(f"❌ Unsupported order type: {order_type}")
+                return None
+            
+            # Validate price requirements
+            if order_type in ['LIMIT', 'STOP_LIMIT'] and price is None:
+                logger.error(f"❌ Price required for {order_type} order")
+                return None
+            
+            if order_type in ['STOP_LIMIT', 'STOP_MARKET'] and stop_price is None:
+                logger.error(f"❌ Stop price required for {order_type} order")
+                return None
+            
+            # Get current market price for reference
+            current_price = await self._get_current_price(symbol)
+            if not current_price:
+                logger.error(f"❌ Could not get current price for {symbol}")
+                return None
+            
+            # Calculate order parameters
+            order_params = {
+                'symbol': symbol,
+                'side': side,
+                'type': order_type,
+                'amount': size,
+                'timeInForce': time_in_force
+            }
+            
+            # Add price parameters based on order type
+            if order_type == 'LIMIT':
+                order_params['price'] = price
+            elif order_type == 'STOP_LIMIT':
+                order_params['price'] = price
+                order_params['stopPrice'] = stop_price
+            elif order_type == 'STOP_MARKET':
+                order_params['stopPrice'] = stop_price
+            
+            # Place order through exchange
+            order_result = await self.exchange_manager.place_order(order_params)
+            
+            if order_result:
+                logger.info(f"✅ {order_type} order placed for {symbol}: {side} {size}")
+                return order_result
+            else:
+                logger.error(f"❌ Failed to place {order_type} order for {symbol}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Order placement error: {e}")
+            return None
+    
+    async def cancel_order(self, order_id: str, symbol: str) -> bool:
+        """Cancel existing order"""
+        try:
+            result = await self.exchange_manager.cancel_order(order_id, symbol)
+            
+            if result:
+                logger.info(f"✅ Order {order_id} cancelled for {symbol}")
+                return True
+            else:
+                logger.error(f"❌ Failed to cancel order {order_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Order cancellation error: {e}")
+            return False
+    
+    async def get_order_status(self, order_id: str, symbol: str) -> Optional[Dict]:
+        """Get order status"""
+        try:
+            return await self.exchange_manager.get_order_status(order_id, symbol)
+        except Exception as e:
+            logger.error(f"❌ Order status check error: {e}")
+            return None

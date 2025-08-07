@@ -41,84 +41,61 @@ class MarketAnalyzer:
         
         logger.info("📊 Market Analyzer initialized")
     
-    async def analyze_current_market(self) -> str:
-        """
-        ENHANCED REAL MARKET ANALYSIS
-        Instead of fake analysis, perform comprehensive market assessment
-        """
+    async def analyze_current_market(self) -> Dict[str, Any]:
+        """Analyze current market conditions with enhanced error handling"""
         try:
-            logger.info("📊 Comprehensive market regime analysis başlatılıyor...")
+            # Define symbols to analyze
+            symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
             
-            # Get market data for multiple symbols
-            symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT']
-            market_data = {}
+            market_conditions = {}
+            successful_analyses = 0
             
             for symbol in symbols:
                 try:
-                    # Get 1h data for trend analysis
-                    now = datetime.now()
-                    data_1h = await self.exchange_manager.get_historical_data(
-                        symbol=symbol,
-                        timeframe='1h',
-                        start_date=now - timedelta(days=3),
-                        end_date=now
-                    )
+                    # Get market data with retry mechanism
+                    market_data = await self._fetch_market_data_with_retry(symbol)
                     
-                    # Get 15m data for short-term analysis  
-                    data_15m = await self.exchange_manager.get_historical_data(
-                        symbol=symbol,
-                        timeframe='15m',
-                        start_date=now - timedelta(days=1),
-                        end_date=now
-                    )
-                    
-                    if data_1h is not None and len(data_1h) > 20 and data_15m is not None and len(data_15m) > 50:
-                        market_data[symbol] = {
-                            'data_1h': data_1h,
-                            'data_15m': data_15m
-                        }
+                    if market_data is not None:
+                        # Analyze individual symbol
+                        symbol_condition = await self._analyze_symbol_condition(symbol, market_data)
+                        market_conditions[symbol] = symbol_condition
+                        successful_analyses += 1
+                    else:
+                        logger.warning(f"⚠️ Failed to get market data for {symbol}")
+                        market_conditions[symbol] = {'status': 'failed', 'note': 'Data unavailable'}
                         
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not get data for {symbol}: {e}")
-                    continue
+                    logger.error(f"❌ Market analysis error for {symbol}: {e}")
+                    market_conditions[symbol] = {'status': 'error', 'note': str(e)}
             
-            if not market_data:
-                logger.warning("⚠️ No market data available, defaulting to sideways")
-                return 'sideways_market'
+            # Calculate overall market condition
+            if successful_analyses > 0:
+                overall_condition = self._calculate_overall_market_condition(market_conditions)
+            else:
+                overall_condition = {
+                    'regime': 'unknown',
+                    'volatility': 0.5,
+                    'trend_strength': 0.5,
+                    'note': 'Insufficient data for analysis'
+                }
             
-            # Analyze multiple market characteristics
-            market_metrics = []
-            
-            for symbol, data in market_data.items():
-                metrics = await self._analyze_symbol_regime(symbol, data['data_1h'], data['data_15m'])
-                market_metrics.append(metrics)
-                
-                logger.info(f"📈 {symbol} Analysis:")
-                logger.info(f"   💨 Volatility: {metrics['volatility']:.1%} ({metrics['volatility_regime']})")
-                logger.info(f"   📊 Trend: {metrics['trend_strength']:.1%} ({metrics['trend_direction']})")
-                logger.info(f"   📉 Range: {metrics['range_pct']:.1%} ({metrics['range_regime']})")
-                logger.info(f"   🔄 Regime: {metrics['local_regime']}")
-            
-            # Aggregate market analysis
-            avg_volatility = np.mean([m['volatility'] for m in market_metrics])
-            avg_trend_strength = np.mean([abs(m['trend_strength']) for m in market_metrics])
-            avg_range = np.mean([m['range_pct'] for m in market_metrics])
-            
-            # Determine overall market regime
-            market_regime = self._determine_market_regime(avg_volatility, avg_trend_strength, avg_range, market_metrics)
-            
-            logger.info(f"🌍 OVERALL MARKET ANALYSIS:")
-            logger.info(f"   📊 Average Volatility: {avg_volatility:.1%}")
-            logger.info(f"   📈 Average Trend Strength: {avg_trend_strength:.1%}")
-            logger.info(f"   📉 Average Range: {avg_range:.1%}")
-            logger.info(f"   🎯 Market Regime: {market_regime}")
-            
-            logger.success(f"✅ Market analizi tamamlandı: {market_regime}")
-            return market_regime
+            return {
+                'overall_condition': overall_condition,
+                'symbol_conditions': market_conditions,
+                'successful_analyses': successful_analyses,
+                'total_symbols': len(symbols),
+                'timestamp': datetime.now().isoformat()
+            }
             
         except Exception as e:
             logger.error(f"❌ Market analysis error: {e}")
-            return 'sideways_market'
+            return {
+                'overall_condition': {'regime': 'unknown', 'note': 'Analysis failed'},
+                'symbol_conditions': {},
+                'successful_analyses': 0,
+                'total_symbols': 0,
+                'timestamp': datetime.now().isoformat()
+            }
     
     async def analyze_market_condition(self, symbol: str) -> Dict[str, Any]:
         """Belirli bir sembol için market koşulunu analiz et"""
@@ -244,7 +221,7 @@ class MarketAnalyzer:
             logger.error(f"❌ Real market data fetch error: {e}")
             return None
     
-    async def _fetch_symbol_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_symbol_data(self, symbol: str) -> Optional[pd.DataFrame]:
         """Belirli bir sembol için veri al - CCXT Implementation"""
         try:
             # Get historical data from exchange (CCXT)
@@ -446,247 +423,170 @@ class MarketAnalyzer:
             logger.error(f"❌ Comprehensive analysis error: {e}")
             return self._get_default_analysis()
     
-    async def _analyze_symbol_condition(self, symbol: str, symbol_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Tek sembol için detaylı analiz"""
-        try:
-            current_price = symbol_data.get('current_price', 0)
-            ma_24 = symbol_data.get('ma_24', current_price)
-            ma_168 = symbol_data.get('ma_168', current_price)
-            rsi = symbol_data.get('rsi', 50)
-            volatility = symbol_data.get('volatility', 0.5)
-            
-            # Trend determination
-            if current_price > ma_24 > ma_168:
-                trend = 'bull_market'
-                strength = 0.7
-            elif current_price < ma_24 < ma_168:
-                trend = 'bear_market'
-                strength = 0.7
-            else:
-                trend = 'sideways_market'
-                strength = 0.5
-            
-            # Volatility classification
-            if volatility > 1.0:
-                vol_level = 'high'
-            elif volatility < 0.3:
-                vol_level = 'low'
-            else:
-                vol_level = 'normal'
-            
-            # Strategy suggestions
-            if trend == 'bull_market' and vol_level == 'low':
-                strategies = ['trend_following', 'swing_trading']
-            elif trend == 'bull_market' and vol_level == 'high':
-                strategies = ['scalping']
-            elif trend == 'bear_market':
-                strategies = ['mean_reversion']
-            else:
-                strategies = ['swing_trading']
-            
-            # Confidence based on data quality
-            confidence = 0.8 if symbol_data.get('dataframe') is not None else 0.6
-            
-            return {
-                'trend': trend,
-                'strength': strength,
-                'volatility': vol_level,
-                'rsi': rsi,
-                'strategies': strategies,
-                'confidence': confidence
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Symbol condition analysis error: {e}")
-            return {
-                'trend': 'sideways_market',
-                'strength': 0.5,
-                'volatility': 'normal',
-                'strategies': ['swing_trading'],
-                'confidence': 0.3
-            }
-    
-    def _is_cache_valid(self) -> bool:
-        """Cache geçerliliğini kontrol et"""
-        if self.last_update is None:
-            return False
-        
-        elapsed = (datetime.now() - self.last_update).total_seconds()
-        return elapsed < self.cache_duration
-    
-    def _get_default_analysis(self) -> Dict[str, Any]:
-        """Varsayılan analiz sonucu"""
-        return {
-            'condition': 'sideways_market',
-            'strength': 0.5,
-            'volatility': 'normal',
-            'bullish_ratio': 0.5,
-            'bearish_ratio': 0.5,
-            'recommended_strategies': ['swing_trading'],
-            'confidence': 0.3,
-            'timestamp': datetime.now()
-        }
-    
-    async def get_fear_greed_index(self) -> int:
-        """Fear & Greed Index'i al (basitleştirilmiş)"""
-        try:
-            # Bu gerçek bir API entegrasyonu olabilir
-            # Şimdilik RSI bazlı basit hesaplama
-            market_data = await self._fetch_real_market_data()
-            
-            if not market_data:
-                return 50  # Neutral
-            
-            # Average RSI from major cryptocurrencies
-            rsi_values = []
-            for symbol, data in market_data.items():
-                if symbol != 'market_summary' and 'rsi' in data:
-                    rsi_values.append(data['rsi'])
-            
-            if not rsi_values:
-                return 50
-            
-            avg_rsi = np.mean(rsi_values)
-            
-            # Convert RSI to Fear & Greed scale (0-100)
-            # RSI 30 = Fear (25), RSI 70 = Greed (75)
-            if avg_rsi <= 30:
-                return 25  # Extreme Fear
-            elif avg_rsi <= 45:
-                return 40  # Fear
-            elif avg_rsi <= 55:
-                return 50  # Neutral
-            elif avg_rsi <= 70:
-                return 65  # Greed
-            else:
-                return 80  # Extreme Greed
+    async def _fetch_market_data_with_retry(self, symbol: str, max_retries: int = 3) -> Optional[pd.DataFrame]:
+        """Fetch market data with retry mechanism and fallback"""
+        for attempt in range(max_retries):
+            try:
+                # Try primary data source
+                data = await self._fetch_symbol_data(symbol)
+                if data is not None and len(data) > 0:
+                    return data
                 
-        except Exception as e:
-            logger.error(f"❌ Fear & Greed index error: {e}")
-            return 50
+                # If primary fails, try alternative timeframe
+                logger.debug(f"⚠️ Primary data source failed for {symbol}, trying alternative...")
+                data = await self._fetch_symbol_data_alternative(symbol)
+                if data is not None and len(data) > 0:
+                    return data
+                
+                # If still fails, try cached data
+                logger.debug(f"⚠️ Alternative data source failed for {symbol}, trying cached data...")
+                cached_data = await self._get_cached_market_data(symbol)
+                if cached_data is not None and len(cached_data) > 0:
+                    return cached_data
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Attempt {attempt + 1} failed for {symbol}: {e}")
+                
+                if attempt < max_retries - 1:
+                    # Wait before retry with exponential backoff
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ All retry attempts failed for {symbol}")
+        
+        return None
     
-    async def get_market_dominance(self) -> Dict[str, float]:
-        """Market dominance hesapla"""
+    async def _fetch_symbol_data_alternative(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Fetch data with alternative parameters"""
         try:
-            market_data = await self._fetch_real_market_data()
+            # Try different timeframes
+            timeframes = ['4h', '2h', '30m']
             
-            if not market_data:
-                return {'BTC': 45.0, 'ETH': 20.0, 'Others': 35.0}
+            for timeframe in timeframes:
+                try:
+                    data = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        limit=100
+                    )
+                    
+                    if data is not None and len(data) > 50:
+                        logger.debug(f"✅ Alternative data fetched for {symbol} using {timeframe}")
+                        return data
+                        
+                except Exception as e:
+                    logger.debug(f"⚠️ Alternative timeframe {timeframe} failed for {symbol}: {e}")
+                    continue
             
-            total_cap = 0
-            individual_caps = {}
-            
-            for symbol, data in market_data.items():
-                if symbol != 'market_summary':
-                    market_cap = data.get('market_cap', 0)
-                    if market_cap > 0:
-                        individual_caps[symbol] = market_cap
-                        total_cap += market_cap
-            
-            if total_cap == 0:
-                return {'BTC': 45.0, 'ETH': 20.0, 'Others': 35.0}
-            
-            # Calculate dominance percentages
-            dominance = {}
-            for symbol, cap in individual_caps.items():
-                dominance[symbol] = (cap / total_cap) * 100
-            
-            return dominance
+            return None
             
         except Exception as e:
-            logger.error(f"❌ Market dominance error: {e}")
-            return {'BTC': 45.0, 'ETH': 20.0, 'Others': 35.0}
-
-    async def _analyze_symbol_regime(self, symbol: str, data_1h: pd.DataFrame, data_15m: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze individual symbol for market regime characteristics"""
+            logger.error(f"❌ Alternative data fetch error for {symbol}: {e}")
+            return None
+    
+    async def _get_cached_market_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Get cached market data from database"""
         try:
-            # Calculate volatility (15m data for precision)
-            returns_15m = data_15m['close'].pct_change().dropna()
-            volatility = returns_15m.std() * np.sqrt(96)  # Annualized from 15m
+            # This should be implemented to get cached data from database
+            # For now, return None
+            return None
+        except Exception as e:
+            logger.error(f"❌ Cached data retrieval error for {symbol}: {e}")
+            return None
+    
+    async def _analyze_symbol_condition(self, symbol: str, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze individual symbol condition with error handling"""
+        try:
+            if market_data is None or len(market_data) < 20:
+                return {'status': 'insufficient_data', 'note': 'Not enough data points'}
             
-            # Calculate trend strength (1h data for stability)
-            closes_1h = data_1h['close'].values
-            sma_20 = pd.Series(closes_1h).rolling(20).mean().iloc[-1]
-            current_price = closes_1h[-1]
-            trend_strength = (current_price - sma_20) / sma_20
+            # Calculate basic metrics
+            volatility = self._calculate_volatility(market_data)
+            trend_strength = self._calculate_trend_strength(market_data)
+            volume_analysis = self._analyze_volume_patterns(market_data)
             
-            # Calculate recent range
-            recent_high = data_1h['high'].tail(24).max()  # Last 24 hours
-            recent_low = data_1h['low'].tail(24).min()
-            range_pct = (recent_high - recent_low) / current_price
-            
-            # Calculate momentum
-            momentum_3h = (closes_1h[-1] - closes_1h[-4]) / closes_1h[-4] if len(closes_1h) >= 4 else 0
-            momentum_12h = (closes_1h[-1] - closes_1h[-13]) / closes_1h[-13] if len(closes_1h) >= 13 else 0
-            
-            # Volume analysis
-            volume_avg = data_1h['volume'].tail(24).mean()
-            volume_current = data_1h['volume'].iloc[-1]
-            volume_ratio = volume_current / volume_avg if volume_avg > 0 else 1
-            
-            # Classify regimes
-            if volatility > 0.04:  # >4% daily volatility
-                volatility_regime = "high"
-            elif volatility > 0.02:  # >2% daily volatility
-                volatility_regime = "medium"
-            else:
-                volatility_regime = "low"
-            
-            if abs(trend_strength) > 0.05:  # >5% from MA
-                trend_direction = "bullish" if trend_strength > 0 else "bearish"
-            elif abs(trend_strength) > 0.02:  # >2% from MA
-                trend_direction = "weak_bullish" if trend_strength > 0 else "weak_bearish"
-            else:
-                trend_direction = "neutral"
-            
-            if range_pct > 0.08:  # >8% range
-                range_regime = "wide"
-            elif range_pct > 0.04:  # >4% range
-                range_regime = "normal"
-            else:
-                range_regime = "tight"
-            
-            # Determine local regime
-            if volatility_regime == "high" and abs(trend_strength) > 0.03:
-                local_regime = "breakout_trending"
-            elif volatility_regime == "high" and range_regime == "wide":
-                local_regime = "high_volatility_ranging"
-            elif volatility_regime == "low" and range_regime == "tight":
-                local_regime = "low_volatility_consolidation"
-            elif abs(trend_strength) > 0.05:
-                local_regime = "trending"
-            elif range_regime == "wide":
-                local_regime = "ranging"
-            else:
-                local_regime = "sideways"
+            # Determine market regime
+            regime = self._determine_market_regime(volatility, trend_strength, volume_analysis)
             
             return {
+                'status': 'success',
+                'regime': regime,
                 'volatility': volatility,
-                'volatility_regime': volatility_regime,
                 'trend_strength': trend_strength,
-                'trend_direction': trend_direction,
-                'range_pct': range_pct,
-                'range_regime': range_regime,
-                'momentum_3h': momentum_3h,
-                'momentum_12h': momentum_12h,
-                'volume_ratio': volume_ratio,
-                'local_regime': local_regime
+                'volume_analysis': volume_analysis,
+                'current_price': market_data['close'].iloc[-1] if len(market_data) > 0 else 0,
+                'price_change_24h': self._calculate_price_change(market_data),
+                'volume_change_24h': self._calculate_volume_change(market_data)
             }
             
         except Exception as e:
-            logger.error(f"❌ Symbol analysis error for {symbol}: {e}")
+            logger.error(f"❌ Symbol condition analysis error for {symbol}: {e}")
+            return {'status': 'error', 'note': str(e)}
+    
+    def _calculate_price_change(self, market_data: pd.DataFrame) -> float:
+        """Calculate 24-hour price change"""
+        try:
+            if len(market_data) < 24:
+                return 0.0
+            
+            current_price = market_data['close'].iloc[-1]
+            price_24h_ago = market_data['close'].iloc[-24]
+            
+            return ((current_price - price_24h_ago) / price_24h_ago) * 100
+            
+        except Exception as e:
+            logger.error(f"❌ Price change calculation error: {e}")
+            return 0.0
+    
+    def _calculate_volume_change(self, market_data: pd.DataFrame) -> float:
+        """Calculate 24-hour volume change"""
+        try:
+            if len(market_data) < 24:
+                return 0.0
+            
+            current_volume = market_data['volume'].iloc[-1]
+            volume_24h_ago = market_data['volume'].iloc[-24]
+            
+            if volume_24h_ago == 0:
+                return 0.0
+            
+            return ((current_volume - volume_24h_ago) / volume_24h_ago) * 100
+            
+        except Exception as e:
+            logger.error(f"❌ Volume change calculation error: {e}")
+            return 0.0
+    
+    def _analyze_volume_patterns(self, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze volume patterns"""
+        try:
+            if len(market_data) < 20:
+                return {'volume_trend': 'unknown', 'volume_ratio': 1.0}
+            
+            # Calculate volume moving average
+            volume_ma = market_data['volume'].rolling(window=20).mean()
+            current_volume = market_data['volume'].iloc[-1]
+            avg_volume = volume_ma.iloc[-1]
+            
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            
+            # Determine volume trend
+            if volume_ratio > 1.5:
+                volume_trend = 'high'
+            elif volume_ratio < 0.5:
+                volume_trend = 'low'
+            else:
+                volume_trend = 'normal'
+            
             return {
-                'volatility': 0.02,
-                'volatility_regime': 'medium',
-                'trend_strength': 0.0,
-                'trend_direction': 'neutral',
-                'range_pct': 0.05,
-                'range_regime': 'normal',
-                'momentum_3h': 0.0,
-                'momentum_12h': 0.0,
-                'volume_ratio': 1.0,
-                'local_regime': 'sideways'
+                'volume_trend': volume_trend,
+                'volume_ratio': volume_ratio,
+                'current_volume': current_volume,
+                'avg_volume': avg_volume
             }
+            
+        except Exception as e:
+            logger.error(f"❌ Volume pattern analysis error: {e}")
+            return {'volume_trend': 'unknown', 'volume_ratio': 1.0}
     
     def _determine_market_regime(self, avg_volatility: float, avg_trend_strength: float, 
                                avg_range: float, individual_metrics: List[Dict]) -> str:

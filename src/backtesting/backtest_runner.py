@@ -133,16 +133,15 @@ class BacktestRunner:
     async def run_single_backtest(self, symbol: str, strategy: str, 
                                 historical_data: pd.DataFrame, timeframe: str = '1h',
                                 custom_params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Run single backtest for specific strategy and symbol"""
+        """Enhanced single backtest with comprehensive trading costs"""
         try:
-            logger.info(f"📊 Running backtest: {strategy} on {symbol}")
+            logger.info(f"📊 Running enhanced backtest: {strategy} on {symbol}")
             
-            # Prepare data
             if len(historical_data) < 100:
                 logger.warning(f"⚠️ Insufficient data for {symbol}")
                 return None
             
-            # Add indicators
+            # Add indicators to data
             data_with_indicators = await self.strategy_engine._add_indicators(historical_data.copy())
             
             # Initialize backtest variables
@@ -151,43 +150,47 @@ class BacktestRunner:
             trades = []
             equity_curve = []
             
-            # Strategy parameters
+            # Get strategy parameters
             strategy_params = self.strategy_engine.adaptive_params[strategy].copy()
             if custom_params:
                 strategy_params.update(custom_params)
             
-            # Run backtest
+            # Trading costs configuration
+            trading_costs = await self._get_trading_costs_config(symbol)
+            
+            # Market conditions tracking
+            market_conditions = []
+            
             for i in range(len(data_with_indicators)):
                 current_data = data_with_indicators.iloc[:i+1]
                 current_price = current_data['close'].iloc[-1]
                 current_time = current_data.index[-1]
                 
-                # Update equity curve
+                # Track equity
                 equity_curve.append({
                     'timestamp': current_time,
                     'equity': capital,
                     'price': current_price
                 })
                 
-                # Check for exit signals if position exists
+                # Update market conditions
+                market_condition = self._analyze_market_condition_at_time(current_data)
+                market_conditions.append(market_condition)
+                
+                # Check for exit signal if position exists
                 if position:
-                    exit_signal = await self._check_exit_signal(
-                        position, current_data, strategy_params
-                    )
+                    exit_signal = await self._check_exit_signal(position, current_data, strategy_params)
                     
                     if exit_signal['should_exit']:
-                        # Close position
-                        exit_price = current_price * (1 + self.slippage) if position['side'] == 'BUY' else current_price * (1 - self.slippage)
+                        # Calculate exit price with slippage
+                        exit_price = await self._calculate_exit_price(
+                            current_price, position['side'], trading_costs, market_condition
+                        )
                         
-                        # Calculate PnL
-                        if position['side'] == 'BUY':
-                            pnl = (exit_price - position['entry_price']) * position['size']
-                        else:
-                            pnl = (position['entry_price'] - exit_price) * position['size']
-                        
-                        # Apply trading fees
-                        exit_fee = exit_price * position['size'] * self.trading_fee
-                        pnl -= exit_fee
+                        # Calculate PnL with all costs
+                        pnl = await self._calculate_pnl_with_costs(
+                            position, exit_price, trading_costs, market_condition
+                        )
                         
                         # Update capital
                         capital += pnl
@@ -202,38 +205,45 @@ class BacktestRunner:
                             'side': position['side'],
                             'pnl': pnl,
                             'return_pct': pnl / (position['entry_price'] * position['size']),
-                            'duration': (current_time - position['entry_time']).total_seconds() / 3600,  # hours
-                            'exit_reason': exit_signal['reason']
+                            'duration': (current_time - position['entry_time']).total_seconds() / 3600,
+                            'exit_reason': exit_signal['reason'],
+                            'trading_costs': position.get('trading_costs', {}),
+                            'market_condition': market_condition
                         }
                         trades.append(trade)
-                        
                         position = None
                 
-                # Check for entry signals if no position
+                # Check for entry signal if no position
                 if not position:
-                    entry_signal = await self._check_entry_signal(
-                        current_data, strategy, strategy_params
-                    )
+                    entry_signal = await self._check_entry_signal(current_data, strategy, strategy_params)
                     
                     if entry_signal['should_enter']:
-                        # Calculate position size
-                        risk_amount = capital * strategy_params.get('risk_per_trade', 0.02)
-                        stop_loss = entry_signal['stop_loss']
-                        position_size = risk_amount / abs(current_price - stop_loss)
+                        # Calculate entry price with slippage
+                        entry_price = await self._calculate_entry_price(
+                            current_price, entry_signal['side'], trading_costs, market_condition
+                        )
                         
-                        # Apply trading fees
-                        entry_fee = current_price * position_size * self.trading_fee
-                        position_size = (risk_amount - entry_fee) / abs(current_price - stop_loss)
+                        # Calculate position size with risk management
+                        position_size = await self._calculate_position_size_with_costs(
+                            entry_price, entry_signal['stop_loss'], capital, strategy_params, trading_costs
+                        )
                         
-                        # Open position
-                        position = {
-                            'entry_time': current_time,
-                            'entry_price': current_price,
-                            'size': position_size,
-                            'side': entry_signal['side'],
-                            'stop_loss': stop_loss,
-                            'take_profit': entry_signal['take_profit']
-                        }
+                        if position_size > 0:
+                            # Calculate trading costs for this position
+                            position_trading_costs = await self._calculate_position_trading_costs(
+                                entry_price, position_size, trading_costs, market_condition
+                            )
+                            
+                            position = {
+                                'entry_time': current_time,
+                                'entry_price': entry_price,
+                                'size': position_size,
+                                'side': entry_signal['side'],
+                                'stop_loss': entry_signal['stop_loss'],
+                                'take_profit': entry_signal['take_profit'],
+                                'trading_costs': position_trading_costs,
+                                'market_condition': market_condition
+                            }
             
             # Calculate performance metrics
             performance_metrics = self._calculate_performance_metrics(trades, equity_curve)
@@ -248,11 +258,13 @@ class BacktestRunner:
                 'trades': trades,
                 'equity_curve': equity_curve,
                 'performance_metrics': performance_metrics,
-                'custom_params': custom_params
+                'custom_params': custom_params,
+                'trading_costs_summary': await self._calculate_trading_costs_summary(trades),
+                'market_conditions_summary': self._calculate_market_conditions_summary(market_conditions)
             }
             
         except Exception as e:
-            logger.error(f"❌ Single backtest error: {e}")
+            logger.error(f"❌ Enhanced single backtest error: {e}")
             return None
     
     async def _check_entry_signal(self, data: pd.DataFrame, strategy: str, 
@@ -674,6 +686,270 @@ class BacktestRunner:
         except Exception as e:
             logger.error(f"❌ Market condition analysis error: {e}")
             return 0.5
+    
+    async def _get_trading_costs_config(self, symbol: str) -> Dict[str, Any]:
+        """Get trading costs configuration for symbol"""
+        try:
+            # This should be implemented to get real exchange-specific costs
+            # For now, return default configuration
+            return {
+                'trading_fee': 0.001,  # 0.1%
+                'slippage_base': 0.0005,  # 0.05%
+                'slippage_volatility_multiplier': 2.0,
+                'funding_fee': 0.0001,  # 0.01% per 8 hours
+                'minimum_order_size': 10,  # $10
+                'price_precision': 4,
+                'amount_precision': 6
+            }
+        except Exception as e:
+            logger.error(f"❌ Trading costs config error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage_base': 0.0005,
+                'slippage_volatility_multiplier': 2.0,
+                'funding_fee': 0.0001,
+                'minimum_order_size': 10,
+                'price_precision': 4,
+                'amount_precision': 6
+            }
+    
+    async def _calculate_entry_price(self, current_price: float, side: str, 
+                                   trading_costs: Dict, market_condition: Dict) -> float:
+        """Calculate entry price with slippage"""
+        try:
+            # Calculate slippage based on market conditions
+            volatility = market_condition.get('volatility', 0.5)
+            volume = market_condition.get('volume', 1000000)
+            
+            base_slippage = trading_costs['slippage_base']
+            volatility_mult = trading_costs['slippage_volatility_multiplier']
+            
+            # Adjust slippage based on volatility and volume
+            slippage = base_slippage * (1 + volatility * volatility_mult)
+            slippage *= max(0.5, min(2.0, 1000000 / volume))  # Volume adjustment
+            
+            # Apply slippage to entry price
+            if side == 'BUY':
+                entry_price = current_price * (1 + slippage)
+            else:  # SELL
+                entry_price = current_price * (1 - slippage)
+            
+            return entry_price
+            
+        except Exception as e:
+            logger.error(f"❌ Entry price calculation error: {e}")
+            return current_price
+    
+    async def _calculate_exit_price(self, current_price: float, side: str,
+                                  trading_costs: Dict, market_condition: Dict) -> float:
+        """Calculate exit price with slippage"""
+        try:
+            # Calculate slippage (similar to entry but may be different for exits)
+            volatility = market_condition.get('volatility', 0.5)
+            volume = market_condition.get('volume', 1000000)
+            
+            base_slippage = trading_costs['slippage_base']
+            volatility_mult = trading_costs['slippage_volatility_multiplier']
+            
+            # Exit slippage might be higher due to urgency
+            slippage = base_slippage * (1 + volatility * volatility_mult) * 1.2
+            slippage *= max(0.5, min(2.0, 1000000 / volume))
+            
+            # Apply slippage to exit price
+            if side == 'BUY':  # Closing long position
+                exit_price = current_price * (1 - slippage)
+            else:  # Closing short position
+                exit_price = current_price * (1 + slippage)
+            
+            return exit_price
+            
+        except Exception as e:
+            logger.error(f"❌ Exit price calculation error: {e}")
+            return current_price
+    
+    async def _calculate_position_size_with_costs(self, entry_price: float, stop_loss: float,
+                                                capital: float, strategy_params: Dict,
+                                                trading_costs: Dict) -> float:
+        """Calculate position size considering trading costs"""
+        try:
+            # Calculate risk amount
+            risk_per_trade = strategy_params.get('risk_per_trade', 0.02)
+            risk_amount = capital * risk_per_trade
+            
+            # Calculate price risk
+            price_risk = abs(entry_price - stop_loss)
+            
+            # Calculate base position size
+            base_position_size = risk_amount / price_risk
+            
+            # Calculate trading costs for this position
+            position_value = base_position_size * entry_price
+            trading_fee = position_value * trading_costs['trading_fee']
+            
+            # Adjust position size for trading costs
+            adjusted_position_size = (risk_amount - trading_fee) / price_risk
+            
+            # Check minimum order size
+            min_order_value = trading_costs['minimum_order_size']
+            if adjusted_position_size * entry_price < min_order_value:
+                return 0
+            
+            return adjusted_position_size
+            
+        except Exception as e:
+            logger.error(f"❌ Position size calculation error: {e}")
+            return 0
+    
+    async def _calculate_position_trading_costs(self, entry_price: float, position_size: float,
+                                              trading_costs: Dict, market_condition: Dict) -> Dict[str, float]:
+        """Calculate trading costs for a position"""
+        try:
+            position_value = position_size * entry_price
+            
+            # Trading fee
+            trading_fee = position_value * trading_costs['trading_fee']
+            
+            # Slippage cost
+            volatility = market_condition.get('volatility', 0.5)
+            base_slippage = trading_costs['slippage_base']
+            volatility_mult = trading_costs['slippage_volatility_multiplier']
+            slippage = base_slippage * (1 + volatility * volatility_mult)
+            slippage_cost = position_value * slippage
+            
+            # Funding fee (for perpetual futures)
+            funding_fee = position_value * trading_costs['funding_fee']
+            
+            total_costs = trading_fee + slippage_cost + funding_fee
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage_cost': slippage_cost,
+                'funding_fee': funding_fee,
+                'total_costs': total_costs,
+                'total_costs_pct': total_costs / position_value
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Position trading costs calculation error: {e}")
+            return {
+                'trading_fee': 0,
+                'slippage_cost': 0,
+                'funding_fee': 0,
+                'total_costs': 0,
+                'total_costs_pct': 0
+            }
+    
+    async def _calculate_pnl_with_costs(self, position: Dict, exit_price: float,
+                                      trading_costs: Dict, market_condition: Dict) -> float:
+        """Calculate PnL including all trading costs"""
+        try:
+            entry_price = position['entry_price']
+            size = position['size']
+            side = position['side']
+            
+            # Calculate gross PnL
+            if side == 'BUY':
+                gross_pnl = (exit_price - entry_price) * size
+            else:  # SELL
+                gross_pnl = (entry_price - exit_price) * size
+            
+            # Calculate exit trading costs
+            exit_costs = await self._calculate_position_trading_costs(
+                exit_price, size, trading_costs, market_condition
+            )
+            
+            # Total costs (entry + exit)
+            total_costs = position['trading_costs']['total_costs'] + exit_costs['total_costs']
+            
+            # Net PnL
+            net_pnl = gross_pnl - total_costs
+            
+            return net_pnl
+            
+        except Exception as e:
+            logger.error(f"❌ PnL calculation error: {e}")
+            return 0
+    
+    def _analyze_market_condition_at_time(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze market condition at specific time"""
+        try:
+            if len(data) < 20:
+                return {'volatility': 0.5, 'volume': 1000000, 'trend': 'neutral'}
+            
+            # Calculate volatility
+            returns = data['close'].pct_change().dropna()
+            volatility = returns.std() if len(returns) > 0 else 0.5
+            
+            # Calculate volume
+            volume = data['volume'].iloc[-1] if 'volume' in data.columns else 1000000
+            
+            # Calculate trend
+            if len(data) >= 20:
+                sma_20 = data['close'].rolling(20).mean().iloc[-1]
+                current_price = data['close'].iloc[-1]
+                trend = 'bullish' if current_price > sma_20 else 'bearish'
+            else:
+                trend = 'neutral'
+            
+            return {
+                'volatility': min(volatility, 1.0),
+                'volume': volume,
+                'trend': trend
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Market condition analysis error: {e}")
+            return {'volatility': 0.5, 'volume': 1000000, 'trend': 'neutral'}
+    
+    async def _calculate_trading_costs_summary(self, trades: List[Dict]) -> Dict[str, Any]:
+        """Calculate trading costs summary"""
+        try:
+            total_trading_fees = sum(t.get('trading_costs', {}).get('trading_fee', 0) for t in trades)
+            total_slippage_costs = sum(t.get('trading_costs', {}).get('slippage_cost', 0) for t in trades)
+            total_funding_fees = sum(t.get('trading_costs', {}).get('funding_fee', 0) for t in trades)
+            total_costs = sum(t.get('trading_costs', {}).get('total_costs', 0) for t in trades)
+            
+            total_volume = sum(t['entry_price'] * t['size'] for t in trades)
+            costs_percentage = (total_costs / total_volume * 100) if total_volume > 0 else 0
+            
+            return {
+                'total_trading_fees': total_trading_fees,
+                'total_slippage_costs': total_slippage_costs,
+                'total_funding_fees': total_funding_fees,
+                'total_costs': total_costs,
+                'total_volume': total_volume,
+                'costs_percentage': costs_percentage
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Trading costs summary calculation error: {e}")
+            return {}
+    
+    def _calculate_market_conditions_summary(self, market_conditions: List[Dict]) -> Dict[str, Any]:
+        """Calculate market conditions summary"""
+        try:
+            if not market_conditions:
+                return {}
+            
+            volatilities = [mc.get('volatility', 0.5) for mc in market_conditions]
+            volumes = [mc.get('volume', 1000000) for mc in market_conditions]
+            trends = [mc.get('trend', 'neutral') for mc in market_conditions]
+            
+            return {
+                'avg_volatility': np.mean(volatilities),
+                'max_volatility': np.max(volatilities),
+                'min_volatility': np.min(volatilities),
+                'avg_volume': np.mean(volumes),
+                'trend_distribution': {
+                    'bullish': trends.count('bullish'),
+                    'bearish': trends.count('bearish'),
+                    'neutral': trends.count('neutral')
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Market conditions summary calculation error: {e}")
+            return {}
     
     async def _analyze_parameters(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze parameter performance across all tests"""

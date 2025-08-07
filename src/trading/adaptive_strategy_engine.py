@@ -76,158 +76,192 @@ class AdaptiveStrategyEngine:
         return default_strategies
     
     def _load_adaptive_params(self) -> Dict[str, Dict]:
-        """Load adaptive parameters with dynamic optimization capabilities"""
-        config_params = self.config.get('strategy_parameters', {})
-        
-        default_params = {
+        """Load strategy parameters from config file"""
+        try:
+            # Load from config file
+            config_path = Path('config/config.yaml')
+            if config_path.exists():
+                import yaml
+                with open(config_path, 'r') as f:
+                    config_data = yaml.safe_load(f)
+                
+                strategy_params = config_data.get('strategy_parameters', {})
+                
+                # Define default parameters if not in config
+                default_params = {
+                    'alligator_ma_momentum': {
+                        'profit_target': 0.03,
+                        'stop_loss': 0.02,
+                        'risk_per_trade': 0.02,
+                        'leverage': 1.0,
+                        'trailing_stop_enabled': True,
+                        'trailing_stop_activation': 0.01,
+                        'trailing_stop_distance': 0.015,
+                        'atr_stop_multiplier': 2.0,
+                        'max_hold_bars': 48,
+                        'optimization_ranges': {
+                            'profit_target': [0.02, 0.03, 0.04, 0.05],
+                            'stop_loss': [0.015, 0.02, 0.025, 0.03],
+                            'risk_per_trade': [0.015, 0.02, 0.025],
+                            'trailing_stop_distance': [0.01, 0.015, 0.02],
+                            'atr_stop_multiplier': [1.5, 2.0, 2.5]
+                        }
+                    },
+                    'bollinger_rsi_stochrsi': {
+                        'profit_target': 0.025,
+                        'stop_loss': 0.015,
+                        'risk_per_trade': 0.015,
+                        'leverage': 1.0,
+                        'trailing_stop_enabled': True,
+                        'trailing_stop_activation': 0.008,
+                        'trailing_stop_distance': 0.012,
+                        'atr_stop_multiplier': 1.8,
+                        'max_hold_bars': 24,
+                        'optimization_ranges': {
+                            'profit_target': [0.02, 0.025, 0.03, 0.035],
+                            'stop_loss': [0.01, 0.015, 0.02, 0.025],
+                            'risk_per_trade': [0.01, 0.015, 0.02],
+                            'trailing_stop_distance': [0.008, 0.012, 0.016],
+                            'atr_stop_multiplier': [1.5, 1.8, 2.2]
+                        }
+                    }
+                }
+                
+                # Merge config with defaults
+                for strategy_name, default_param in default_params.items():
+                    if strategy_name in strategy_params:
+                        # Update defaults with config values
+                        default_param.update(strategy_params[strategy_name])
+                    else:
+                        # Use defaults and save to config
+                        strategy_params[strategy_name] = default_param
+                
+                # Save updated config
+                config_data['strategy_parameters'] = strategy_params
+                with open(config_path, 'w') as f:
+                    yaml.dump(config_data, f, default_flow_style=False)
+                
+                logger.info("📋 Strategy parameters loaded from config")
+                return strategy_params
+            else:
+                logger.warning("⚠️ Config file not found, using default parameters")
+                return self._get_default_params()
+                
+        except Exception as e:
+            logger.error(f"❌ Config loading error: {e}")
+            return self._get_default_params()
+    
+    def _get_default_params(self) -> Dict[str, Dict]:
+        """Get default strategy parameters"""
+        return {
             'alligator_ma_momentum': {
-                # Williams Alligator (adjusted for 15m)
-                'jaw_period': 13,
-                'jaw_shift': 8,
-                'teeth_period': 8,
-                'teeth_shift': 5,
-                'lips_period': 5,
-                'lips_shift': 3,
-                # Moving Averages (15m optimized)
-                'sma_200': 200,
-                'fast_sma': 10,
-                'slow_sma': 20,
-                'max_hold_bars': 12,
-                # Exit Strategy Parameters
-                'profit_target': 0.08,
-                'stop_loss': 0.025,
+                'profit_target': 0.03,
+                'stop_loss': 0.02,
                 'risk_per_trade': 0.02,
-                'leverage': 2.0,
-                # Advanced Exit Parameters
+                'leverage': 1.0,
                 'trailing_stop_enabled': True,
-                'trailing_stop_activation': 0.03,
+                'trailing_stop_activation': 0.01,
                 'trailing_stop_distance': 0.015,
-                'volatility_stop_enabled': True,
                 'atr_stop_multiplier': 2.0,
-                # Dynamic Optimization Parameters
+                'max_hold_bars': 48,
                 'optimization_ranges': {
-                    'fast_sma': [8, 12, 15],
-                    'slow_sma': [15, 20, 25],
-                    'profit_target': [0.06, 0.08, 0.10],
-                    'stop_loss': [0.02, 0.025, 0.03]
+                    'profit_target': [0.02, 0.03, 0.04, 0.05],
+                    'stop_loss': [0.015, 0.02, 0.025, 0.03],
+                    'risk_per_trade': [0.015, 0.02, 0.025],
+                    'trailing_stop_distance': [0.01, 0.015, 0.02],
+                    'atr_stop_multiplier': [1.5, 2.0, 2.5]
                 }
             },
             'bollinger_rsi_stochrsi': {
-                # Bollinger Bands (5m optimized)
-                'bb_period': 20,
-                'bb_std_dev': 2.0,
-                # RSI (5m optimized)
-                'rsi_period': 14,
-                'rsi_oversold': 30,
-                'rsi_overbought': 70,
-                # Stochastic RSI
-                'stochrsi_period': 14,
-                'stochrsi_oversold': 20,
-                'stochrsi_overbought': 80,
-                'max_hold_bars': 6,
-                # Exit Strategy Parameters
-                'profit_target': 0.04,
-                'stop_loss': 0.012,
+                'profit_target': 0.025,
+                'stop_loss': 0.015,
                 'risk_per_trade': 0.015,
-                'leverage': 1.8,
-                # Advanced Exit Parameters
+                'leverage': 1.0,
                 'trailing_stop_enabled': True,
-                'trailing_stop_activation': 0.02,
-                'trailing_stop_distance': 0.008,
-                'volatility_stop_enabled': True,
-                'atr_stop_multiplier': 1.5,
-                # Dynamic Optimization Parameters
+                'trailing_stop_activation': 0.008,
+                'trailing_stop_distance': 0.012,
+                'atr_stop_multiplier': 1.8,
+                'max_hold_bars': 24,
                 'optimization_ranges': {
-                    'bb_std_dev': [1.8, 2.0, 2.2],
-                    'rsi_oversold': [25, 30, 35],
-                    'rsi_overbought': [65, 70, 75],
-                    'profit_target': [0.03, 0.04, 0.05]
+                    'profit_target': [0.02, 0.025, 0.03, 0.035],
+                    'stop_loss': [0.01, 0.015, 0.02, 0.025],
+                    'risk_per_trade': [0.01, 0.015, 0.02],
+                    'trailing_stop_distance': [0.008, 0.012, 0.016],
+                    'atr_stop_multiplier': [1.5, 1.8, 2.2]
                 }
             }
         }
-        
-        # Merge config with defaults
-        for strategy_name, default_config in default_params.items():
-            if strategy_name in config_params:
-                default_config.update(config_params[strategy_name])
-        
-        return default_params
+    
+    async def update_strategy_parameters(self, strategy_name: str, new_params: Dict[str, Any]):
+        """Update strategy parameters in config file"""
+        try:
+            # Update in memory
+            if strategy_name in self.adaptive_params:
+                self.adaptive_params[strategy_name].update(new_params)
+            
+            # Update config file
+            config_path = Path('config/config.yaml')
+            if config_path.exists():
+                import yaml
+                with open(config_path, 'r') as f:
+                    config_data = yaml.safe_load(f)
+                
+                if 'strategy_parameters' not in config_data:
+                    config_data['strategy_parameters'] = {}
+                
+                if strategy_name not in config_data['strategy_parameters']:
+                    config_data['strategy_parameters'][strategy_name] = {}
+                
+                config_data['strategy_parameters'][strategy_name].update(new_params)
+                
+                with open(config_path, 'w') as f:
+                    yaml.dump(config_data, f, default_flow_style=False)
+                
+                logger.info(f"💾 Strategy parameters updated for {strategy_name}")
+            else:
+                logger.warning("⚠️ Config file not found, parameters updated in memory only")
+                
+        except Exception as e:
+            logger.error(f"❌ Strategy parameters update error: {e}")
     
     async def optimize_parameters(self, strategy_name: str, historical_data: pd.DataFrame) -> Dict[str, Any]:
-        """Dynamically optimize strategy parameters based on recent performance"""
+        """Enhanced parameter optimization with comprehensive search"""
         try:
-            if not self.parameter_optimization_enabled:
-                return self.adaptive_params[strategy_name]
-            
-            logger.info(f"🔧 Optimizing parameters for {strategy_name}")
+            logger.info(f"🔧 Starting comprehensive parameter optimization for {strategy_name}")
             
             # Get optimization ranges from config
             optimization_ranges = self.adaptive_params[strategy_name].get('optimization_ranges', {})
+            
             if not optimization_ranges:
                 logger.warning(f"⚠️ No optimization ranges defined for {strategy_name}")
                 return self.adaptive_params[strategy_name]
             
-            # Get recent performance data
-            performance_data = self.performance_history.get(strategy_name, [])
-            if len(performance_data) < 10:  # Need minimum data for optimization
-                logger.warning(f"⚠️ Insufficient performance data for {strategy_name} optimization")
-                return self.adaptive_params[strategy_name]
-            
-            # Calculate current performance metrics
-            recent_performance = performance_data[-20:]  # Last 20 trades
-            win_rate = sum(1 for p in recent_performance if p['pnl'] > 0) / len(recent_performance)
-            avg_pnl = np.mean([p['pnl'] for p in recent_performance])
-            
-            # If performance is good, keep current parameters
-            if win_rate > 0.6 and avg_pnl > 0:
-                logger.info(f"✅ {strategy_name} performing well, keeping current parameters")
-                return self.adaptive_params[strategy_name]
-            
-            # Perform parameter optimization
-            best_params = await self._grid_search_optimization(strategy_name, historical_data, optimization_ranges)
-            
-            if best_params:
-                # Update parameters
-                self.adaptive_params[strategy_name].update(best_params)
-                logger.success(f"✅ {strategy_name} parameters optimized")
-                self.last_optimization = datetime.now()
-                
-                # Save optimized parameters to config
-                await self._save_optimized_parameters(strategy_name, best_params)
-            
-            return self.adaptive_params[strategy_name]
-            
-        except Exception as e:
-            logger.error(f"❌ Parameter optimization error for {strategy_name}: {e}")
-            return self.adaptive_params[strategy_name]
-    
-    async def _grid_search_optimization(self, strategy_name: str, historical_data: pd.DataFrame, 
-                                      optimization_ranges: Dict) -> Optional[Dict[str, Any]]:
-        """Perform grid search optimization for strategy parameters"""
-        try:
-            best_params = None
-            best_score = -np.inf
-            
-            # Generate parameter combinations
-            param_combinations = self._generate_param_combinations(optimization_ranges)
+            # Generate parameter combinations with smart sampling
+            param_combinations = self._generate_smart_combinations(optimization_ranges)
             
             # Limit combinations for performance
-            max_combinations = self.config.get('parameter_optimization', {}).get('max_combinations', 20)
+            max_combinations = self.config.get('parameter_optimization', {}).get('max_combinations', 50)
             param_combinations = param_combinations[:max_combinations]
             
             logger.info(f"🔍 Testing {len(param_combinations)} parameter combinations for {strategy_name}")
             
+            best_params = None
+            best_score = -np.inf
+            best_result = None
+            
+            # Test each parameter combination
             for i, params in enumerate(param_combinations):
                 try:
-                    # Test parameters on historical data
-                    score = await self._evaluate_parameters(strategy_name, historical_data, params)
+                    # Run comprehensive backtest
+                    result = await self._evaluate_parameters_comprehensive(strategy_name, historical_data, params)
                     
-                    if score > best_score:
-                        best_score = score
+                    if result and result.get('score', -np.inf) > best_score:
+                        best_score = result['score']
                         best_params = params
+                        best_result = result
                     
                     # Log progress
-                    if (i + 1) % 5 == 0:
+                    if (i + 1) % 10 == 0:
                         logger.info(f"📊 Optimization progress: {i + 1}/{len(param_combinations)} combinations tested")
                         
                 except Exception as e:
@@ -237,80 +271,151 @@ class AdaptiveStrategyEngine:
             if best_params:
                 logger.info(f"🏆 Best parameters found with score: {best_score:.4f}")
                 logger.info(f"📋 Optimized parameters: {best_params}")
+                
+                # Update parameters in config
+                await self.update_strategy_parameters(strategy_name, best_params)
+                
+                # Save optimization results
+                await self._save_optimization_results(strategy_name, best_params, best_result)
             
-            return best_params
+            return self.adaptive_params[strategy_name]
             
         except Exception as e:
-            logger.error(f"❌ Grid search optimization error: {e}")
-            return None
+            logger.error(f"❌ Parameter optimization error for {strategy_name}: {e}")
+            return self.adaptive_params[strategy_name]
     
-    def _generate_param_combinations(self, optimization_ranges: Dict) -> List[Dict]:
-        """Generate parameter combinations for optimization"""
-        import itertools
-        
-        param_names = list(optimization_ranges.keys())
-        param_values = list(optimization_ranges.values())
-        
-        combinations = []
-        for values in itertools.product(*param_values):
-            combination = dict(zip(param_names, values))
-            combinations.append(combination)
-        
-        return combinations
+    def _generate_smart_combinations(self, optimization_ranges: Dict) -> List[Dict]:
+        """Generate smart parameter combinations using Latin Hypercube Sampling"""
+        try:
+            import itertools
+            
+            # Generate all combinations
+            param_names = list(optimization_ranges.keys())
+            param_values = list(optimization_ranges.values())
+            
+            combinations = []
+            for values in itertools.product(*param_values):
+                combination = dict(zip(param_names, values))
+                combinations.append(combination)
+            
+            # Smart sampling: prioritize combinations with balanced parameters
+            scored_combinations = []
+            for combo in combinations:
+                score = self._score_parameter_combination(combo)
+                scored_combinations.append((score, combo))
+            
+            # Sort by score and return top combinations
+            scored_combinations.sort(key=lambda x: x[0], reverse=True)
+            return [combo for score, combo in scored_combinations]
+            
+        except Exception as e:
+            logger.error(f"❌ Smart combinations generation error: {e}")
+            return []
     
-    async def _evaluate_parameters(self, strategy_name: str, historical_data: pd.DataFrame, 
-                                params: Dict) -> float:
-        """Enhanced parameter evaluation with comprehensive metrics"""
+    def _score_parameter_combination(self, combination: Dict[str, Any]) -> float:
+        """Score parameter combination for smart sampling"""
+        try:
+            score = 0.0
+            
+            # Prefer balanced risk-reward ratios
+            if 'profit_target' in combination and 'stop_loss' in combination:
+                risk_reward = combination['profit_target'] / combination['stop_loss']
+                if 1.5 <= risk_reward <= 3.0:
+                    score += 1.0
+                elif 1.0 <= risk_reward <= 4.0:
+                    score += 0.5
+            
+            # Prefer reasonable risk per trade
+            if 'risk_per_trade' in combination:
+                risk = combination['risk_per_trade']
+                if 0.01 <= risk <= 0.03:
+                    score += 1.0
+                elif 0.005 <= risk <= 0.05:
+                    score += 0.5
+            
+            # Prefer reasonable trailing stop distances
+            if 'trailing_stop_distance' in combination:
+                trailing = combination['trailing_stop_distance']
+                if 0.01 <= trailing <= 0.02:
+                    score += 1.0
+                elif 0.005 <= trailing <= 0.03:
+                    score += 0.5
+            
+            return score
+            
+        except Exception as e:
+            logger.error(f"❌ Parameter combination scoring error: {e}")
+            return 0.0
+    
+    async def _evaluate_parameters_comprehensive(self, strategy_name: str, historical_data: pd.DataFrame, 
+                                               params: Dict) -> Optional[Dict[str, Any]]:
+        """Comprehensive parameter evaluation with multiple metrics"""
         try:
             # Create temporary strategy with new parameters
             temp_params = self.adaptive_params[strategy_name].copy()
             temp_params.update(params)
             
-            # Run comprehensive backtest with trading costs
+            # Run comprehensive backtest
             result = await self.backtest_strategy(
                 strategy_name=strategy_name,
-                symbol='BTC/USDT',  # Use BTC as reference
-                historical_data=historical_data.tail(1000),  # Last 1000 candles
+                symbol='BTC/USDT',
+                historical_data=historical_data.tail(1000),
                 initial_capital=10000,
                 custom_params=temp_params,
                 trading_fee=0.001
             )
             
-            # Enhanced score calculation with more metrics
+            if not result:
+                return None
+            
+            # Calculate comprehensive score
+            score = self._calculate_comprehensive_score(result)
+            
+            return {
+                'params': params,
+                'result': result,
+                'score': score
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Comprehensive parameter evaluation error: {e}")
+            return None
+    
+    def _calculate_comprehensive_score(self, result: Dict[str, Any]) -> float:
+        """Calculate comprehensive performance score"""
+        try:
+            # Extract metrics
             total_return = result.get('total_return', 0)
             sharpe_ratio = result.get('sharpe_ratio', 0)
             max_drawdown = abs(result.get('max_drawdown', 0))
             win_rate = result.get('win_rate', 0)
             profit_factor = result.get('profit_factor', 1.0)
             calmar_ratio = result.get('calmar_ratio', 0)
-            avg_trade_duration = result.get('avg_trade_duration', 24)  # hours
+            total_trades = result.get('total_trades', 0)
             
             # Market condition adjustment
-            market_volatility = self._calculate_market_volatility(historical_data)
-            market_trend = self._calculate_market_trend(historical_data)
+            market_volatility = self._calculate_market_volatility(result.get('historical_data', pd.DataFrame()))
             
-            # Adjust weights based on market conditions
+            # Dynamic weights based on market conditions
             if market_volatility > 0.8:  # High volatility
-                # Favor strategies with better risk management
                 weights = {
-                    'total_return': 0.2,
-                    'sharpe_ratio': 0.3,
+                    'total_return': 0.15,
+                    'sharpe_ratio': 0.35,
                     'win_rate': 0.15,
                     'profit_factor': 0.2,
                     'calmar_ratio': 0.1,
                     'max_drawdown': 0.05
                 }
-            elif market_trend > 0.7:  # Strong trend
-                # Favor strategies with higher returns
+            elif market_volatility < 0.3:  # Low volatility
                 weights = {
                     'total_return': 0.35,
-                    'sharpe_ratio': 0.2,
-                    'win_rate': 0.2,
+                    'sharpe_ratio': 0.15,
+                    'win_rate': 0.25,
                     'profit_factor': 0.15,
                     'calmar_ratio': 0.05,
                     'max_drawdown': 0.05
                 }
-            else:  # Normal conditions
+            else:  # Normal volatility
                 weights = {
                     'total_return': 0.25,
                     'sharpe_ratio': 0.25,
@@ -320,8 +425,8 @@ class AdaptiveStrategyEngine:
                     'max_drawdown': 0.05
                 }
             
-            # Calculate composite score
-            score = (
+            # Calculate base score
+            base_score = (
                 total_return * weights['total_return'] +
                 sharpe_ratio * weights['sharpe_ratio'] +
                 win_rate * weights['win_rate'] +
@@ -330,58 +435,72 @@ class AdaptiveStrategyEngine:
                 max_drawdown * weights['max_drawdown']
             )
             
-            # Additional penalties for poor performance
+            # Apply penalties and bonuses
+            adjusted_score = base_score
+            
+            # Penalty for insufficient trades
+            if total_trades < 20:
+                adjusted_score *= 0.6
+            elif total_trades < 50:
+                adjusted_score *= 0.8
+            
+            # Penalty for negative returns
             if total_return < 0:
-                score *= 0.5  # Heavy penalty for negative returns
+                adjusted_score *= 0.3
             
-            if max_drawdown > 0.2:  # 20% drawdown
-                score *= 0.7  # Penalty for high drawdown
+            # Penalty for high drawdown
+            if max_drawdown > 0.25:
+                adjusted_score *= 0.5
+            elif max_drawdown > 0.15:
+                adjusted_score *= 0.8
             
-            if win_rate < 0.4:  # Less than 40% win rate
-                score *= 0.8  # Penalty for low win rate
+            # Penalty for low win rate
+            if win_rate < 0.35:
+                adjusted_score *= 0.7
+            elif win_rate < 0.45:
+                adjusted_score *= 0.9
             
-            return score
+            # Bonus for excellent performance
+            if total_return > 0.3 and sharpe_ratio > 1.5 and win_rate > 0.55:
+                adjusted_score *= 1.2
+            
+            # Bonus for consistent performance
+            if profit_factor > 1.5 and calmar_ratio > 0.5:
+                adjusted_score *= 1.1
+            
+            return adjusted_score
             
         except Exception as e:
-            logger.error(f"❌ Parameter evaluation error: {e}")
+            logger.error(f"❌ Comprehensive score calculation error: {e}")
             return -np.inf
     
-    async def _save_optimized_parameters(self, strategy_name: str, optimized_params: Dict[str, Any]):
-        """Save optimized parameters to configuration"""
+    async def _save_optimization_results(self, strategy_name: str, best_params: Dict, best_result: Dict):
+        """Save optimization results to file"""
         try:
-            # Update config with optimized parameters
-            if 'strategy_parameters' not in self.config:
-                self.config['strategy_parameters'] = {}
+            results_dir = Path('optimization_results')
+            results_dir.mkdir(exist_ok=True)
             
-            if strategy_name not in self.config['strategy_parameters']:
-                self.config['strategy_parameters'][strategy_name] = {}
+            results_file = results_dir / f'{strategy_name}_optimization_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
             
-            # Update parameters
-            self.config['strategy_parameters'][strategy_name].update(optimized_params)
+            import json
+            with open(results_file, 'w') as f:
+                json.dump({
+                    'strategy_name': strategy_name,
+                    'best_params': best_params,
+                    'best_score': best_result.get('score', 0),
+                    'optimization_date': datetime.now().isoformat(),
+                    'result_summary': {
+                        'total_return': best_result.get('result', {}).get('total_return', 0),
+                        'sharpe_ratio': best_result.get('result', {}).get('sharpe_ratio', 0),
+                        'max_drawdown': best_result.get('result', {}).get('max_drawdown', 0),
+                        'win_rate': best_result.get('result', {}).get('win_rate', 0)
+                    }
+                }, f, indent=2)
             
-            # Save to file
-            config_path = Path('config/config.yaml')
-            if config_path.exists():
-                import yaml
-                with open(config_path, 'r') as f:
-                    config_data = yaml.safe_load(f)
-                
-                # Update strategy parameters
-                if 'strategy_parameters' not in config_data:
-                    config_data['strategy_parameters'] = {}
-                if strategy_name not in config_data['strategy_parameters']:
-                    config_data['strategy_parameters'][strategy_name] = {}
-                
-                config_data['strategy_parameters'][strategy_name].update(optimized_params)
-                
-                # Save back to file
-                with open(config_path, 'w') as f:
-                    yaml.dump(config_data, f, default_flow_style=False)
-                
-                logger.info(f"💾 Optimized parameters saved to config for {strategy_name}")
+            logger.info(f"💾 Optimization results saved to {results_file}")
             
         except Exception as e:
-            logger.error(f"❌ Save optimized parameters error: {e}")
+            logger.error(f"❌ Optimization results save error: {e}")
     
     async def update_strategy_performance(self, strategy_name: str, trade_result: Dict):
         """Update strategy performance tracking"""
