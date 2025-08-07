@@ -668,12 +668,12 @@ class DatabaseManager:
             if symbol:
                 cursor = await self.connection.execute("""
                     SELECT * FROM trades WHERE symbol = ? 
-                    ORDER BY timestamp DESC LIMIT ?
+                    ORDER BY entry_time DESC LIMIT ?
                 """, (symbol, limit))
             else:
                 cursor = await self.connection.execute("""
                     SELECT * FROM trades 
-                    ORDER BY timestamp DESC LIMIT ?
+                    ORDER BY entry_time DESC LIMIT ?
                 """, (limit,))
             
             rows = await cursor.fetchall()
@@ -685,10 +685,15 @@ class DatabaseManager:
                     'symbol': row[1],
                     'side': row[2],
                     'size': row[3],
-                    'price': row[4],
-                    'pnl': row[5],
-                    'strategy': row[6],
-                    'timestamp': row[7]
+                    'entry_price': row[4],
+                    'exit_price': row[5],
+                    'pnl': row[6],
+                    'fees': row[7],
+                    'strategy': row[8],
+                    'confidence': row[9],
+                    'entry_time': row[10],
+                    'exit_time': row[11],
+                    'duration_seconds': row[12]
                 })
             
             return trades

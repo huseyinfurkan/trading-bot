@@ -37,7 +37,7 @@ class NotificationManager:
         
         # Dynamic rate limiting based on notification frequency
         self.last_notification = {}
-        self.min_interval = await self._get_dynamic_min_interval()
+        self.min_interval = 60
         
         logger.info("📱 Notification Manager initialized")
     

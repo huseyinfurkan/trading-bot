@@ -27,9 +27,9 @@ class MonitoringSystem:
         self.notification_manager = notification_manager
         
         # Dynamic system thresholds based on system performance
-        self.cpu_threshold = await self._get_dynamic_cpu_threshold(config)
-        self.memory_threshold = await self._get_dynamic_memory_threshold(config)
-        self.disk_threshold = await self._get_dynamic_disk_threshold(config)
+        self.cpu_threshold = 80
+        self.memory_threshold = 85
+        self.disk_threshold = 90
         
         # Performance tracking
         self.performance_metrics = {
@@ -40,12 +40,12 @@ class MonitoringSystem:
         }
         
         # Dynamic alert cooldown based on error frequency
-        self.alert_cooldown = await self._get_dynamic_alert_cooldown(config)
+        self.alert_cooldown = 300
         
         # Dynamic health check intervals based on system load
-        self.system_check_interval = await self._get_dynamic_check_interval(config, 'system')
-        self.performance_check_interval = await self._get_dynamic_check_interval(config, 'performance')
-        self.error_check_interval = await self._get_dynamic_check_interval(config, 'error')
+        self.system_check_interval = 60
+        self.performance_check_interval = 120
+        self.error_check_interval = 30
         
         logger.info("🔍 Enhanced Monitoring System initialized")
     

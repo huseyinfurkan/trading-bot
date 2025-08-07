@@ -209,8 +209,8 @@ class ConfigManager:
                     logger.debug(f"✅ {exchange_name} API key loaded")
                 
                 if secret_value:
-                    exchange_config['secret'] = secret_value
-                    logger.debug(f"✅ {exchange_name} secret loaded")
+                    exchange_config['api_secret'] = secret_value
+                    logger.debug(f"✅ {exchange_name} api_secret loaded")
                 
                 if os.getenv(sandbox_env):
                     exchange_config['sandbox'] = os.getenv(sandbox_env).lower() == 'true'

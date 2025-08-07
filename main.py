@@ -96,14 +96,14 @@ class EnhancedTradingBot:
             self.ai_signal_filter = AISignalFilter(self.config.get('ai', {}))
             await self.ai_signal_filter.initialize()
             
-            self.market_analyzer = MarketAnalyzer(self.exchange_manager, self.config.get('market_analysis', {}))
-            self.confidence_calculator = ConfidenceCalculator()
+            self.market_analyzer = MarketAnalyzer(self.config.get('market_analysis', {}), self.exchange_manager)
+            self.confidence_calculator = ConfidenceCalculator(self.config.get('ai', {}), self.db_manager)
             
             logger.info("✅ AI components initialized")
             
             # 9. Initialize trading components
-            self.risk_manager = RiskManager(self.config.get('trading', {}).get('risk_management', {}))
-            self.position_manager = PositionManager(self.exchange_manager, self.db_manager, self.risk_manager)
+            self.risk_manager = RiskManager(self.config, self.exchange_manager)
+            self.position_manager = PositionManager(self.exchange_manager, self.risk_manager, self.db_manager)
             
             self.strategy_engine = AdaptiveStrategyEngine(
                 self.config, 
@@ -114,10 +114,13 @@ class EnhancedTradingBot:
             
             logger.info("✅ Trading components initialized")
             
-            # 10. Initialize monitoring system
-            self.monitoring_system = MonitoringSystem(self.config.get('monitoring', {}))
+            # 10. Initialize notifications
+            self.notifications = NotificationManager(self.config.get('notifications', {}))
             
-            # 11. Initialize live data engine
+            # 11. Initialize monitoring system
+            self.monitoring_system = MonitoringSystem(self.config.get('monitoring', {}), self.db_manager, self.notifications)
+            
+            # 12. Initialize live data engine
             self.live_data_engine = LiveDataEngine(
                 self.exchange_manager,
                 self.market_analyzer,
@@ -129,7 +132,7 @@ class EnhancedTradingBot:
             
             logger.info("✅ Live data engine initialized")
             
-            # 12. Initialize bot coordinator
+            # 13. Initialize bot coordinator
             self.bot_coordinator = BotCoordinator(
                 self.config,
                 self.exchange_manager,
@@ -141,8 +144,7 @@ class EnhancedTradingBot:
             
             logger.info("✅ Bot coordinator initialized")
             
-            # 13. Initialize notifications
-            self.notifications = NotificationManager(self.config.get('notifications', {}))
+            # 14. Initialize notifications (already done above)
             
             # Store all components for easy access
             self.components = {

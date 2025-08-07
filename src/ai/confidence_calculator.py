@@ -28,11 +28,11 @@ class ConfidenceCalculator:
         self.min_confidence = ai_config.get('min_confidence', 0.1)
         
         # Dynamic weight factors based on market conditions
-        self.signal_weight = await self._get_dynamic_signal_weight()
-        self.market_weight = await self._get_dynamic_market_weight()
-        self.technical_weight = await self._get_dynamic_technical_weight()
-        self.volume_weight = await self._get_dynamic_volume_weight()
-        self.historical_weight = await self._get_dynamic_historical_weight()
+        self.signal_weight = 0.3
+        self.market_weight = 0.25
+        self.technical_weight = 0.2
+        self.volume_weight = 0.15
+        self.historical_weight = 0.1
         
         # Historical performance tracking
         self.performance_history = {}

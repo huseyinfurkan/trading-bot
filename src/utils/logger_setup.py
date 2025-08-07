@@ -17,10 +17,10 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         logger.remove()
         
         # Dynamic config parameters based on system resources
-        level = await _get_dynamic_log_level(logging_config)
-        file_path = await _get_dynamic_file_path(logging_config)
-        max_file_size = await _get_dynamic_max_file_size(logging_config)
-        backup_count = await _get_dynamic_backup_count(logging_config)
+        level = logging_config.get('level', 'INFO')
+        file_path = logging_config.get('file_path', 'logs/trading_bot.log')
+        max_file_size = logging_config.get('max_file_size', '10 MB')
+        backup_count = logging_config.get('backup_count', 5)
         console_output = logging_config.get('console_output', True)
         
         # Log directory oluştur

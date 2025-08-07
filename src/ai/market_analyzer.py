@@ -29,16 +29,16 @@ class MarketAnalyzer:
         self.crypto_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
         
         # Dynamic analysis parameters based on market conditions
-        self.trend_period = await self._get_dynamic_trend_period()
-        self.volatility_window = await self._get_dynamic_volatility_window()
-        self.dominance_threshold = await self._get_dynamic_dominance_threshold()
-        self.fear_greed_levels = await self._get_dynamic_fear_greed_levels()
-        self.rsi_period = await self._get_dynamic_rsi_period()
+        self.trend_period = 20
+        self.volatility_window = 14
+        self.dominance_threshold = 0.6
+        self.fear_greed_levels = {'extreme_fear': 25, 'fear': 45, 'neutral': 55, 'greed': 75, 'extreme_greed': 80}
+        self.rsi_period = 14
         
         # Dynamic cache for market data
         self.market_cache = {}
         self.last_update = None
-        self.cache_duration = await self._get_dynamic_cache_duration()
+        self.cache_duration = 300
         
         logger.info("📊 Market Analyzer initialized")
     

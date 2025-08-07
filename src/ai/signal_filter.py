@@ -32,9 +32,8 @@ class AISignalFilter:
         self.feature_columns = []
         
         # Dynamic adaptive learning parameters based on performance
-        self.adaptive_weights = await self._get_dynamic_adaptive_weights()
-        
-        self.adaptive_thresholds = await self._get_dynamic_adaptive_thresholds()
+        self.adaptive_weights = {}
+        self.adaptive_thresholds = {}
         
         # Model versioning
         self.model_versions = {}
@@ -42,12 +41,12 @@ class AISignalFilter:
         self.model_performance_history = {}
         
         # Dynamic learning rate for adaptive adjustments
-        self.learning_rate = await self._get_dynamic_learning_rate(ai_config)
-        self.performance_window = await self._get_dynamic_performance_window(ai_config)
+        self.learning_rate = 0.01
+        self.performance_window = 100
         
         # Dynamic signal cache
         self.signal_cache = {}
-        self.cache_duration = await self._get_dynamic_cache_duration()
+        self.cache_duration = 300
         
         logger.info("🤖 AI Signal Filter initialized with adaptive learning")
     
@@ -55,6 +54,13 @@ class AISignalFilter:
         """AI bileşenlerini başlat"""
         try:
             logger.info("🧠 AI Signal Filter başlatılıyor...")
+            
+            # Initialize dynamic parameters
+            self.adaptive_weights = await self._get_dynamic_adaptive_weights()
+            self.adaptive_thresholds = await self._get_dynamic_adaptive_thresholds()
+            self.learning_rate = await self._get_dynamic_learning_rate(self.config)
+            self.performance_window = await self._get_dynamic_performance_window(self.config)
+            self.cache_duration = await self._get_dynamic_cache_duration()
             
             # Load any existing models
             await self._load_existing_models()

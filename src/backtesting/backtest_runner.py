@@ -26,9 +26,9 @@ class BacktestRunner:
         
         # Dynamic backtest configuration based on market conditions
         self.backtest_config = config.get('backtesting', {})
-        self.initial_capital = await self._get_dynamic_initial_capital()
-        self.trading_fee = await self._get_dynamic_trading_fee()
-        self.slippage = await self._get_dynamic_slippage()
+        self.initial_capital = 10000
+        self.trading_fee = 0.001
+        self.slippage = 0.0005
         
         # Results storage
         self.results = {}

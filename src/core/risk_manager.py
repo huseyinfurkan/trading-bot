@@ -379,17 +379,17 @@ class RiskManager:
                     volume = historical_data['volume'].iloc[-1] if 'volume' in historical_data.columns else 1000000
                     
                                 # Calculate bid-ask spread estimate from high-low range
-            high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
-            bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
-            
-            # Get real funding rate from exchange
-            funding_rate = 0.0001  # Default, will be updated by real API
-            try:
-                funding_info = await self.exchange_manager.get_funding_rate(symbol, exchange)
-                if funding_info:
-                    funding_rate = funding_info.get('fundingRate', 0.0001)
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to get funding rate for {symbol}: {e}")
+                    high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
+                    bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
+                    
+                    # Get real funding rate from exchange
+                    funding_rate = 0.0001  # Default, will be updated by real API
+                    try:
+                        funding_info = await self.exchange_manager.get_funding_rate(symbol, exchange)
+                        if funding_info:
+                            funding_rate = funding_info.get('fundingRate', 0.0001)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to get funding rate for {symbol}: {e}")
                     
                     return {
                         'volume': volume,
