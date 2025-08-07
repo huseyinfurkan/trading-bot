@@ -156,9 +156,9 @@ class AISignalFilter:
             final_confidence = signal_confidence * regime_multiplier
             
             # Enhanced 3-class signal generation
-            if predicted_class == 2 and final_confidence > 0.65:  # BUY - Increased from 0.5 to 0.65
+            if predicted_class == 2 and final_confidence > 0.58:  # BUY - Balanced threshold
                 signal_type = "BUY"
-            elif predicted_class == 1 and final_confidence > 0.65:  # SELL - Increased from 0.5 to 0.65
+            elif predicted_class == 1 and final_confidence > 0.58:  # SELL - Balanced threshold
                 signal_type = "SELL"
             else:  # HOLD or low confidence
                 signal_type = "HOLD"

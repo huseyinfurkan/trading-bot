@@ -327,7 +327,7 @@ class AdaptiveStrategyEngine:
                     volume_boost = 0.15
             
             if strong_uptrend or uptrend_momentum:  # More flexible entry conditions
-                confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
+                confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'BUY',
                     'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
@@ -344,7 +344,7 @@ class AdaptiveStrategyEngine:
                     'research_basis': '15m trend following'
                 }
             elif strong_downtrend or downtrend_momentum:  # More flexible entry conditions
-                confidence = 0.5 + volume_boost  # Reduced from 0.7 to prevent overtrading
+                confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'SELL',
                     'confidence': min(0.85, confidence),  # Reduced max from 0.95 to 0.85
@@ -430,7 +430,7 @@ class AdaptiveStrategyEngine:
             
             # LONG signal - Mean reversion bounce
             if oversold_rsi and near_lower_bb:
-                confidence = 0.45 + volume_strength  # Reduced from 0.65 to prevent overtrading
+                confidence = 0.65 + volume_strength  # Increased from 0.45 to 0.65 for better signal generation
                 return {
                     'action': 'BUY',
                     'confidence': min(0.8, confidence),  # Reduced max from 0.95 to 0.8
@@ -450,7 +450,7 @@ class AdaptiveStrategyEngine:
             
             # SHORT signal - Mean reversion rejection
             elif overbought_rsi and near_upper_bb:
-                confidence = 0.45 + volume_strength  # Reduced from 0.65 to prevent overtrading
+                confidence = 0.65 + volume_strength  # Increased from 0.45 to 0.65 for better signal generation
                 return {
                     'action': 'SELL',
                     'confidence': min(0.8, confidence),  # Reduced max from 0.95 to 0.8
@@ -586,7 +586,7 @@ class AdaptiveStrategyEngine:
                         regime = 'sideways_market'
                     
                     # Get confidence threshold from custom params or use moderate default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.75) if custom_params else 0.75  # Increased from 0.5 to 0.75 to reduce overtrading
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.62) if custom_params else 0.62  # Balanced: not too low (overtrading) not too high (no trades)
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
                     # IMPORTANT: Pass df slice to prevent API calls during backtest
