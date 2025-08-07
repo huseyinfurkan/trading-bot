@@ -62,8 +62,8 @@ class AdaptiveStrategyEngine:
                 'bb_std_dev': 2.0,     # Standard 2 std dev for 5m
                 # RSI (5m optimized)
                 'rsi_period': 14,
-                'rsi_oversold': 30,    # Standard thresholds for 5m
-                'rsi_overbought': 70,
+                'rsi_oversold': 25,    # More restrictive for higher quality signals (was 30)
+                'rsi_overbought': 75,  # More restrictive for higher quality signals (was 70)
                 # Stochastic RSI
                 'stochrsi_period': 14,
                 'stochrsi_oversold': 20,
@@ -309,14 +309,14 @@ class AdaptiveStrategyEngine:
             sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             sma10_falling = (sma_10.iloc[-1] < sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             
-            # IMPROVED TREND CONDITIONS (more flexible)
+            # IMPROVED TREND CONDITIONS (stricter for quality signals)
             # LONG: Strong alignment with price momentum
-            strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20)  # More flexible
-            uptrend_momentum = (current_price > current_sma20 and sma10_rising)  # Alternative condition
+            strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20 and current_sma20 > current_sma50)  # Stricter: all MAs aligned
+            uptrend_momentum = (current_price > current_sma20 and sma10_rising and current_sma10 > current_sma50)  # Additional confirmation
             
             # SHORT: Strong downward alignment with price momentum  
-            strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20)  # More flexible
-            downtrend_momentum = (current_price < current_sma20 and sma10_falling)  # Alternative condition
+            strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20 and current_sma20 < current_sma50)  # Stricter: all MAs aligned
+            downtrend_momentum = (current_price < current_sma20 and sma10_falling and current_sma10 < current_sma50)  # Additional confirmation
             
             # Volume confirmation (if available)
             volume_boost = 0.0
@@ -326,7 +326,7 @@ class AdaptiveStrategyEngine:
                 if current_vol > vol_ma.iloc[-1] * 1.2:  # 20% above average
                     volume_boost = 0.15
             
-            if strong_uptrend or uptrend_momentum:  # More flexible entry conditions
+            if strong_uptrend and uptrend_momentum:  # Require BOTH strong trend AND momentum confirmation
                 confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'BUY',
@@ -343,7 +343,7 @@ class AdaptiveStrategyEngine:
                     'take_profit': current_price * 1.08,  # 8% target
                     'research_basis': '15m trend following'
                 }
-            elif strong_downtrend or downtrend_momentum:  # More flexible entry conditions
+            elif strong_downtrend and downtrend_momentum:  # Require BOTH strong trend AND momentum confirmation
                 confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'SELL',
@@ -411,14 +411,14 @@ class AdaptiveStrategyEngine:
             rsi = 100 - (100 / (1 + rs))
             current_rsi = rsi.iloc[-1]
             
-            # SIMPLIFIED MEAN REVERSION CONDITIONS
+            # SIMPLIFIED MEAN REVERSION CONDITIONS (more restrictive)
             # BUY: Oversold conditions (bounce from bottom)
             oversold_rsi = current_rsi < params['rsi_oversold']
-            near_lower_bb = bb_position < 0.2  # Near lower Bollinger Band
+            near_lower_bb = bb_position < 0.15  # Very near lower Bollinger Band (more restrictive)
             
             # SELL: Overbought conditions (rejection from top)
             overbought_rsi = current_rsi > params['rsi_overbought']
-            near_upper_bb = bb_position > 0.8  # Near upper Bollinger Band
+            near_upper_bb = bb_position > 0.85  # Very near upper Bollinger Band (more restrictive)
             
             # Volume confirmation for 5m scalping
             volume_strength = 0.0
@@ -586,7 +586,7 @@ class AdaptiveStrategyEngine:
                         regime = 'sideways_market'
                     
                     # Get confidence threshold from custom params or use moderate default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.62) if custom_params else 0.62  # Balanced: not too low (overtrading) not too high (no trades)
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.70) if custom_params else 0.70  # Higher threshold for more selective trading
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
                     # IMPORTANT: Pass df slice to prevent API calls during backtest
@@ -643,14 +643,14 @@ class AdaptiveStrategyEngine:
                     else:
                         # Strategy-specific OPTIMIZED exit conditions for new timeframes
                         if actual_strategy == 'alligator_ma_momentum':
-                            profit_target = 0.06  # 6% profit target (15m trend following)
-                            stop_loss = 0.03      # 3% stop loss (reasonable for 15m)
+                            profit_target = 0.08   # 8% profit target (higher for 15m trend following to account for fees)
+                            stop_loss = 0.025      # 2.5% stop loss (reasonable for 15m)
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            profit_target = 0.025  # 2.5% profit target (5m mean reversion)
-                            stop_loss = 0.015      # 1.5% stop loss (tight for 5m scalping)
+                            profit_target = 0.04   # 4% profit target (higher for 5m mean reversion to account for fees)
+                            stop_loss = 0.012      # 1.2% stop loss (tight but not too tight for 5m scalping)
                         else:
-                            profit_target = 0.04   # 4% default
-                            stop_loss = 0.025      # 2.5% default
+                            profit_target = 0.05   # 5% default
+                            stop_loss = 0.02       # 2% default
                     
                     # Apply exit conditions
                     if pnl_pct > profit_target:
