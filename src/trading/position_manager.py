@@ -110,9 +110,7 @@ class PositionManager:
                     entry_price=adjusted_entry_price,
                     stop_loss=stop_loss,
                     confidence=confidence,
-                    strategy=strategy,
-                    current_price=adjusted_entry_price,
-                    account_balance=account_balance
+                    strategy=strategy
                 )
                 
                 if not size_result.get('allowed', False):

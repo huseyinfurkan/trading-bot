@@ -39,6 +39,11 @@ class BotCoordinator:
         self.health_checks = 0
         self.risk_checks = 0
         self.maintenance_runs = 0
+        self.performance_metrics = {
+            'error_counts': [],
+            'system_health': [],
+            'risk_levels': []
+        }
         
         logger.info("🎯 Bot Coordinator initialized")
     
