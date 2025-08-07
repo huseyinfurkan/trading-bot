@@ -272,9 +272,18 @@ class LiveDataEngine:
             recommended_strategy = market_regime.get('best_strategy', 'bollinger_rsi_stochrsi')
             
             # Get actual trading signal from adaptive strategy
+            current_price = live_data.get('close', 0) if live_data else 0
+            current_volume = live_data.get('volume', 0) if live_data else 0
+            
             strategy_signal = await self.strategy_engine.get_entry_signal(
                 symbol=symbol, 
-                market_data={'symbol': symbol, 'price': 0, 'volume': 0, 'timestamp': datetime.now()}, 
+                market_data={
+                    'symbol': symbol, 
+                    'price': current_price, 
+                    'volume': current_volume, 
+                    'timestamp': datetime.now(),
+                    'indicators': market_data.get('indicators', {})
+                }, 
                 regime=market_regime.get('regime', 'sideways_market') if isinstance(market_regime, dict) else market_regime
             )
             if strategy_signal.get('action') == 'HOLD':

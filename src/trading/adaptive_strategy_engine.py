@@ -305,6 +305,10 @@ class AdaptiveStrategyEngine:
             current_sma20 = sma_20.iloc[-1] if not pd.isna(sma_20.iloc[-1]) else current_price
             current_sma50 = sma_50.iloc[-1] if not pd.isna(sma_50.iloc[-1]) else current_price
             
+            # Momentum confirmation (calculate BEFORE using in conditions)
+            sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
+            sma10_falling = (sma_10.iloc[-1] < sma_10.iloc[-2]) if len(sma_10) >= 2 else False
+            
             # IMPROVED TREND CONDITIONS (more flexible)
             # LONG: Strong alignment with price momentum
             strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20)  # More flexible
@@ -313,10 +317,6 @@ class AdaptiveStrategyEngine:
             # SHORT: Strong downward alignment with price momentum  
             strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20)  # More flexible
             downtrend_momentum = (current_price < current_sma20 and sma10_falling)  # Alternative condition
-            
-            # Momentum confirmation
-            sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
-            sma10_falling = (sma_10.iloc[-1] < sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             
             # Volume confirmation (if available)
             volume_boost = 0.0
