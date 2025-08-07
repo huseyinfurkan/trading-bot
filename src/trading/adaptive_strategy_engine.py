@@ -459,10 +459,17 @@ class AdaptiveStrategyEngine:
             @use_named_args(space)
             def objective(**params):
                 try:
+                    # Create event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
                     # Run backtest with these parameters
-                    result = asyncio.run(self._evaluate_parameters_comprehensive(
+                    result = loop.run_until_complete(self._evaluate_parameters_comprehensive(
                         strategy_name, historical_data, params
                     ))
+                    
+                    # Clean up
+                    loop.close()
                     
                     if result and result.get('score', -np.inf) > -np.inf:
                         # Return negative score (minimization problem)
