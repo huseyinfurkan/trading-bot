@@ -62,8 +62,8 @@ class AdaptiveStrategyEngine:
                 'bb_std_dev': 2.0,     # Standard 2 std dev for 5m
                 # RSI (5m optimized)
                 'rsi_period': 14,
-                'rsi_oversold': 25,    # More restrictive for higher quality signals (was 30)
-                'rsi_overbought': 75,  # More restrictive for higher quality signals (was 70)
+                'rsi_oversold': 30,    # More realistic oversold level (was 25)
+                'rsi_overbought': 70,  # More realistic overbought level (was 75)
                 # Stochastic RSI
                 'stochrsi_period': 14,
                 'stochrsi_oversold': 20,
@@ -309,14 +309,14 @@ class AdaptiveStrategyEngine:
             sma10_rising = (sma_10.iloc[-1] > sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             sma10_falling = (sma_10.iloc[-1] < sma_10.iloc[-2]) if len(sma_10) >= 2 else False
             
-            # IMPROVED TREND CONDITIONS (stricter for quality signals)
+            # IMPROVED TREND CONDITIONS (realistic for actual trading)
             # LONG: Strong alignment with price momentum
-            strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20 and current_sma20 > current_sma50)  # Stricter: all MAs aligned
-            uptrend_momentum = (current_price > current_sma20 and sma10_rising and current_sma10 > current_sma50)  # Additional confirmation
+            strong_uptrend = (current_price > current_sma10 and current_sma10 > current_sma20)  # Reasonable trend alignment
+            uptrend_momentum = (current_price > current_sma20 and sma10_rising)  # Momentum confirmation
             
             # SHORT: Strong downward alignment with price momentum  
-            strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20 and current_sma20 < current_sma50)  # Stricter: all MAs aligned
-            downtrend_momentum = (current_price < current_sma20 and sma10_falling and current_sma10 < current_sma50)  # Additional confirmation
+            strong_downtrend = (current_price < current_sma10 and current_sma10 < current_sma20)  # Reasonable downtrend
+            downtrend_momentum = (current_price < current_sma20 and sma10_falling)  # Momentum confirmation
             
             # Volume confirmation (if available)
             volume_boost = 0.0
@@ -326,7 +326,7 @@ class AdaptiveStrategyEngine:
                 if current_vol > vol_ma.iloc[-1] * 1.2:  # 20% above average
                     volume_boost = 0.15
             
-            if strong_uptrend and uptrend_momentum:  # Require BOTH strong trend AND momentum confirmation
+            if strong_uptrend or uptrend_momentum:  # Either strong trend OR momentum (more realistic)
                 confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'BUY',
@@ -343,7 +343,7 @@ class AdaptiveStrategyEngine:
                     'take_profit': current_price * 1.08,  # 8% target
                     'research_basis': '15m trend following'
                 }
-            elif strong_downtrend and downtrend_momentum:  # Require BOTH strong trend AND momentum confirmation
+            elif strong_downtrend or downtrend_momentum:  # Either strong trend OR momentum (more realistic)
                 confidence = 0.65 + volume_boost  # Increased from 0.5 to 0.65 for better signal generation
                 return {
                     'action': 'SELL',
@@ -411,14 +411,14 @@ class AdaptiveStrategyEngine:
             rsi = 100 - (100 / (1 + rs))
             current_rsi = rsi.iloc[-1]
             
-            # SIMPLIFIED MEAN REVERSION CONDITIONS (more restrictive)
+            # SIMPLIFIED MEAN REVERSION CONDITIONS (realistic)
             # BUY: Oversold conditions (bounce from bottom)
             oversold_rsi = current_rsi < params['rsi_oversold']
-            near_lower_bb = bb_position < 0.15  # Very near lower Bollinger Band (more restrictive)
+            near_lower_bb = bb_position < 0.25  # Near lower Bollinger Band (realistic)
             
             # SELL: Overbought conditions (rejection from top)
             overbought_rsi = current_rsi > params['rsi_overbought']
-            near_upper_bb = bb_position > 0.85  # Very near upper Bollinger Band (more restrictive)
+            near_upper_bb = bb_position > 0.75  # Near upper Bollinger Band (realistic)
             
             # Volume confirmation for 5m scalping
             volume_strength = 0.0
@@ -587,7 +587,7 @@ class AdaptiveStrategyEngine:
                         regime = 'sideways_market'
                     
                     # Get confidence threshold from custom params or use moderate default
-                    confidence_threshold = custom_params.get('confidence_threshold', 0.70) if custom_params else 0.70  # Higher threshold for more selective trading
+                    confidence_threshold = custom_params.get('confidence_threshold', 0.60) if custom_params else 0.60  # Balanced threshold for reasonable trading
                     
                     # Use get_entry_signal method (same as live trading) with AI filtering
                     # IMPORTANT: Pass df slice to prevent API calls during backtest
