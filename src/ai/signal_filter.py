@@ -307,10 +307,91 @@ class AISignalFilter:
         return signals
     
     def _get_ml_signals(self, df: pd.DataFrame, symbol: str) -> List[Dict[str, Any]]:
-        """ML tabanlı sinyaller - DISABLED (fake random signals removed)"""
-        # DISABLED: Fake random ML signals removed for accurate backtesting
-        # Real ML signals come from trained models via filter_signal() method
-        return []
+        """ML tabanlı sinyaller - Real trained model predictions"""
+        signals = []
+        
+        try:
+            if len(df) < 50:  # Need sufficient data for ML
+                return signals
+            
+            # Get the trained models
+            models = self.models.get('5m', {})  # Use 5m models
+            
+            if not models:
+                logger.debug("No trained ML models available")
+                return signals
+            
+            # Prepare features for prediction
+            features = self._extract_features(df.tail(1))
+            if not features:
+                return signals
+            
+            # Get predictions from both models
+            gb_model = models.get('GradientBoosting')
+            rf_model = models.get('RandomForest')
+            
+            predictions = []
+            
+            if gb_model:
+                try:
+                    features_scaled = self.scalers['5m']['GradientBoosting'].transform([features])
+                    pred_proba = gb_model.predict_proba(features_scaled)[0]
+                    pred_class = gb_model.predict(features_scaled)[0]
+                    predictions.append({
+                        'model': 'GradientBoosting',
+                        'class': pred_class,
+                        'probabilities': pred_proba,
+                        'confidence': max(pred_proba)
+                    })
+                except Exception as e:
+                    logger.debug(f"GB model prediction error: {e}")
+            
+            if rf_model:
+                try:
+                    features_scaled = self.scalers['5m']['RandomForest'].transform([features])
+                    pred_proba = rf_model.predict_proba(features_scaled)[0]
+                    pred_class = rf_model.predict(features_scaled)[0]
+                    predictions.append({
+                        'model': 'RandomForest',
+                        'class': pred_class,
+                        'probabilities': pred_proba,
+                        'confidence': max(pred_proba)
+                    })
+                except Exception as e:
+                    logger.debug(f"RF model prediction error: {e}")
+            
+            # Generate signals from predictions
+            for pred in predictions:
+                if pred['confidence'] > 0.6:  # Only high-confidence predictions
+                    signal_type = 'HOLD'
+                    if pred['class'] == 2:  # BUY class
+                        signal_type = 'BUY'
+                    elif pred['class'] == 1:  # SELL class
+                        signal_type = 'SELL'
+                    
+                    if signal_type != 'HOLD':
+                        signals.append({
+                            'type': signal_type,
+                            'strength': pred['confidence'],
+                            'source': f"ML_{pred['model']}",
+                            'confidence': pred['confidence'],
+                            'price': df['close'].iloc[-1],
+                            'timestamp': datetime.now(),
+                            'details': {
+                                'model': pred['model'],
+                                'predicted_class': pred['class'],
+                                'probabilities': pred['probabilities'].tolist(),
+                                'features_count': len(features)
+                            }
+                        })
+            
+            if signals:
+                logger.debug(f"Generated {len(signals)} ML signals from trained models")
+            
+        except Exception as e:
+            logger.error(f"❌ ML signals error: {e}")
+        
+        return signals
     
     def _get_volume_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Volume tabanlı sinyaller"""

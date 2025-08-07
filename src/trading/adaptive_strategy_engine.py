@@ -56,7 +56,18 @@ class AdaptiveStrategyEngine:
                 'sma_200': 200,       # Trend filter
                 'fast_sma': 10,       # 15m optimized
                 'slow_sma': 20,       # 15m optimized 
-                'max_hold_bars': 12  # 15m timeframe: 12 bars = 3 hours
+                'max_hold_bars': 12,  # 15m timeframe: 12 bars = 3 hours
+                # Exit Strategy Parameters
+                'profit_target': 0.08,   # 8% profit target
+                'stop_loss': 0.025,      # 2.5% stop loss
+                'risk_per_trade': 0.02,  # 2% risk per trade
+                'leverage': 2.0,         # Moderate leverage
+                # Advanced Exit Parameters
+                'trailing_stop_enabled': True,
+                'trailing_stop_activation': 0.03,  # Start trailing after 3% profit
+                'trailing_stop_distance': 0.015,   # Trail 1.5% behind peak
+                'volatility_stop_enabled': True,
+                'atr_stop_multiplier': 2.0         # Stop at 2x ATR from entry
             },
             'bollinger_rsi_stochrsi': {
                 # Bollinger Bands (5m optimized)
@@ -70,7 +81,18 @@ class AdaptiveStrategyEngine:
                 'stochrsi_period': 14,
                 'stochrsi_oversold': 20,
                 'stochrsi_overbought': 80,
-                'max_hold_bars': 6    # 5m timeframe: 6 bars = 30 minutes
+                'max_hold_bars': 6,    # 5m timeframe: 6 bars = 30 minutes
+                # Exit Strategy Parameters
+                'profit_target': 0.04,   # 4% profit target
+                'stop_loss': 0.012,      # 1.2% stop loss
+                'risk_per_trade': 0.015, # 1.5% risk per trade
+                'leverage': 1.8,         # Moderate leverage
+                # Advanced Exit Parameters
+                'trailing_stop_enabled': True,
+                'trailing_stop_activation': 0.02,  # Start trailing after 2% profit
+                'trailing_stop_distance': 0.008,   # Trail 0.8% behind peak
+                'volatility_stop_enabled': True,
+                'atr_stop_multiplier': 1.5         # Stop at 1.5x ATR from entry
             }
         }
         
@@ -122,47 +144,117 @@ class AdaptiveStrategyEngine:
             return {'regime': 'sideways_market', 'confidence': 0.5, 'recommended_strategy': 'bollinger_rsi_stochrsi'}
     
     def _comprehensive_regime_analysis(self, data_15m, data_1h, data_4h) -> Dict[str, Any]:
-        """Comprehensive multi-timeframe analysis"""
+        """ENHANCED multi-timeframe analysis with advanced indicators"""
         try:
-            # Volatility analysis (15m for precision)
+            current_price = data_15m['close'].iloc[-1]
+            
+            # 1. VOLATILITY REGIME ANALYSIS
             returns_15m = data_15m['close'].pct_change().dropna()
             volatility = returns_15m.std() * np.sqrt(96)  # Annualized
             
-            # Trend analysis (4h for stability)
-            closes_4h = data_4h['close'].values
-            sma_20_4h = pd.Series(closes_4h).rolling(20).mean().iloc[-1]
-            current_price = closes_4h[-1]
-            trend_strength = abs((current_price - sma_20_4h) / sma_20_4h)
+            # GARCH-like volatility regime detection
+            vol_5_day = returns_15m.tail(96*5).std() * np.sqrt(96)  # 5-day vol
+            vol_20_day = returns_15m.tail(96*20).std() * np.sqrt(96)  # 20-day vol
+            vol_regime = 'high' if vol_5_day > vol_20_day * 1.5 else 'low' if vol_5_day < vol_20_day * 0.7 else 'normal'
             
-            # Range analysis (1h for balance)
+            # 2. TREND REGIME ANALYSIS (Multi-timeframe)
+            # 4h for major trend
+            closes_4h = data_4h['close']
+            sma_10_4h = closes_4h.rolling(10).mean().iloc[-1]
+            sma_20_4h = closes_4h.rolling(20).mean().iloc[-1]
+            sma_50_4h = closes_4h.rolling(50).mean().iloc[-1] if len(closes_4h) >= 50 else sma_20_4h
+            
+            # 1h for intermediate trend
+            closes_1h = data_1h['close']
+            sma_20_1h = closes_1h.rolling(20).mean().iloc[-1]
+            
+            # Trend strength calculation
+            major_trend_strength = abs((current_price - sma_50_4h) / sma_50_4h) if sma_50_4h > 0 else 0
+            intermediate_trend_strength = abs((current_price - sma_20_1h) / sma_20_1h) if sma_20_1h > 0 else 0
+            
+            # Trend direction consensus
+            major_trend_up = current_price > sma_10_4h > sma_20_4h > sma_50_4h
+            major_trend_down = current_price < sma_10_4h < sma_20_4h < sma_50_4h
+            intermediate_trend_up = current_price > sma_20_1h
+            
+            # 3. MOMENTUM ANALYSIS
+            # ADX-like calculation for trend strength
+            high_15m = data_15m['high']
+            low_15m = data_15m['low']
+            close_15m = data_15m['close']
+            
+            tr = np.maximum(high_15m - low_15m, 
+                 np.maximum(abs(high_15m - close_15m.shift(1)), 
+                           abs(low_15m - close_15m.shift(1))))
+            atr = tr.rolling(14).mean().iloc[-1]
+            atr_pct = atr / current_price
+            
+            # 4. VOLUME PROFILE ANALYSIS
+            volume_15m = data_15m['volume']
+            volume_sma_20 = volume_15m.rolling(20).mean().iloc[-1]
+            current_volume = volume_15m.iloc[-1]
+            volume_strength = 'high' if current_volume > volume_sma_20 * 1.5 else 'low' if current_volume < volume_sma_20 * 0.5 else 'normal'
+            
+            # 5. RANGE ANALYSIS (Support/Resistance)
             high_24h = data_1h['high'].tail(24).max()
             low_24h = data_1h['low'].tail(24).min()
             range_pct = (high_24h - low_24h) / current_price
             
-            # Volume analysis
-            volume_avg = data_1h['volume'].tail(24).mean()
-            volume_current = data_1h['volume'].iloc[-1]
-            volume_ratio = volume_current / volume_avg if volume_avg > 0 else 1.0
+            # Price position in range
+            price_position = (current_price - low_24h) / (high_24h - low_24h) if high_24h > low_24h else 0.5
             
-            # Momentum analysis
-            momentum_short = (closes_4h[-1] - closes_4h[-4]) / closes_4h[-4] if len(closes_4h) >= 4 else 0
-            momentum_medium = (closes_4h[-1] - closes_4h[-12]) / closes_4h[-12] if len(closes_4h) >= 12 else 0
+            # 6. BREAKOUT DETECTION
+            # Recent breakout above resistance
+            resistance_break = current_price > data_1h['high'].rolling(20).max().iloc[-2]
+            support_break = current_price < data_1h['low'].rolling(20).min().iloc[-2]
             
-            # Confidence calculation
-            confidence = min(0.95, max(0.3, 
-                0.3 + (volume_ratio - 0.5) * 0.2 + 
-                (volatility * 10) * 0.3 + 
-                trend_strength * 0.2
-            ))
+            # 7. ADVANCED CONFIDENCE CALCULATION
+            confidence_factors = []
+            
+            # Trend consistency across timeframes
+            trend_consistency = 0.5
+            if major_trend_up and intermediate_trend_up:
+                trend_consistency = 0.9
+            elif major_trend_down and not intermediate_trend_up:
+                trend_consistency = 0.9
+            elif major_trend_up or intermediate_trend_up:
+                trend_consistency = 0.7
+                
+            confidence_factors.append(trend_consistency * 0.3)
+            
+            # Volume confirmation
+            volume_confirmation = min(1.0, current_volume / volume_sma_20) if volume_sma_20 > 0 else 0.5
+            confidence_factors.append(volume_confirmation * 0.2)
+            
+            # Volatility factor (higher vol = more opportunities but less certainty)
+            vol_factor = 0.8 if vol_regime == 'normal' else 0.6 if vol_regime == 'high' else 0.4
+            confidence_factors.append(vol_factor * 0.2)
+            
+            # Breakout confirmation
+            breakout_factor = 0.9 if resistance_break or support_break else 0.5
+            confidence_factors.append(breakout_factor * 0.15)
+            
+            # Range position (avoid extremes)
+            range_factor = 1.0 - abs(price_position - 0.5) * 1.5  # Prefer middle range
+            confidence_factors.append(max(0.3, range_factor) * 0.15)
+            
+            final_confidence = min(0.95, max(0.3, sum(confidence_factors)))
             
             return {
                 'volatility': volatility,
-                'trend_strength': trend_strength,
+                'vol_regime': vol_regime,
+                'trend_strength': major_trend_strength,
+                'intermediate_trend_strength': intermediate_trend_strength,
+                'major_trend_up': major_trend_up,
+                'major_trend_down': major_trend_down,
+                'intermediate_trend_up': intermediate_trend_up,
+                'atr_pct': atr_pct,
+                'volume_strength': volume_strength,
                 'range_pct': range_pct,
-                'volume_ratio': volume_ratio,
-                'momentum_short': momentum_short,
-                'momentum_medium': momentum_medium,
-                'confidence': confidence,
+                'price_position': price_position,
+                'resistance_break': resistance_break,
+                'support_break': support_break,
+                'confidence': final_confidence,
                 'range_analysis': 'wide' if range_pct > 0.08 else 'normal' if range_pct > 0.04 else 'tight'
             }
             
@@ -175,19 +267,46 @@ class AdaptiveStrategyEngine:
             }
     
     def _determine_optimal_regime(self, analysis: Dict) -> str:
-        """Determine optimal market regime based on research"""
-        vol = analysis['volatility']
-        trend = analysis['trend_strength']
-        range_pct = analysis['range_pct']
-        momentum = abs(analysis['momentum_short'])
+        """ENHANCED market regime detection with advanced indicators"""
+        # Extract enhanced analysis data
+        vol_regime = analysis.get('vol_regime', 'normal')
+        major_trend_up = analysis.get('major_trend_up', False)
+        major_trend_down = analysis.get('major_trend_down', False)
+        resistance_break = analysis.get('resistance_break', False)
+        support_break = analysis.get('support_break', False)
+        trend_strength = analysis.get('trend_strength', 0)
+        atr_pct = analysis.get('atr_pct', 0)
+        volume_strength = analysis.get('volume_strength', 'normal')
+        price_position = analysis.get('price_position', 0.5)
         
-        # Research-based regime classification
-        if vol > 0.05 and trend > 0.04:  # High volatility + strong trend
-            return 'breakout_market'
-        elif vol > 0.04 and range_pct > 0.08:  # High vol + wide range
-            return 'volatile_ranging_market'
-        elif trend > 0.06 or momentum > 0.03:  # Strong trend or momentum
-            return 'trending_market'
+        # 1. BREAKOUT DETECTION (Priority 1)
+        if (resistance_break or support_break) and volume_strength == 'high':
+            if vol_regime == 'high' and atr_pct > 0.03:
+                return 'explosive_breakout_market'
+            else:
+                return 'breakout_market'
+        
+        # 2. STRONG TREND DETECTION (Priority 2)
+        if (major_trend_up or major_trend_down) and trend_strength > 0.05:
+            if vol_regime == 'high':
+                return 'volatile_trending_market'
+            elif volume_strength == 'high':
+                return 'strong_trending_market'
+            else:
+                return 'trending_market'
+        
+        # 3. RANGING MARKET DETECTION (Priority 3)
+        if not major_trend_up and not major_trend_down:
+            if vol_regime == 'high' and atr_pct > 0.04:
+                return 'high_volatility_ranging_market'
+            elif 0.3 < price_position < 0.7:  # Middle of range
+                return 'consolidation_market'
+            else:
+                return 'sideways_market'
+        
+        # 4. MEAN REVERSION CONDITIONS (Priority 4)
+        if price_position > 0.8 or price_position < 0.2:  # Near extremes
+            return 'mean_reversion_market'
         elif vol < 0.015 and range_pct < 0.03:  # Low vol + tight range
             return 'consolidation_market'
         elif range_pct > 0.06:  # Wide range but moderate vol
@@ -514,8 +633,29 @@ class AdaptiveStrategyEngine:
             position_size = 0
             entry_price = 0
             entry_bar = 0  # Track when position was entered
+            
+            # Advanced exit strategy tracking
+            trailing_stop = {
+                'enabled': False,
+                'peak_price': 0,
+                'stop_price': 0,
+                'activated': False
+            }
+            entry_atr = 0  # ATR at entry for volatility-based stops
             trades = []
             equity_curve = []
+            
+            # Enhanced portfolio risk tracking
+            portfolio_risk = {
+                'total_exposure': 0.0,
+                'daily_trades': 0,
+                'consecutive_losses': 0,
+                'daily_pnl': 0.0,
+                'max_drawdown': 0.0,
+                'peak_capital': initial_capital,
+                'current_drawdown': 0.0,
+                'risk_limit_breached': False
+            }
             
             # Strategy-specific parameters
             if actual_strategy == 'alligator_ma_momentum':
@@ -598,7 +738,7 @@ class AdaptiveStrategyEngine:
                     # Use combined_confidence if available, otherwise use raw confidence
                     signal_confidence = signal.get('combined_confidence', signal.get('confidence', 0.0))
                     
-                    if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold:
+                    if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold and not portfolio_risk['risk_limit_breached']:
                         # Enter position with RISK MANAGER sizing (consistent with live trading)
                         if self.risk_manager:
                             # Use RiskManager for consistent position sizing
@@ -620,29 +760,17 @@ class AdaptiveStrategyEngine:
                                 
                             except Exception as e:
                                 logger.warning(f"RiskManager error: {e}, using fallback sizing")
-                                # Fallback to realistic hardcoded sizing
-                                if actual_strategy == 'alligator_ma_momentum':
-                                    risk_per_trade = 0.02
-                                    leverage = 2.0
-                                else:
-                                    risk_per_trade = 0.015
-                                    leverage = 1.8
+                                # Fallback to config-based sizing
+                                params = self.adaptive_params.get(actual_strategy, {})
+                                risk_per_trade = params.get('risk_per_trade', 0.02)
+                                leverage = params.get('leverage', 2.0)
                                 position_value = capital * risk_per_trade * leverage
                                 position_size = position_value / current_price
                         else:
-                            # Fallback: Use realistic hardcoded sizing (for backward compatibility)
-                            if actual_strategy == 'alligator_ma_momentum':
-                                # Realistic sizing for 15m trend following (AI filtered signals)
-                                risk_per_trade = 0.02   # 2% risk (realistic for trend following)
-                                leverage = 2.0          # Moderate leverage for trend trades
-                            elif actual_strategy == 'bollinger_rsi_stochrsi':
-                                # Realistic sizing for 5m mean reversion scalping (AI filtered)
-                                risk_per_trade = 0.015  # 1.5% risk (realistic for mean reversion)
-                                leverage = 1.8          # Moderate leverage for quick trades
-                            else:
-                                # Default realistic sizing
-                                risk_per_trade = 0.02
-                                leverage = 2.0
+                            # Get risk parameters from strategy config
+                            params = self.adaptive_params.get(actual_strategy, {})
+                            risk_per_trade = params.get('risk_per_trade', 0.02)  # Default 2%
+                            leverage = params.get('leverage', 2.0)               # Default 2x
                             
                             position_value = capital * risk_per_trade * leverage
                             position_size = position_value / current_price
@@ -659,7 +787,25 @@ class AdaptiveStrategyEngine:
                         entry_fee = position_value * trading_fee
                         capital -= entry_fee
                         
-                        logger.debug(f"📈 {position} Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}, Fee: ${entry_fee:.2f}")
+                        # Initialize advanced exit strategies
+                        trailing_stop['enabled'] = params.get('trailing_stop_enabled', False)
+                        trailing_stop['peak_price'] = current_price
+                        trailing_stop['activated'] = False
+                        
+                        # Calculate volatility-based stop using current ATR
+                        current_atr = current_row.get('atr', current_price * 0.02)  # Fallback to 2% of price
+                        entry_atr = current_atr
+                        
+                        # Update portfolio risk tracking
+                        portfolio_risk['total_exposure'] = position_value
+                        portfolio_risk['daily_trades'] += 1
+                        
+                        # Check portfolio risk limits
+                        if portfolio_risk['daily_trades'] > 10:  # Max 10 trades per day
+                            portfolio_risk['risk_limit_breached'] = True
+                            logger.warning(f"⚠️ Daily trade limit exceeded: {portfolio_risk['daily_trades']}")
+                        
+                        logger.debug(f"📈 {position} Entry: {symbol} @ ${current_price:.4f}, Size: {position_size:.6f}, Fee: ${entry_fee:.2f}, Exposure: ${position_value:.2f}")
                 
                 else:  # Have position
                     # Check exit conditions - Strategy-specific logic with custom params support
@@ -676,25 +822,82 @@ class AdaptiveStrategyEngine:
                         profit_target = custom_params.get('profit_target', 0.08)
                         stop_loss = custom_params.get('stop_loss', 0.04)
                     else:
-                        # Strategy-specific OPTIMIZED exit conditions for new timeframes
-                        if actual_strategy == 'alligator_ma_momentum':
-                            profit_target = 0.08   # 8% profit target (higher for 15m trend following to account for fees)
-                            stop_loss = 0.025      # 2.5% stop loss (reasonable for 15m)
-                        elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            profit_target = 0.04   # 4% profit target (higher for 5m mean reversion to account for fees)
-                            stop_loss = 0.012      # 1.2% stop loss (tight but not too tight for 5m scalping)
-                        else:
-                            profit_target = 0.05   # 5% default
-                            stop_loss = 0.02       # 2% default
+                        # Get exit strategy parameters from config
+                        params = self.adaptive_params.get(actual_strategy, {})
+                        profit_target = params.get('profit_target', 0.05)  # Default 5%
+                        stop_loss = params.get('stop_loss', 0.02)           # Default 2%
                     
-                    # Apply exit conditions
+                    # 🚀 ADVANCED EXIT CONDITIONS
+                    
+                    # 1. UPDATE TRAILING STOP
+                    if trailing_stop['enabled']:
+                        if position == 'LONG':
+                            # Update peak for long position
+                            if current_price > trailing_stop['peak_price']:
+                                trailing_stop['peak_price'] = current_price
+                            
+                            # Check if trailing should be activated
+                            if not trailing_stop['activated'] and pnl_pct > params.get('trailing_stop_activation', 0.03):
+                                trailing_stop['activated'] = True
+                                logger.debug(f"🔄 Trailing stop activated at {pnl_pct:.2%} profit")
+                            
+                            # Calculate trailing stop price
+                            if trailing_stop['activated']:
+                                trail_distance = params.get('trailing_stop_distance', 0.015)
+                                trailing_stop['stop_price'] = trailing_stop['peak_price'] * (1 - trail_distance)
+                        
+                        else:  # SHORT position
+                            # Update peak (lowest price) for short position
+                            if current_price < trailing_stop['peak_price']:
+                                trailing_stop['peak_price'] = current_price
+                            
+                            # Check if trailing should be activated
+                            if not trailing_stop['activated'] and pnl_pct > params.get('trailing_stop_activation', 0.03):
+                                trailing_stop['activated'] = True
+                                logger.debug(f"🔄 Trailing stop activated at {pnl_pct:.2%} profit")
+                            
+                            # Calculate trailing stop price
+                            if trailing_stop['activated']:
+                                trail_distance = params.get('trailing_stop_distance', 0.015)
+                                trailing_stop['stop_price'] = trailing_stop['peak_price'] * (1 + trail_distance)
+                    
+                    # 2. CHECK ALL EXIT CONDITIONS
+                    
+                    # Standard profit target
                     if pnl_pct > profit_target:
                         should_exit = True
                         exit_reason = "Profit target"
+                    
+                    # Trailing stop exit
+                    elif trailing_stop['activated']:
+                        if position == 'LONG' and current_price <= trailing_stop['stop_price']:
+                            should_exit = True
+                            exit_reason = f"Trailing stop (peak: ${trailing_stop['peak_price']:.4f})"
+                        elif position == 'SHORT' and current_price >= trailing_stop['stop_price']:
+                            should_exit = True
+                            exit_reason = f"Trailing stop (peak: ${trailing_stop['peak_price']:.4f})"
+                    
+                    # Volatility-based stop
+                    elif params.get('volatility_stop_enabled', False):
+                        atr_multiplier = params.get('atr_stop_multiplier', 2.0)
+                        if position == 'LONG':
+                            volatility_stop = entry_price - (entry_atr * atr_multiplier)
+                            if current_price <= volatility_stop:
+                                should_exit = True
+                                exit_reason = f"Volatility stop ({atr_multiplier}x ATR)"
+                        else:  # SHORT
+                            volatility_stop = entry_price + (entry_atr * atr_multiplier)
+                            if current_price >= volatility_stop:
+                                should_exit = True
+                                exit_reason = f"Volatility stop ({atr_multiplier}x ATR)"
+                    
+                    # Standard stop loss (if no trailing stop is active)
                     elif pnl_pct < -stop_loss:
                         should_exit = True
                         exit_reason = "Stop loss"
-                    elif (i - entry_bar) > params['max_hold_bars']:  # Time limit in bars
+                    
+                    # Time limit
+                    elif (i - entry_bar) > params['max_hold_bars']:
                         should_exit = True
                         exit_reason = "Time limit"
                 
@@ -709,6 +912,34 @@ class AdaptiveStrategyEngine:
                         pnl -= exit_fee  # Subtract exit fee from PnL
                             
                         capital += pnl
+                        
+                        # Update portfolio risk tracking
+                        portfolio_risk['total_exposure'] = 0.0  # No position
+                        portfolio_risk['daily_pnl'] += pnl
+                        
+                        # Track consecutive losses
+                        if pnl < 0:
+                            portfolio_risk['consecutive_losses'] += 1
+                        else:
+                            portfolio_risk['consecutive_losses'] = 0  # Reset on profit
+                        
+                        # Update drawdown tracking
+                        if capital > portfolio_risk['peak_capital']:
+                            portfolio_risk['peak_capital'] = capital
+                            portfolio_risk['current_drawdown'] = 0.0
+                        else:
+                            portfolio_risk['current_drawdown'] = (portfolio_risk['peak_capital'] - capital) / portfolio_risk['peak_capital']
+                            if portfolio_risk['current_drawdown'] > portfolio_risk['max_drawdown']:
+                                portfolio_risk['max_drawdown'] = portfolio_risk['current_drawdown']
+                        
+                        # Risk limit checks
+                        if portfolio_risk['consecutive_losses'] >= 3:
+                            portfolio_risk['risk_limit_breached'] = True
+                            logger.warning(f"⚠️ Consecutive loss limit reached: {portfolio_risk['consecutive_losses']}")
+                        
+                        if portfolio_risk['current_drawdown'] > 0.10:  # 10% drawdown limit
+                            portfolio_risk['risk_limit_breached'] = True
+                            logger.warning(f"⚠️ Drawdown limit exceeded: {portfolio_risk['current_drawdown']:.2%}")
                         
                         trade = {
                             'entry_price': entry_price,
@@ -728,6 +959,15 @@ class AdaptiveStrategyEngine:
                         position_size = 0
                         entry_price = 0
                         entry_bar = 0  # Reset entry bar
+                        entry_atr = 0  # Reset ATR
+                        
+                        # Reset trailing stop
+                        trailing_stop = {
+                            'enabled': False,
+                            'peak_price': 0,
+                            'stop_price': 0,
+                            'activated': False
+                        }
                 
                 # Track equity with correct unrealized PnL for LONG/SHORT
                 current_equity = capital

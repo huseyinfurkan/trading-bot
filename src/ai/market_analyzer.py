@@ -4,7 +4,6 @@ Gerçek piyasa verisi analizi - yfinance ve ccxt entegrasyonu
 """
 
 import asyncio
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
@@ -24,8 +23,8 @@ class MarketAnalyzer:
         self.config = config
         self.exchange_manager = exchange_manager
         
-        # Major crypto symbols for market analysis
-        self.major_symbols = ['BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD']
+        # Major crypto symbols for market analysis (CCXT format)
+        self.major_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
         self.crypto_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
         
         # Analysis parameters

@@ -199,69 +199,160 @@ class BacktestRunner:
     
     async def parameter_optimization(self, symbol: str, strategy: str, 
                                    start_date: datetime, end_date: datetime) -> Dict[str, Any]:
-        """Parameter optimization for strategies"""
+        """ADVANCED parameter optimization with grid search and cross-validation"""
         try:
-            logger.info(f"🔧 Parameter optimization for {strategy} on {symbol}")
+            logger.info(f"🔧 ADVANCED Parameter optimization for {strategy} on {symbol}")
             
-            # Run base strategy
-            base_result = await self.run_backtest(symbol, strategy, start_date, end_date)
-            base_return = base_result.get('total_return', 0)
+            # 1. SPLIT DATA FOR CROSS-VALIDATION
+            total_days = (end_date - start_date).days
+            train_days = int(total_days * 0.7)  # 70% for training
             
-            logger.info(f"📊 Base strategy return: {base_return:.2%}")
+            train_end = start_date + timedelta(days=train_days)
+            validation_start = train_end
             
-            # Define AGGRESSIVE parameter variations for HIGH RETURNS
+            logger.info(f"📊 Train period: {start_date.strftime('%Y-%m-%d')} to {train_end.strftime('%Y-%m-%d')}")
+            logger.info(f"📊 Validation period: {validation_start.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            
+            # 2. DEFINE COMPREHENSIVE PARAMETER GRIDS
             if 'alligator' in strategy:
-                param_variations = [
-                    {'profit_target': 0.08, 'stop_loss': 0.03, 'confidence_threshold': 0.5},   # Aggressive
-                    {'profit_target': 0.12, 'stop_loss': 0.04, 'confidence_threshold': 0.6},   # Very aggressive  
-                    {'profit_target': 0.15, 'stop_loss': 0.05, 'confidence_threshold': 0.4},   # Ultra aggressive
-                    {'profit_target': 0.10, 'stop_loss': 0.035, 'confidence_threshold': 0.55}  # Balanced aggressive
-                ]
+                param_grid = {
+                    'profit_target': [0.04, 0.06, 0.08, 0.10, 0.12],
+                    'stop_loss': [0.015, 0.020, 0.025, 0.030, 0.035],
+                    'confidence_threshold': [0.45, 0.50, 0.55, 0.60, 0.65],
+                    'trailing_stop_activation': [0.02, 0.025, 0.03, 0.035],
+                    'trailing_stop_distance': [0.010, 0.015, 0.020]
+                }
             elif 'bollinger' in strategy:
-                param_variations = [
-                    {'profit_target': 0.05, 'stop_loss': 0.02, 'confidence_threshold': 0.5},   # Aggressive
-                    {'profit_target': 0.08, 'stop_loss': 0.025, 'confidence_threshold': 0.6},  # Very aggressive
-                    {'profit_target': 0.10, 'stop_loss': 0.03, 'confidence_threshold': 0.45},  # Ultra aggressive 
-                    {'profit_target': 0.07, 'stop_loss': 0.022, 'confidence_threshold': 0.55}  # Balanced aggressive
-                ]
+                param_grid = {
+                    'profit_target': [0.02, 0.03, 0.04, 0.05, 0.06],
+                    'stop_loss': [0.008, 0.010, 0.012, 0.015, 0.018],
+                    'confidence_threshold': [0.45, 0.50, 0.55, 0.60, 0.65],
+                    'trailing_stop_activation': [0.015, 0.020, 0.025],
+                    'trailing_stop_distance': [0.006, 0.008, 0.010]
+                }
             else:
-                param_variations = []
+                param_grid = {}
             
-            best_return = base_return
-            best_params = "Base parameters"
+            # 3. GENERATE PARAMETER COMBINATIONS (Grid Search)
+            from itertools import product
             
-            logger.info(f"🔍 Testing {len(param_variations)} parameter variations...")
+            param_names = list(param_grid.keys())
+            param_values = list(param_grid.values())
             
-            # Test each parameter variation
-            for i, params in enumerate(param_variations):
-                logger.info(f"📊 Testing variation {i+1}/{len(param_variations)}: {params}")
+            # Limit combinations to avoid excessive testing
+            max_combinations = 50
+            all_combinations = list(product(*param_values))
+            
+            if len(all_combinations) > max_combinations:
+                # Sample random combinations
+                import random
+                combinations = random.sample(all_combinations, max_combinations)
+            else:
+                combinations = all_combinations
+            
+            logger.info(f"🔍 Testing {len(combinations)} parameter combinations (grid search)")
+            
+            # 4. RUN TRAINING PHASE
+            results = []
+            best_train_return = -float('inf')
+            best_params = {}
+            
+            for i, combo in enumerate(combinations):
+                params = dict(zip(param_names, combo))
                 
-                # Run backtest with custom parameters
-                result = await self.run_backtest(symbol, strategy, start_date, end_date, 10000, params)
-                current_return = result.get('total_return', 0)
+                logger.info(f"📊 Training {i+1}/{len(combinations)}: {params}")
                 
-                logger.info(f"   Result: {current_return:.2%} return")
+                # Train on training data
+                train_result = await self.run_backtest(symbol, strategy, start_date, train_end, 10000, params)
+                train_return = train_result.get('total_return', 0)
+                train_trades = train_result.get('total_trades', 0)
                 
-                if current_return > best_return:
-                    best_return = current_return
+                # Filter out configurations with too few trades
+                if train_trades < 5:
+                    logger.info(f"   ❌ Skipping: Only {train_trades} trades")
+                    continue
+                
+                logger.info(f"   Train result: {train_return:.2%} return ({train_trades} trades)")
+                
+                results.append({
+                    'params': params,
+                    'train_return': train_return,
+                    'train_trades': train_trades
+                })
+                
+                if train_return > best_train_return:
+                    best_train_return = train_return
                     best_params = params
-                    logger.info(f"   🎯 New best parameters found!")
             
-            improvement = ((best_return - base_return) / base_return * 100) if base_return != 0 else 0
+            # 5. SELECT TOP CANDIDATES FOR VALIDATION
+            results.sort(key=lambda x: x['train_return'], reverse=True)
+            top_candidates = results[:10]  # Top 10 performers
             
-            logger.info(f"✅ Optimization complete:")
-            logger.info(f"   Base return: {base_return:.2%}")
-            logger.info(f"   Best return: {best_return:.2%}")
-            logger.info(f"   Improvement: {improvement:.1f}%")
+            logger.info(f"🎯 Top {len(top_candidates)} candidates selected for validation")
+            
+            # 6. VALIDATION PHASE
+            best_val_return = -float('inf')
+            best_validated_params = {}
+            validation_results = []
+            
+            for candidate in top_candidates:
+                params = candidate['params']
+                
+                logger.info(f"📊 Validating: {params}")
+                
+                # Test on validation data
+                val_result = await self.run_backtest(symbol, strategy, validation_start, end_date, 10000, params)
+                val_return = val_result.get('total_return', 0)
+                val_trades = val_result.get('total_trades', 0)
+                
+                logger.info(f"   Validation result: {val_return:.2%} return ({val_trades} trades)")
+                
+                validation_results.append({
+                    'params': params,
+                    'train_return': candidate['train_return'],
+                    'val_return': val_return,
+                    'combined_score': (candidate['train_return'] + val_return) / 2
+                })
+                
+                if val_return > best_val_return:
+                    best_val_return = val_return
+                    best_validated_params = params
+            
+            # 7. SELECT FINAL PARAMETERS BASED ON COMBINED SCORE
+            validation_results.sort(key=lambda x: x['combined_score'], reverse=True)
+            
+            if validation_results:
+                final_params = validation_results[0]['params']
+                final_score = validation_results[0]['combined_score']
+                
+                logger.info(f"🎯 FINAL OPTIMAL PARAMETERS: {final_params}")
+                logger.info(f"🎯 Combined score: {final_score:.2%}")
+            else:
+                final_params = {}
+                final_score = 0
+            
+# Parameter optimization complete - results will be logged in final step
+            
+            # 8. FINAL FULL-PERIOD TEST
+            if final_params:
+                full_result = await self.run_backtest(symbol, strategy, start_date, end_date, 10000, final_params)
+                full_return = full_result.get('total_return', 0)
+            else:
+                full_return = 0
+            
+            logger.info(f"✅ ADVANCED OPTIMIZATION COMPLETE:")
+            logger.info(f"   🎯 Final parameters: {final_params}")
+            logger.info(f"   📊 Full-period return: {full_return:.2%}")
+            logger.info(f"   📊 Combined score: {final_score:.2%}")
             
             return {
                 'symbol': symbol,
                 'strategy': strategy,
-                'base_return': base_return,
-                'best_return': best_return,
-                'improvement': improvement,
-                'best_params': best_params,
-                'variations_tested': len(param_variations)
+                'optimal_params': final_params,
+                'full_period_return': full_return,
+                'combined_score': final_score,
+                'validation_results': validation_results[:5] if validation_results else [],
+                'total_combinations_tested': len(combinations) if 'combinations' in locals() else 0
             }
             
         except Exception as e:
