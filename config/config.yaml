@@ -10,10 +10,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.001
-      taker: 0.001
-      funding_rate: 0.0001
-      withdrawal_fee: 0.0005
+      maker: 0.001  # Will be fetched from exchange API
+      taker: 0.001  # Will be fetched from exchange API
+      funding_rate: 0.0001  # Will be fetched from exchange API
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API
+    dynamic_fees: true  # Enable real-time fee fetching
   
   binance:
     enabled: true  # Enabled for fallback
@@ -22,10 +23,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.001
-      taker: 0.001
-      funding_rate: 0.0001
-      withdrawal_fee: 0.0005
+      maker: 0.001  # Will be fetched from exchange API
+      taker: 0.001  # Will be fetched from exchange API
+      funding_rate: 0.0001  # Will be fetched from exchange API
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API
+    dynamic_fees: true  # Enable real-time fee fetching
   
   okx:
     enabled: false  # Disabled by default
@@ -35,10 +37,11 @@ exchanges:
     params:
       defaultType: 'spot'
     fees:
-      maker: 0.0008
-      taker: 0.001
-      funding_rate: 0.0001
-      withdrawal_fee: 0.0005
+      maker: 0.0008  # Will be fetched from exchange API
+      taker: 0.001   # Will be fetched from exchange API
+      funding_rate: 0.0001  # Will be fetched from exchange API
+      withdrawal_fee: 0.0005  # Will be fetched from exchange API
+    dynamic_fees: true  # Enable real-time fee fetching
 
 # WebSocket Configuration
 websocket:

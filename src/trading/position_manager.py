@@ -83,10 +83,15 @@ class PositionManager:
                 # Get account balance for position sizing
                 try:
                     balance = await self.exchange_manager.get_balance()
-                    account_balance = balance.get('USDT', 0) if balance else 10000  # Default fallback
+                    account_balance = balance.get('USDT', 0) if balance else 0
+                    
+                    if account_balance <= 0:
+                        logger.error(f"❌ {symbol} için yeterli bakiye yok: {account_balance}")
+                        return None
+                        
                 except Exception as e:
-                    logger.warning(f"⚠️ Balance check failed: {e}, using default")
-                    account_balance = 10000
+                    logger.error(f"❌ Balance check failed: {e}")
+                    return None
                 
                 # Position size calculation with proper validation
                 size_result = await self.risk_manager.calculate_position_size(

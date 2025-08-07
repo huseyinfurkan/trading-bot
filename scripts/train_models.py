@@ -75,7 +75,6 @@ class ModelTrainer:
             self.bybit_exchange = ccxt.bybit({
                 'apiKey': bybit_config.get('api_key', ''),
                 'secret': bybit_config.get('api_secret', ''),
-                'sandbox': bybit_config.get('testnet', True),
                 'enableRateLimit': True,
                 'options': {
                     'defaultType': 'spot'

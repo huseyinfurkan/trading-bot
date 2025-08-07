@@ -1195,20 +1195,20 @@ class RiskManager:
                 'binance': {
                     'apiKey': os.getenv('BINANCE_API_KEY', ''),
                     'secret': os.getenv('BINANCE_SECRET', ''),
-                    'sandbox': True,
+                    'sandbox': False,  # Use live trading
                     'enableRateLimit': True
                 },
                 'bybit': {
                     'apiKey': os.getenv('BYBIT_API_KEY', ''),
                     'secret': os.getenv('BYBIT_SECRET', ''),
-                    'sandbox': True,
+                    'sandbox': False,  # Use live trading
                     'enableRateLimit': True
                 },
                 'okx': {
                     'apiKey': os.getenv('OKX_API_KEY', ''),
                     'secret': os.getenv('OKX_SECRET', ''),
                     'password': os.getenv('OKX_PASSPHRASE', ''),
-                    'sandbox': True,
+                    'sandbox': False,  # Use live trading
                     'enableRateLimit': True
                 }
             }

@@ -70,7 +70,7 @@ class WebSocketManager:
             exchange = exchange_class({
                 'apiKey': exchange_config.get('api_key', ''),
                 'secret': exchange_config.get('api_secret', ''),
-                'sandbox': exchange_config.get('testnet', True),
+                'sandbox': False,  # Use live trading
                 'enableRateLimit': True,
                 'options': exchange_config.get('params', {})
             })

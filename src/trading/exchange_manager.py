@@ -559,21 +559,34 @@ class ExchangeManager:
             logger.error(f"❌ WebSocket startup error: {e}")
     
     async def get_trading_fees(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, float]]:
-        """Trading ücretleri al"""
+        """Get real-time trading fees from exchange"""
         try:
             if exchange not in self.exchanges:
                 return None
             
             exchange_obj = self.exchanges[exchange]
             
-            # Get trading fees
+            # Get real-time trading fees
             markets = await exchange_obj.load_markets()
             market = markets.get(symbol)
             
             if market:
+                # Get real fees from market data
+                maker_fee = market.get('maker', 0.001)
+                taker_fee = market.get('taker', 0.001)
+                
+                # Validate fees
+                if maker_fee <= 0 or taker_fee <= 0:
+                    logger.warning(f"⚠️ Invalid fees for {symbol}: maker={maker_fee}, taker={taker_fee}")
+                    return None
+                
                 return {
-                    'maker_fee': market.get('maker', 0.001),
-                    'taker_fee': market.get('taker', 0.001)
+                    'maker_fee': maker_fee,
+                    'taker_fee': taker_fee,
+                    'symbol': symbol,
+                    'exchange': exchange,
+                    'timestamp': datetime.now(),
+                    'real_data': True
                 }
             
             return None
