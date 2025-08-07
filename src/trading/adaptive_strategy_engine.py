@@ -54,7 +54,7 @@ class AdaptiveStrategyEngine:
                 'sma_200': 200,       # Trend filter
                 'fast_sma': 10,       # 15m optimized
                 'slow_sma': 20,       # 15m optimized 
-                'max_hold_hours': 12  # 15m timeframe allows shorter holds (12 periods = 3 hours)
+                'max_hold_bars': 12  # 15m timeframe: 12 bars = 3 hours
             },
             'bollinger_rsi_stochrsi': {
                 # Bollinger Bands (5m optimized)
@@ -68,7 +68,7 @@ class AdaptiveStrategyEngine:
                 'stochrsi_period': 14,
                 'stochrsi_oversold': 20,
                 'stochrsi_overbought': 80,
-                'max_hold_hours': 6    # 5m timeframe for quick scalping (6 periods = 30 minutes)
+                'max_hold_bars': 6    # 5m timeframe: 6 bars = 30 minutes
             }
         }
         
@@ -597,19 +597,19 @@ class AdaptiveStrategyEngine:
                     signal_confidence = signal.get('combined_confidence', signal.get('confidence', 0.0))
                     
                     if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold:
-                        # Enter position with strategy-specific sizing for new timeframes
+                        # Enter position with REALISTIC sizing for AI-filtered signals
                         if actual_strategy == 'alligator_ma_momentum':
-                            # Much more conservative sizing for 15m trend following
-                            risk_per_trade = 0.005  # 0.5% risk (very conservative)
-                            leverage = 1.5          # Lower leverage for trend following
+                            # Realistic sizing for 15m trend following (AI filtered signals)
+                            risk_per_trade = 0.02   # 2% risk (realistic for trend following)
+                            leverage = 2.0          # Moderate leverage for trend trades
                         elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            # Very conservative sizing for 5m mean reversion scalping
-                            risk_per_trade = 0.003  # 0.3% risk (ultra conservative for fast scalping)
-                            leverage = 1.2          # Minimal leverage for quick trades
+                            # Realistic sizing for 5m mean reversion scalping (AI filtered)
+                            risk_per_trade = 0.015  # 1.5% risk (realistic for mean reversion)
+                            leverage = 1.8          # Moderate leverage for quick trades
                         else:
-                            # Default conservative sizing
-                            risk_per_trade = 0.005
-                            leverage = 1.5
+                            # Default realistic sizing
+                            risk_per_trade = 0.02
+                            leverage = 2.0
                         
                         position_value = capital * risk_per_trade * leverage
                         position_size = position_value / current_price
@@ -661,16 +661,15 @@ class AdaptiveStrategyEngine:
                     elif pnl_pct < -stop_loss:
                         should_exit = True
                         exit_reason = "Stop loss"
-                    elif (i - entry_bar) > params['max_hold_hours']:  # Time limit (bars, not hours)
+                    elif (i - entry_bar) > params['max_hold_bars']:  # Time limit in bars
                         should_exit = True
                         exit_reason = "Time limit"
                 
                     if should_exit:
-                        # Exit position with correct PnL calculation for LONG/SHORT
-                        if position == 'LONG':
-                            pnl = position_size * (current_price - entry_price)
-                        else:  # SHORT
-                            pnl = position_size * (entry_price - current_price)
+                        # Exit position with LEVERAGE-ADJUSTED PnL calculation for LONG/SHORT
+                        base_pnl = position_size * (current_price - entry_price) if position == 'LONG' else position_size * (entry_price - current_price)
+                        # Apply leverage multiplier to PnL (leverage was already used in position sizing)
+                        pnl = base_pnl  # PnL is already leveraged due to position_size calculation
                         
                         # Apply exit fee
                         exit_fee = position_size * current_price * trading_fee
