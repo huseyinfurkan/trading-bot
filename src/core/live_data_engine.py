@@ -369,7 +369,7 @@ class LiveDataEngine:
                     'take_profit': entry_signal.get('take_profit'),
                     'confidence': entry_signal['confidence'],
                     'strategy': analysis['recommended_strategy'],
-                    'reason': f"Strong {entry_signal['signal']} signal",
+                    'reason': f"Strong {entry_signal['action']} signal",
                     'risk_amount': risk_assessment['risk_amount'],
                     'position_size': risk_assessment['position_size']
                 }

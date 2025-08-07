@@ -224,13 +224,26 @@ class DatabaseManager:
     async def update_position(self, position_id: int, updates: Dict[str, Any]) -> bool:
         """Pozisyon güncelle"""
         try:
-            # Build dynamic update query
+            # Validate allowed columns to prevent SQL injection
+            allowed_columns = {
+                'current_price', 'stop_loss', 'take_profit', 'pnl', 
+                'status', 'closed_at', 'side', 'size'
+            }
+            
+            # Build dynamic update query with validation
             set_clauses = []
             params = []
             
             for key, value in updates.items():
+                if key not in allowed_columns:
+                    logger.warning(f"⚠️ Ignoring invalid column: {key}")
+                    continue
                 set_clauses.append(f"{key} = ?")
                 params.append(value)
+            
+            if not set_clauses:
+                logger.warning("⚠️ No valid columns to update")
+                return False
             
             params.append(position_id)
             
@@ -533,15 +546,74 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"❌ Data cleanup error: {e}")
     
+    async def check_connection_health(self) -> bool:
+        """Veritabanı bağlantı sağlığını kontrol et"""
+        try:
+            if not self.connection:
+                return False
+            
+            cursor = await self.connection.execute("SELECT 1")
+            await cursor.fetchone()
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Database connection health check failed: {e}")
+            return False
+    
+    async def _ensure_connection(self) -> bool:
+        """Veritabanı bağlantısının aktif olduğundan emin ol"""
+        try:
+            if await self.check_connection_health():
+                return True
+            
+            logger.warning("⚠️ Database connection lost, reconnecting...")
+            
+            # Close existing connection if any
+            if self.connection:
+                await self.connection.close()
+            
+            # Reinitialize connection
+            await self.initialize()
+            return await self.check_connection_health()
+            
+        except Exception as e:
+            logger.error(f"❌ Database reconnection failed: {e}")
+            return False
+    
+    async def execute_with_retry(self, query: str, params=None, max_retries: int = 3):
+        """Execute SQL with automatic retry on connection failure"""
+        for attempt in range(max_retries):
+            try:
+                if not await self._ensure_connection():
+                    if attempt == max_retries - 1:
+                        raise Exception("Database connection could not be established")
+                    continue
+                
+                if params:
+                    cursor = await self.connection.execute(query, params)
+                else:
+                    cursor = await self.connection.execute(query)
+                
+                return cursor
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Database query attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+                
+                # Wait before retry
+                await asyncio.sleep(0.5 * (attempt + 1))
+        
+        raise Exception("All database retry attempts failed")
+    
     async def close(self):
         """Veritabanı bağlantısını kapat"""
         try:
             if self.connection:
                 await self.connection.close()
                 logger.info("💾 Database connection closed")
-                
         except Exception as e:
-            logger.error(f"❌ Database close error: {e}")
+            logger.error(f"❌ Error closing database: {e}")
     
     async def get_connection(self):
         """Veritabanı bağlantısını döndür"""

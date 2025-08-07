@@ -603,7 +603,7 @@ class AdaptiveStrategyEngine:
                         if self.risk_manager:
                             # Use RiskManager for consistent position sizing
                             try:
-                                position_calc = await self.risk_manager.calculate_position_size(
+                                position_calc = await self.risk_manager.calculate_position_size_backtest(
                                     symbol=symbol,
                                     action=signal,
                                     current_price=current_price,

@@ -28,14 +28,18 @@ class ExchangeManager:
         self.exchanges = {}
         self.websocket_connections = {}
         self.market_data_cache = {}
-        self.rate_limiters = {}
+        
+        # Rate limiting
+        self.rate_limiter = {}
+        self.last_request_time = {}
+        self.min_request_interval = 0.1  # 100ms between requests
         
         # WebSocket callbacks
         self.price_callbacks = []
         self.orderbook_callbacks = []
         self.trade_callbacks = []
         
-        logger.info("🌐 Exchange Manager initialized")
+        logger.info("📡 Exchange Manager initialized")
     
     async def initialize(self) -> None:
         """Exchange bağlantılarını başlat"""
@@ -119,7 +123,7 @@ class ExchangeManager:
             self.exchanges[exchange_name] = exchange
             
             # Initialize rate limiter
-            self.rate_limiters[exchange_name] = {
+            self.rate_limiter[exchange_name] = {
                 'last_request': 0,
                 'min_interval': 1.0 / config.get('requests_per_second', 10)
             }
@@ -151,8 +155,59 @@ class ExchangeManager:
             return wrapper
         return decorator
     
-    async def get_market_data(self, symbol: str, timeframe: str = '1h', 
-                            limit: int = 100, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
+    async def _apply_rate_limit(self, exchange_name: str):
+        """Apply rate limiting for exchange requests"""
+        try:
+            current_time = time.time()
+            
+            if exchange_name in self.last_request_time:
+                time_since_last = current_time - self.last_request_time[exchange_name]
+                
+                if time_since_last < self.min_request_interval:
+                    sleep_time = self.min_request_interval - time_since_last
+                    await asyncio.sleep(sleep_time)
+            
+            self.last_request_time[exchange_name] = time.time()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Rate limiting error: {e}")
+    
+    async def _execute_with_retry(self, func, *args, max_retries: int = 3, **kwargs):
+        """Execute exchange function with retry logic for rate limits"""
+        for attempt in range(max_retries):
+            try:
+                # Apply rate limiting
+                exchange_name = kwargs.get('exchange', 'bybit')
+                await self._apply_rate_limit(exchange_name)
+                
+                # Execute function
+                result = await func(*args, **kwargs)
+                return result
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Check for rate limit errors
+                if 'rate limit' in error_msg or 'too many requests' in error_msg:
+                    wait_time = min(2 ** attempt, 30)  # Exponential backoff, max 30s
+                    logger.warning(f"⚠️ Rate limit hit, waiting {wait_time}s (attempt {attempt + 1})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                # Check for network errors
+                elif 'network' in error_msg or 'timeout' in error_msg or 'connection' in error_msg:
+                    wait_time = min(1 * (attempt + 1), 10)  # Linear backoff for network issues
+                    logger.warning(f"⚠️ Network error, retrying in {wait_time}s (attempt {attempt + 1})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                # Other errors - don't retry
+                else:
+                    raise e
+        
+        raise Exception(f"Failed after {max_retries} attempts")
+
+    async def get_market_data(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
         """Gerçek market data al"""
         try:
             if exchange not in self.exchanges:
@@ -231,7 +286,13 @@ class ExchangeManager:
     async def get_historical_data(self, symbol: str, timeframe: str = '1h', 
                                 start_date: datetime = None, end_date: datetime = None,
                                 exchange: str = 'bybit') -> Optional[pd.DataFrame]:
-        """Geçmiş veri al (backtesting için)"""
+        """Geçmiş veri al (backtesting için) - with rate limiting and retry"""
+        return await self._execute_with_retry(self._get_historical_data_internal, symbol, timeframe, start_date, end_date, exchange=exchange)
+    
+    async def _get_historical_data_internal(self, symbol: str, timeframe: str = '1h', 
+                                          start_date: datetime = None, end_date: datetime = None,
+                                          exchange: str = 'bybit') -> Optional[pd.DataFrame]:
+        """Internal method for historical data fetching"""
         try:
             if exchange not in self.exchanges:
                 return None
@@ -259,9 +320,17 @@ class ExchangeManager:
                     
                     all_ohlcv.extend(ohlcv)
                     
-                    # Update start time
+                    # Update start time based on timeframe
                     last_timestamp = ohlcv[-1][0]
-                    current_start = datetime.fromtimestamp(last_timestamp / 1000) + timedelta(hours=1)
+                    
+                    # Calculate appropriate time increment based on timeframe
+                    timeframe_minutes = {
+                        '1m': 1, '5m': 5, '15m': 15, '30m': 30, 
+                        '1h': 60, '4h': 240, '1d': 1440
+                    }
+                    
+                    increment_minutes = timeframe_minutes.get(timeframe, 60)  # Default to 1h
+                    current_start = datetime.fromtimestamp(last_timestamp / 1000) + timedelta(minutes=increment_minutes)
                     
                     # Rate limiting
                     await asyncio.sleep(0.1)

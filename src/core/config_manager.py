@@ -71,20 +71,21 @@ class ConfigManager:
                 'required_strategies': ['alligator_ma_momentum', 'bollinger_rsi_stochrsi'],
                 'strategy_params': {
                     'alligator_ma_momentum': {
-                        'risk_per_trade': {'type': float, 'min': 0.001, 'max': 0.05},
-                        'leverage': {'type': float, 'min': 1.0, 'max': 5.0},
-                        'profit_target': {'type': float, 'min': 0.02, 'max': 0.20},
-                        'stop_loss': {'type': float, 'min': 0.01, 'max': 0.10},
+                        'jaw_period': {'type': int, 'min': 5, 'max': 20},
+                        'teeth_period': {'type': int, 'min': 3, 'max': 15},
+                        'lips_period': {'type': int, 'min': 2, 'max': 10},
+                        'fast_sma': {'type': int, 'min': 5, 'max': 20},
+                        'slow_sma': {'type': int, 'min': 10, 'max': 50},
                         'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
                     },
                     'bollinger_rsi_stochrsi': {
-                        'risk_per_trade': {'type': float, 'min': 0.001, 'max': 0.05},
-                        'leverage': {'type': float, 'min': 1.0, 'max': 5.0},
-                        'profit_target': {'type': float, 'min': 0.01, 'max': 0.15},
-                        'stop_loss': {'type': float, 'min': 0.005, 'max': 0.08},
-                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100},
+                        'bb_period': {'type': int, 'min': 10, 'max': 30},
+                        'bb_std_dev': {'type': float, 'min': 1.0, 'max': 3.0},
+                        'rsi_period': {'type': int, 'min': 10, 'max': 20},
                         'rsi_oversold': {'type': int, 'min': 10, 'max': 40},
-                        'rsi_overbought': {'type': int, 'min': 60, 'max': 90}
+                        'rsi_overbought': {'type': int, 'min': 60, 'max': 90},
+                        'stochrsi_period': {'type': int, 'min': 10, 'max': 20},
+                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
                     }
                 }
             },

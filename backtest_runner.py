@@ -37,15 +37,15 @@ class BacktestRunner:
             logger.info("🚀 Backtesting Runner başlatılıyor...")
             
             # Load configuration
-            self.config = ConfigManager('config/config.yaml')
-            await self.config.load_config()
+            self.config_manager = ConfigManager('config/config.yaml')
+            self.config = await self.config_manager.load_config()
             
             # Initialize core components
-            self.db_manager = DatabaseManager(self.config.config.get('database', {}))
+            self.db_manager = DatabaseManager(self.config.get('database', {}))
             await self.db_manager.initialize()
             
             # Initialize exchange manager with proper config dict
-            exchanges_config = self.config.config.get('exchanges', {
+            exchanges_config = self.config.get('exchanges', {
                 'bybit': {
                     'enabled': True,
                     'testnet': False,
@@ -60,26 +60,26 @@ class BacktestRunner:
             # Initialize AI components
             self.market_analyzer = MarketAnalyzer(self.config, self.exchange_manager)
             self.signal_filter = AISignalFilter(
-                self.config.config.get('ai_settings', {}), 
+                self.config.get('ai_settings', {}), 
                 self.db_manager, 
                 self.exchange_manager
             )
             self.confidence_calculator = ConfidenceCalculator(
-                self.config.config.get('ai_settings', {}), 
+                self.config.get('ai_settings', {}), 
                 self.db_manager
             )
             
             # Initialize RiskManager for consistent position sizing
             from src.core.risk_manager import RiskManager
             self.risk_manager = RiskManager(
-                self.config.config.get('risk_management', {}),
+                self.config.get('risk_management', {}),
                 self.db_manager,
                 self.market_analyzer
             )
             
             # Initialize strategy engine WITH RiskManager
             self.strategy_engine = AdaptiveStrategyEngine(
-                self.config.config, 
+                self.config, 
                 self.exchange_manager, 
                 self.signal_filter,
                 self.risk_manager  # ADDED: For consistent position sizing with live trading

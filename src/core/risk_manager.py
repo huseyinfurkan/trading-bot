@@ -45,9 +45,10 @@ class RiskManager:
         
         logger.info("⚖️ Risk Manager initialized")
     
-    async def calculate_position_size(self, symbol: str, entry_price: float,
-                                    stop_loss: float, confidence: float,
-                                    strategy: str) -> Dict[str, Any]:
+    async def calculate_position_size(self, symbol: str = None, entry_price: float = None,
+                                    stop_loss: float = None, confidence: float = None,
+                                    strategy: str = None, action: Dict[str, Any] = None,
+                                    current_price: float = None, account_balance: float = None) -> Dict[str, Any]:
         """Pozisyon boyutunu hesapla"""
         try:
             # 1. Risk check - position limit
@@ -126,6 +127,55 @@ class RiskManager:
                 'size': 0,
                 'risk_amount': 0
             }
+    
+    async def calculate_position_size_backtest(self, symbol: str, action: Dict[str, Any],
+                                             current_price: float, account_balance: float,
+                                             confidence: float) -> Dict[str, Any]:
+        """
+        Calculate position size for backtest - matches actual call signature
+        This method bridges the gap between backtest calls and existing risk logic
+        """
+        try:
+            # Extract stop loss from action or calculate it
+            stop_loss = action.get('stop_loss')
+            if not stop_loss:
+                # Use 2% stop loss as default
+                if action.get('action') == 'BUY':
+                    stop_loss = current_price * 0.98  # 2% below entry for LONG
+                else:  # SELL
+                    stop_loss = current_price * 1.02  # 2% above entry for SHORT
+            
+            # Extract strategy from action
+            strategy = action.get('strategy_used', 'unknown')
+            
+            # Update portfolio value for calculation
+            old_portfolio_value = self.portfolio_value
+            self.portfolio_value = account_balance
+            
+            # Call the existing calculate_position_size method
+            result = await self.calculate_position_size(
+                symbol=symbol,
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                confidence=confidence,
+                strategy=strategy
+            )
+            
+            # Restore original portfolio value
+            self.portfolio_value = old_portfolio_value
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Backtest position size calculation error: {e}")
+            return {
+                'allowed': False,
+                'reason': f'Calculation error: {str(e)}',
+                'size': 0,
+                'risk_amount': 0
+            }
+    
+
     
     async def _check_correlation(self, symbol: str) -> Dict[str, Any]:
         """Gerçek correlation kontrolü"""
