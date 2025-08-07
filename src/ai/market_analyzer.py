@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
-Market Analyzer
-Gerçek piyasa verisi analizi - yfinance ve ccxt entegrasyonu
+Gerçek piyasa verisi analizi - CCXT entegrasyonu
+Market analysis using real exchange data via CCXT
 """
 
 import asyncio
@@ -271,7 +272,7 @@ class MarketAnalyzer:
             return None
     
     async def _get_market_summary(self) -> Dict[str, Any]:
-        """Crypto-focused market summary - yfinance removed"""
+        """Crypto-focused market summary using CCXT data"""
         try:
             # Get crypto market dominance and sentiment from exchange data
             # Instead of traditional indices, use crypto-specific metrics

@@ -5,11 +5,9 @@
 exchanges:
   bybit:
     enabled: true
-    testnet: true  # Use testnet for safety
     api_key: ${BYBIT_API_KEY}
     api_secret: ${BYBIT_SECRET}
     params:
-      testnet: true
       defaultType: 'spot'
     fees:
       maker: 0.001
@@ -19,11 +17,9 @@ exchanges:
   
   binance:
     enabled: false  # Disabled by default
-    testnet: true
     api_key: ${BINANCE_API_KEY}
     api_secret: ${BINANCE_SECRET}
     params:
-      testnet: true
       defaultType: 'spot'
     fees:
       maker: 0.001
@@ -33,12 +29,10 @@ exchanges:
   
   okx:
     enabled: false  # Disabled by default
-    testnet: true
     api_key: ${OKX_API_KEY}
     api_secret: ${OKX_SECRET}
     passphrase: ${OKX_PASSPHRASE}
     params:
-      testnet: true
       defaultType: 'spot'
     fees:
       maker: 0.0008

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Model Training Script
-Uses CCXT data for training ML models
+Uses Bybit API via CCXT for training ML models
 """
 
 import asyncio
@@ -23,17 +23,17 @@ from loguru import logger
 
 
 class ModelTrainer:
-    """Model trainer using CCXT data"""
+    """Model trainer using Bybit API via CCXT"""
     
     def __init__(self):
-        """Initialize model trainer"""
+        """Initialize model trainer with Bybit focus"""
         self.config_manager = ConfigManager()
         self.config = self.config_manager.get_config()
         self.db_manager = DatabaseManager(self.config['database'])
         self.exchange_manager = ExchangeManager(self.config['exchanges'])
         self.ai_signal_filter = AISignalFilter(self.config['ai'], self.db_manager, self.exchange_manager)
         
-        # Training parameters
+        # Bybit-specific training parameters
         self.symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
         self.timeframes = ['1h', '4h', '1d']
         self.lookback_days = 365  # 1 year of data
@@ -43,44 +43,78 @@ class ModelTrainer:
         self.test_size = 0.2
         self.random_state = 42
         
-        logger.info("🤖 Model Trainer initialized with CCXT data")
+        # Bybit exchange instance
+        self.bybit_exchange = None
+        
+        logger.info("🤖 Model Trainer initialized with Bybit API")
     
     async def initialize(self):
-        """Initialize components"""
+        """Initialize components and Bybit connection"""
         try:
             await self.db_manager.initialize()
             await self.exchange_manager.initialize()
             await self.ai_signal_filter.initialize()
-            logger.info("✅ Model Trainer components initialized")
+            
+            # Initialize Bybit exchange specifically
+            await self._initialize_bybit_exchange()
+            
+            logger.info("✅ Model Trainer components initialized with Bybit")
         except Exception as e:
             logger.error(f"❌ Initialization error: {e}")
             raise
     
-    async def train_all_models(self):
-        """Train models for all symbols"""
+    async def _initialize_bybit_exchange(self):
+        """Initialize Bybit exchange connection"""
         try:
-            logger.info("🚀 Starting model training for all symbols")
+            import ccxt
+            
+            # Get Bybit configuration
+            bybit_config = self.config.get('exchanges', {}).get('bybit', {})
+            
+            # Create Bybit exchange instance
+            self.bybit_exchange = ccxt.bybit({
+                'apiKey': bybit_config.get('api_key', ''),
+                'secret': bybit_config.get('api_secret', ''),
+                'sandbox': bybit_config.get('testnet', True),
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'spot'
+                }
+            })
+            
+            # Test connection
+            await self.bybit_exchange.load_markets()
+            logger.info("✅ Bybit exchange connection established")
+            
+        except Exception as e:
+            logger.error(f"❌ Bybit exchange initialization error: {e}")
+            raise
+    
+    async def train_all_models(self):
+        """Train models for all symbols using Bybit data"""
+        try:
+            logger.info("🚀 Starting model training with Bybit API")
             
             for symbol in self.symbols:
-                logger.info(f"📊 Training models for {symbol}")
+                logger.info(f"📊 Training models for {symbol} using Bybit data")
                 await self.train_symbol_models(symbol)
             
-            logger.info("✅ All models trained successfully")
+            logger.info("✅ All models trained successfully with Bybit data")
             
         except Exception as e:
             logger.error(f"❌ Model training error: {e}")
     
     async def train_symbol_models(self, symbol: str):
-        """Train models for a specific symbol"""
+        """Train models for a specific symbol using Bybit data"""
         try:
-            # Get historical data using CCXT
-            historical_data = await self._get_historical_data_ccxt(symbol)
+            # Get historical data from Bybit
+            historical_data = await self._get_bybit_historical_data(symbol)
             
             if historical_data is None or len(historical_data) < self.min_data_points:
-                logger.warning(f"⚠️ Insufficient data for {symbol}: {len(historical_data) if historical_data is not None else 0} points")
+                logger.warning(f"⚠️ Insufficient Bybit data for {symbol}: {len(historical_data) if historical_data is not None else 0} points")
                 return
             
-            logger.info(f"📈 Got {len(historical_data)} data points for {symbol}")
+            logger.info(f"📈 Got {len(historical_data)} Bybit data points for {symbol}")
             
             # Prepare features and labels
             features, labels = await self._prepare_training_data(historical_data, symbol)
@@ -94,21 +128,19 @@ class ModelTrainer:
             # Train models
             await self._train_models_for_symbol(symbol, features, labels)
             
-            logger.info(f"✅ Models trained successfully for {symbol}")
+            logger.info(f"✅ Models trained successfully for {symbol} with Bybit data")
             
         except Exception as e:
             logger.error(f"❌ Symbol training error for {symbol}: {e}")
     
-    async def _get_historical_data_ccxt(self, symbol: str) -> pd.DataFrame:
-        """Get historical data using CCXT"""
+    async def _get_bybit_historical_data(self, symbol: str) -> pd.DataFrame:
+        """Get historical data from Bybit API"""
         try:
-            # Calculate start date
             end_date = datetime.now()
             start_date = end_date - timedelta(days=self.lookback_days)
             
-            logger.info(f"📊 Fetching CCXT data for {symbol} from {start_date} to {end_date}")
+            logger.info(f"📊 Fetching Bybit data for {symbol} from {start_date} to {end_date}")
             
-            # Get data for multiple timeframes and combine
             all_data = []
             
             for timeframe in self.timeframes:
@@ -123,37 +155,40 @@ class ModelTrainer:
                     else:
                         limit = 1000
                     
-                    # Get data from exchange
-                    data = await self.exchange_manager.get_historical_data(
+                    # Fetch data from Bybit
+                    ohlcv = await self.bybit_exchange.fetch_ohlcv(
                         symbol=symbol,
                         timeframe=timeframe,
                         limit=limit
                     )
                     
-                    if data is not None and len(data) > 0:
-                        # Add timeframe column
-                        data['timeframe'] = timeframe
-                        all_data.append(data)
-                        logger.info(f"✅ Got {len(data)} {timeframe} data points for {symbol}")
+                    if ohlcv and len(ohlcv) > 0:
+                        # Convert to DataFrame
+                        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                        df['timeframe'] = timeframe
+                        all_data.append(df)
+                        
+                        logger.info(f"✅ Got {len(df)} {timeframe} data points for {symbol} from Bybit")
                     
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to get {timeframe} data for {symbol}: {e}")
+                    logger.warning(f"⚠️ Failed to get {timeframe} data for {symbol} from Bybit: {e}")
                     continue
             
             if not all_data:
-                logger.error(f"❌ No data retrieved for {symbol}")
+                logger.error(f"❌ No Bybit data retrieved for {symbol}")
                 return None
             
             # Combine all timeframes
             combined_data = pd.concat(all_data, ignore_index=True)
             combined_data = combined_data.sort_values('timestamp').drop_duplicates(subset=['timestamp'])
             
-            logger.info(f"📊 Combined {len(combined_data)} data points for {symbol}")
+            logger.info(f"📊 Combined {len(combined_data)} Bybit data points for {symbol}")
             
             return combined_data
             
         except Exception as e:
-            logger.error(f"❌ Historical data fetch error for {symbol}: {e}")
+            logger.error(f"❌ Bybit historical data fetch error for {symbol}: {e}")
             return None
     
     async def _prepare_training_data(self, data: pd.DataFrame, symbol: str) -> tuple:

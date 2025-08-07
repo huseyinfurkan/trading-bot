@@ -77,85 +77,48 @@ class ExchangeManager:
             logger.error(f"❌ Exchange initialization error: {e}")
             raise
     
-    async def _initialize_exchange(self, exchange_name: str, config: Dict[str, Any]) -> None:
-        """Tek exchange'i başlat"""
+    async def _initialize_exchange(self, exchange_name: str, config: Dict[str, Any]) -> Optional[Any]:
+        """Initialize exchange connection"""
         try:
-            if exchange_name.lower() == 'bybit':
-                exchange_class = ccxt.bybit
-            elif exchange_name.lower() == 'binance':
-                exchange_class = ccxt.binance
-            elif exchange_name.lower() == 'okx':
-                exchange_class = ccxt.okx
-            else:
-                logger.warning(f"⚠️ Unsupported exchange: {exchange_name}")
-                return
+            import ccxt
+            
+            # Get API credentials
+            api_key = config.get('api_key', '')
+            secret = config.get('api_secret', '')
+            passphrase = config.get('passphrase', '')
             
             # Debug API credentials
-            api_key = config.get('api_key', '')
-            secret = config.get('secret', '')
             logger.debug(f"🔐 {exchange_name} credentials: apiKey={bool(api_key)}, secret={bool(secret)}")
             logger.debug(f"🔍 {exchange_name} API key first 8 chars: {api_key[:8] if api_key else 'EMPTY'}")
             logger.debug(f"🔍 {exchange_name} Secret first 8 chars: {secret[:8] if secret else 'EMPTY'}")
             
-            exchange = exchange_class({
+            # Create exchange instance
+            exchange_class = getattr(ccxt, exchange_name)
+            
+            # Build exchange config
+            exchange_config = {
                 'apiKey': api_key,
                 'secret': secret,
-                'password': config.get('passphrase', ''),  # OKX için
-                'sandbox': config.get('sandbox', True),  # Paper trading için
                 'enableRateLimit': True,
-                'options': {
-                    'defaultType': config.get('default_type', 'spot'),  # spot, future, option
-                }
-            })
-            
-            # Test connection - PUBLIC FIRST, then private if needed
-            try:
-                # Use public ticker endpoint for initial test (no API key needed)
-                ticker = await exchange.fetch_ticker('BTC/USDT')
-                logger.success(f"✅ {exchange_name} public connection verified")
-                
-                # Now test private API with balance check
-                try:
-                    balance = await exchange.fetch_balance()
-                    logger.success(f"✅ {exchange_name} private API verified")
-                    # Load markets AFTER API verification
-                    await exchange.load_markets()
-                    logger.success(f"✅ {exchange_name} markets loaded")
-                except Exception as private_error:
-                    if "10003" in str(private_error) or "invalid" in str(private_error).lower():
-                        logger.error(f"❌ {exchange_name} API credentials invalid: {private_error}")
-                        logger.error(f"🔑 Please check your API keys in .env file")
-                        raise
-                    else:
-                        logger.warning(f"⚠️ {exchange_name} private API issue: {private_error}")
-                        logger.info(f"📊 Continuing with public data only...")
-                        # Load markets with public access only
-                        exchange.apiKey = ''
-                        exchange.secret = ''
-                        await exchange.load_markets()
-                        exchange._public_only = True
-                        
-            except Exception as e:
-                logger.error(f"❌ {exchange_name} connection failed: {e}")
-                logger.error(f"🌐 Check your internet connection and API credentials")
-                raise
-            
-            self.exchanges[exchange_name] = exchange
-            
-            # Initialize rate limiter
-            self.rate_limiter[exchange_name] = {
-                'last_request': 0,
-                'min_interval': 1.0 / config.get('requests_per_second', 10)
+                'options': config.get('params', {})
             }
             
-            if hasattr(exchange, '_public_only') and exchange._public_only:
-                logger.success(f"✅ {exchange_name} connected (public data only)")
-            else:
-                logger.success(f"✅ {exchange_name} connected successfully")
+            # Add passphrase for OKX
+            if exchange_name == 'okx' and passphrase:
+                exchange_config['password'] = passphrase
+            
+            # Create exchange instance
+            exchange = exchange_class(exchange_config)
+            
+            # Test connection
+            await exchange.load_markets()
+            
+            logger.info(f"✅ {exchange_name} exchange initialized successfully")
+            return exchange
             
         except Exception as e:
-            logger.error(f"❌ {exchange_name} connection failed: {e}")
-            raise
+            logger.error(f"❌ {exchange_name} exchange initialization error: {e}")
+            return None
     
     @staticmethod
     def rate_limit(exchange_name: str):
