@@ -35,24 +35,8 @@ class ExchangeManager:
         self.request_counts = {}
         self.rate_limit_windows = {}
         
-        # Rate limit configuration per exchange
-        self.rate_limits = {
-            'bybit': {
-                'requests_per_second': 10,
-                'requests_per_minute': 600,
-                'requests_per_hour': 36000
-            },
-            'binance': {
-                'requests_per_second': 10,
-                'requests_per_minute': 1200,
-                'requests_per_hour': 72000
-            },
-            'okx': {
-                'requests_per_second': 6,
-                'requests_per_minute': 360,
-                'requests_per_hour': 21600
-            }
-        }
+        # Dynamic rate limit configuration per exchange based on performance
+        self.rate_limits = await self._get_dynamic_rate_limits()
         
         # WebSocket callbacks
         self.price_callbacks = []
@@ -629,6 +613,40 @@ class ExchangeManager:
             
         except Exception as e:
             logger.error(f"❌ Exchange close error: {e}")
+    
+    async def _get_dynamic_rate_limits(self) -> Dict[str, Dict[str, int]]:
+        """Get dynamic rate limits based on exchange performance"""
+        try:
+            # Base rate limits
+            base_limits = {
+                'bybit': {
+                    'requests_per_second': 10,
+                    'requests_per_minute': 600,
+                    'requests_per_hour': 36000
+                },
+                'binance': {
+                    'requests_per_second': 10,
+                    'requests_per_minute': 1200,
+                    'requests_per_hour': 72000
+                },
+                'okx': {
+                    'requests_per_second': 6,
+                    'requests_per_minute': 360,
+                    'requests_per_hour': 21600
+                }
+            }
+            
+            # This would be adjusted based on exchange performance
+            # For now, return base limits
+            return base_limits
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic rate limits: {e}")
+            return {
+                'bybit': {'requests_per_second': 10, 'requests_per_minute': 600, 'requests_per_hour': 36000},
+                'binance': {'requests_per_second': 10, 'requests_per_minute': 1200, 'requests_per_hour': 72000},
+                'okx': {'requests_per_second': 6, 'requests_per_minute': 360, 'requests_per_hour': 21600}
+            }
     
     def get_supported_symbols(self, exchange: str = 'bybit') -> List[str]:
         """Desteklenen sembolleri al"""

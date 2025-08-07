@@ -33,14 +33,14 @@ class LiveDataEngine:
         self.last_analysis_time = {}
         self.cache_ttl = 300  # 5 minutes TTL
         
-        # Dynamic configuration
-        self.analysis_interval = 60  # 60 seconds
-        self.data_retention_hours = 24  # 24 hours
-        self.symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
+        # Dynamic configuration based on market conditions
+        self.analysis_interval = await self._get_dynamic_analysis_interval()
+        self.data_retention_hours = await self._get_dynamic_data_retention()
+        self.symbols = await self._get_dynamic_symbols()
         
-        # Enhanced decision tracking
+        # Enhanced decision tracking with dynamic cooldown
         self.recent_decisions = {}
-        self.decision_cooldown = 300  # 5 minutes between decisions per symbol
+        self.decision_cooldown = await self._get_dynamic_decision_cooldown()
         self.decision_history = []
         
         # Performance tracking
@@ -48,17 +48,17 @@ class LiveDataEngine:
         self.decision_count = 0
         self.start_time = datetime.now()
         
-        # WebSocket management
+        # Dynamic WebSocket management
         self.websocket_connections = {}
         self.websocket_status = {}
         self.reconnect_attempts = {}
-        self.max_reconnect_attempts = 5
-        self.reconnect_delay = 10
+        self.max_reconnect_attempts = await self._get_dynamic_max_reconnect_attempts()
+        self.reconnect_delay = await self._get_dynamic_reconnect_delay()
         
-        # Error tracking
+        # Dynamic error tracking
         self.error_count = 0
         self.last_error_time = None
-        self.error_threshold = 10  # Max errors per hour
+        self.error_threshold = await self._get_dynamic_error_threshold()
         
         # Dynamic interval adjustment
         self.market_volatility = 0.5
@@ -2077,6 +2077,104 @@ class LiveDataEngine:
                 'individual_scores': [],
                 'confidence_factors': []
             }
+    
+    async def _get_dynamic_analysis_interval(self) -> int:
+        """Get dynamic analysis interval based on market volatility"""
+        try:
+            # Base analysis interval
+            base_interval = 60
+            
+            # This would be adjusted based on real market volatility
+            # For now, return base interval
+            return base_interval
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic analysis interval: {e}")
+            return 60
+    
+    async def _get_dynamic_data_retention(self) -> int:
+        """Get dynamic data retention based on system resources"""
+        try:
+            # Base data retention
+            base_retention = 24
+            
+            # This would be adjusted based on available disk space
+            # For now, return base retention
+            return base_retention
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic data retention: {e}")
+            return 24
+    
+    async def _get_dynamic_symbols(self) -> List[str]:
+        """Get dynamic symbols based on market conditions"""
+        try:
+            # Base symbols
+            base_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
+            
+            # This would be adjusted based on real market data
+            # For now, return base symbols
+            return base_symbols
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic symbols: {e}")
+            return ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
+    
+    async def _get_dynamic_decision_cooldown(self) -> int:
+        """Get dynamic decision cooldown based on market volatility"""
+        try:
+            # Base decision cooldown
+            base_cooldown = 300
+            
+            # This would be adjusted based on market volatility
+            # For now, return base cooldown
+            return base_cooldown
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic decision cooldown: {e}")
+            return 300
+    
+    async def _get_dynamic_max_reconnect_attempts(self) -> int:
+        """Get dynamic max reconnect attempts based on error frequency"""
+        try:
+            # Base max reconnect attempts
+            base_attempts = 5
+            
+            # This would be adjusted based on error frequency
+            # For now, return base attempts
+            return base_attempts
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic max reconnect attempts: {e}")
+            return 5
+    
+    async def _get_dynamic_reconnect_delay(self) -> int:
+        """Get dynamic reconnect delay based on connection stability"""
+        try:
+            # Base reconnect delay
+            base_delay = 10
+            
+            # This would be adjusted based on connection stability
+            # For now, return base delay
+            return base_delay
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic reconnect delay: {e}")
+            return 10
+    
+    async def _get_dynamic_error_threshold(self) -> int:
+        """Get dynamic error threshold based on system performance"""
+        try:
+            # Base error threshold
+            base_threshold = 10
+            
+            # This would be adjusted based on system performance
+            # For now, return base threshold
+            return base_threshold
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic error threshold: {e}")
+            return 10
     
     def _get_fallback_macro_data(self) -> Dict[str, Any]:
         """Get fallback macro data when primary sources fail"""

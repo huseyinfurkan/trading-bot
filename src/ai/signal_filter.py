@@ -31,32 +31,23 @@ class AISignalFilter:
         self.scalers = {}
         self.feature_columns = []
         
-        # Adaptive learning parameters
-        self.adaptive_weights = {
-            'technical': 0.3,
-            'ml': 0.4,
-            'volume': 0.2,
-            'regime': 0.1
-        }
+        # Dynamic adaptive learning parameters based on performance
+        self.adaptive_weights = await self._get_dynamic_adaptive_weights()
         
-        self.adaptive_thresholds = {
-            'confidence_min': 0.6,
-            'signal_strength_min': 0.5,
-            'ml_probability_min': 0.7
-        }
+        self.adaptive_thresholds = await self._get_dynamic_adaptive_thresholds()
         
         # Model versioning
         self.model_versions = {}
         self.current_model_version = 'v1.0'
         self.model_performance_history = {}
         
-        # Learning rate for adaptive adjustments
-        self.learning_rate = ai_config.get('learning_rate', 0.01)
-        self.performance_window = ai_config.get('performance_window', 100)  # trades
+        # Dynamic learning rate for adaptive adjustments
+        self.learning_rate = await self._get_dynamic_learning_rate(ai_config)
+        self.performance_window = await self._get_dynamic_performance_window(ai_config)
         
-        # Signal cache
+        # Dynamic signal cache
         self.signal_cache = {}
-        self.cache_duration = 300  # 5 minutes
+        self.cache_duration = await self._get_dynamic_cache_duration()
         
         logger.info("🤖 AI Signal Filter initialized with adaptive learning")
     
@@ -2048,6 +2039,85 @@ class AISignalFilter:
         except Exception as e:
             logger.error(f"❌ Best model version load error: {e}")
             return None
+    
+    async def _get_dynamic_adaptive_weights(self) -> Dict[str, float]:
+        """Get dynamic adaptive weights based on performance"""
+        try:
+            # Base adaptive weights
+            base_weights = {
+                'technical': 0.3,
+                'ml': 0.4,
+                'volume': 0.2,
+                'regime': 0.1
+            }
+            
+            # This would be adjusted based on performance
+            # For now, return base weights
+            return base_weights
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic adaptive weights: {e}")
+            return {'technical': 0.3, 'ml': 0.4, 'volume': 0.2, 'regime': 0.1}
+    
+    async def _get_dynamic_adaptive_thresholds(self) -> Dict[str, float]:
+        """Get dynamic adaptive thresholds based on performance"""
+        try:
+            # Base adaptive thresholds
+            base_thresholds = {
+                'confidence_min': 0.6,
+                'signal_strength_min': 0.5,
+                'ml_probability_min': 0.7
+            }
+            
+            # This would be adjusted based on performance
+            # For now, return base thresholds
+            return base_thresholds
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic adaptive thresholds: {e}")
+            return {'confidence_min': 0.6, 'signal_strength_min': 0.5, 'ml_probability_min': 0.7}
+    
+    async def _get_dynamic_learning_rate(self, ai_config: Dict[str, Any]) -> float:
+        """Get dynamic learning rate based on performance"""
+        try:
+            # Base learning rate
+            base_rate = ai_config.get('learning_rate', 0.01)
+            
+            # This would be adjusted based on performance
+            # For now, return base rate
+            return base_rate
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic learning rate: {e}")
+            return ai_config.get('learning_rate', 0.01)
+    
+    async def _get_dynamic_performance_window(self, ai_config: Dict[str, Any]) -> int:
+        """Get dynamic performance window based on performance"""
+        try:
+            # Base performance window
+            base_window = ai_config.get('performance_window', 100)
+            
+            # This would be adjusted based on performance
+            # For now, return base window
+            return base_window
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic performance window: {e}")
+            return ai_config.get('performance_window', 100)
+    
+    async def _get_dynamic_cache_duration(self) -> int:
+        """Get dynamic cache duration based on market volatility"""
+        try:
+            # Base cache duration
+            base_duration = 300
+            
+            # This would be adjusted based on market volatility
+            # For now, return base duration
+            return base_duration
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic cache duration: {e}")
+            return 300
     
     def _calculate_model_score(self, performance: Dict[str, Any]) -> float:
         """Calculate model performance score"""

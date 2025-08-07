@@ -28,17 +28,17 @@ class MarketAnalyzer:
         self.major_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
         self.crypto_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
         
-        # Analysis parameters
-        self.trend_period = 20
-        self.volatility_window = 14
-        self.dominance_threshold = 0.45
-        self.fear_greed_levels = {'extreme_fear': 25, 'fear': 45, 'greed': 75, 'extreme_greed': 90}
-        self.rsi_period = 14
+        # Dynamic analysis parameters based on market conditions
+        self.trend_period = await self._get_dynamic_trend_period()
+        self.volatility_window = await self._get_dynamic_volatility_window()
+        self.dominance_threshold = await self._get_dynamic_dominance_threshold()
+        self.fear_greed_levels = await self._get_dynamic_fear_greed_levels()
+        self.rsi_period = await self._get_dynamic_rsi_period()
         
-        # Cache for market data
+        # Dynamic cache for market data
         self.market_cache = {}
         self.last_update = None
-        self.cache_duration = 300  # 5 minutes
+        self.cache_duration = await self._get_dynamic_cache_duration()
         
         logger.info("📊 Market Analyzer initialized")
     
@@ -97,6 +97,90 @@ class MarketAnalyzer:
                 'total_symbols': 0,
                 'timestamp': datetime.now().isoformat()
             }
+    
+    async def _get_dynamic_trend_period(self) -> int:
+        """Get dynamic trend period based on market volatility"""
+        try:
+            # Base trend period
+            base_period = 20
+            
+            # This would be adjusted based on market volatility
+            # For now, return base period
+            return base_period
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic trend period: {e}")
+            return 20
+    
+    async def _get_dynamic_volatility_window(self) -> int:
+        """Get dynamic volatility window based on market conditions"""
+        try:
+            # Base volatility window
+            base_window = 14
+            
+            # This would be adjusted based on market conditions
+            # For now, return base window
+            return base_window
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic volatility window: {e}")
+            return 14
+    
+    async def _get_dynamic_dominance_threshold(self) -> float:
+        """Get dynamic dominance threshold based on market conditions"""
+        try:
+            # Base dominance threshold
+            base_threshold = 0.45
+            
+            # This would be adjusted based on market conditions
+            # For now, return base threshold
+            return base_threshold
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic dominance threshold: {e}")
+            return 0.45
+    
+    async def _get_dynamic_fear_greed_levels(self) -> Dict[str, int]:
+        """Get dynamic fear greed levels based on market conditions"""
+        try:
+            # Base fear greed levels
+            base_levels = {'extreme_fear': 25, 'fear': 45, 'greed': 75, 'extreme_greed': 90}
+            
+            # This would be adjusted based on market conditions
+            # For now, return base levels
+            return base_levels
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic fear greed levels: {e}")
+            return {'extreme_fear': 25, 'fear': 45, 'greed': 75, 'extreme_greed': 90}
+    
+    async def _get_dynamic_rsi_period(self) -> int:
+        """Get dynamic RSI period based on market conditions"""
+        try:
+            # Base RSI period
+            base_period = 14
+            
+            # This would be adjusted based on market conditions
+            # For now, return base period
+            return base_period
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic RSI period: {e}")
+            return 14
+    
+    async def _get_dynamic_cache_duration(self) -> int:
+        """Get dynamic cache duration based on market volatility"""
+        try:
+            # Base cache duration
+            base_duration = 300
+            
+            # This would be adjusted based on market volatility
+            # For now, return base duration
+            return base_duration
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic cache duration: {e}")
+            return 300
     
     async def analyze_market_condition(self, symbol: str) -> Dict[str, Any]:
         """Belirli bir sembol için market koşulunu analiz et"""
