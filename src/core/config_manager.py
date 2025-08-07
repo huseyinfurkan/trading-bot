@@ -59,7 +59,7 @@ class ConfigManager:
         """Kapsamlı konfigürasyon doğrulaması - tip kontrolü ve tutarlılık"""
         logger.info("🔍 Kapsamlı konfigürasyon doğrulaması başlatılıyor...")
         
-        # Type validation schema
+        # 1. DEEP TYPE VALIDATION SCHEMA
         validation_schema = {
             'exchanges': {
                 'type': dict,
@@ -376,3 +376,91 @@ class ConfigManager:
         if strategy_name not in strategies:
             raise KeyError(f"Strateji bulunamadı: {strategy_name}")
         return strategies[strategy_name]
+    
+    def _validate_type_deep(self, value, expected_type, path=""):
+        """Derin tip kontrolü - nested structures için"""
+        try:
+            if expected_type == dict and not isinstance(value, dict):
+                raise ValueError(f"Expected dict at {path}, got {type(value).__name__}")
+            elif expected_type == list and not isinstance(value, list):
+                raise ValueError(f"Expected list at {path}, got {type(value).__name__}")
+            elif expected_type == str and not isinstance(value, str):
+                raise ValueError(f"Expected string at {path}, got {type(value).__name__}")
+            elif expected_type == int and not isinstance(value, int):
+                raise ValueError(f"Expected int at {path}, got {type(value).__name__}")
+            elif expected_type == float and not isinstance(value, (int, float)):
+                raise ValueError(f"Expected float at {path}, got {type(value).__name__}")
+            elif expected_type == bool and not isinstance(value, bool):
+                raise ValueError(f"Expected bool at {path}, got {type(value).__name__}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Type validation failed: {e}")
+            return False
+    
+    def _validate_range(self, value, min_val=None, max_val=None, path=""):
+        """Değer aralığı kontrolü"""
+        try:
+            if min_val is not None and value < min_val:
+                raise ValueError(f"Value {value} at {path} is below minimum {min_val}")
+            if max_val is not None and value > max_val:
+                raise ValueError(f"Value {value} at {path} is above maximum {max_val}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Range validation failed: {e}")
+            return False
+    
+    async def reload_config(self):
+        """HOT-RELOAD: Konfigürasyonu yeniden yükle"""
+        try:
+            logger.info("🔄 Hot-reloading configuration...")
+            
+            # Backup current config
+            old_config = self.config.copy() if self.config else {}
+            
+            # Try to load new config
+            with open(self.config_path, 'r', encoding='utf-8') as file:
+                new_config = yaml.safe_load(file)
+            
+            if not new_config:
+                logger.error("❌ New config is empty, keeping old config")
+                return False
+            
+            # Set environment variables
+            self.config = new_config
+            self._set_environment_variables()
+            
+            # Validate new config
+            await self._validate_config()
+            
+            logger.success("✅ Configuration hot-reloaded successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Hot-reload failed: {e}")
+            # Restore old config
+            self.config = old_config
+            return False
+    
+    def watch_config_file(self):
+        """Konfigürasyon dosyası değişikliklerini izle"""
+        import threading
+        import time
+        import os
+        
+        def watch():
+            last_modified = os.path.getmtime(self.config_path)
+            while True:
+                try:
+                    current_modified = os.path.getmtime(self.config_path)
+                    if current_modified != last_modified:
+                        logger.info("📁 Config file changed, triggering hot-reload...")
+                        # Note: This would need async context in real implementation
+                        last_modified = current_modified
+                    time.sleep(1)  # Check every second
+                except Exception as e:
+                    logger.error(f"❌ Config watch error: {e}")
+                    time.sleep(5)
+        
+        watcher_thread = threading.Thread(target=watch, daemon=True)
+        watcher_thread.start()
+        logger.info("👁️ Config file watcher started")

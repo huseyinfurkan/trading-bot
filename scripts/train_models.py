@@ -10,7 +10,6 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import yfinance as yf
 from loguru import logger
 
 # Add src to path
@@ -18,27 +17,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from src.ai.signal_filter import AISignalFilter
 from src.core.database_manager import DatabaseManager
+from src.trading.exchange_manager import ExchangeManager
+from src.core.config_manager import ConfigManager
 
 
 class ModelTrainer:
     """Model eğitim yöneticisi"""
     
     def __init__(self):
+        # Use CCXT-compatible symbols directly
         self.symbols = [
-            'BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 
-            'SOL-USD', 'DOT-USD', 'MATIC-USD', 'LINK-USD'
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 
+            'SOLUSDT', 'DOTUSDT', 'MATICUSDT', 'LINKUSDT'
         ]
         
-        self.crypto_mapping = {
-            'BTC-USD': 'BTC/USDT',
-            'ETH-USD': 'ETH/USDT', 
-            'BNB-USD': 'BNB/USDT',
-            'ADA-USD': 'ADA/USDT',
-            'SOL-USD': 'SOL/USDT',
-            'DOT-USD': 'DOT/USDT',
-            'MATIC-USD': 'MATIC/USDT',
-            'LINK-USD': 'LINK/USDT'
-        }
+        # Initialize CCXT exchange manager
+        self.exchange_manager = None
+        self.config_manager = None
         
         self.model_dir = Path('models')
         self.model_dir.mkdir(exist_ok=True)
@@ -46,33 +41,80 @@ class ModelTrainer:
         self.data_dir = Path('data/training')
         self.data_dir.mkdir(parents=True, exist_ok=True)
     
-    async def download_training_data(self, symbol: str, period: str = "2y") -> pd.DataFrame:
-        """Eğitim verilerini indir"""
+    async def initialize(self):
+        """Initialize exchange manager and config"""
         try:
-            logger.info(f"📥 {symbol} için eğitim verisi indiriliyor...")
+            logger.info("🔧 Initializing CCXT exchange manager...")
             
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval="1h")
+            # Load config
+            config_path = Path(__file__).parent.parent / 'config' / 'config.yaml'
+            self.config_manager = ConfigManager(str(config_path))
+            config = await self.config_manager.load_config()
             
-            if data.empty:
-                logger.warning(f"⚠️ {symbol} için veri bulunamadı")
+            # Initialize exchange manager
+            exchanges_config = config.get('exchanges', {
+                'bybit': {
+                    'enabled': True,
+                    'testnet': False,
+                    'api_key': '',
+                    'api_secret': '',
+                    'params': {}
+                }
+            })
+            
+            self.exchange_manager = ExchangeManager(exchanges_config)
+            await self.exchange_manager.initialize()
+            
+            logger.success("✅ CCXT exchange manager ready for training")
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange manager initialization failed: {e}")
+            raise
+    
+    async def download_training_data(self, symbol: str, period: str = "2y") -> pd.DataFrame:
+        """Eğitim verilerini CCXT ile indir"""
+        try:
+            logger.info(f"📥 {symbol} için eğitim verisi indiriliyor (CCXT)...")
+            
+            # Calculate date range
+            end_date = datetime.now()
+            if period == "2y":
+                start_date = end_date - timedelta(days=730)  # 2 years
+            elif period == "1y":
+                start_date = end_date - timedelta(days=365)  # 1 year
+            else:
+                start_date = end_date - timedelta(days=180)  # Default 6 months
+            
+            # Get historical data from exchange
+            data = await self.exchange_manager.get_historical_data(
+                symbol=symbol,
+                timeframe='1h',
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if data is None or len(data) < 100:
+                logger.warning(f"⚠️ {symbol} için yeterli veri bulunamadı")
                 return pd.DataFrame()
             
-            # Clean and format data
-            df = pd.DataFrame({
-                'timestamp': data.index,
-                'open': data['Open'].values,
-                'high': data['High'].values,
-                'low': data['Low'].values,
-                'close': data['Close'].values,
-                'volume': data['Volume'].values
-            })
+            # Data is already in correct format from CCXT
+            df = data.copy()
+            df.reset_index(inplace=True)
+            
+            # Ensure required columns
+            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.error(f"❌ Missing column {col} in {symbol} data")
+                    return pd.DataFrame()
             
             # Remove NaN values
             df = df.dropna()
             
+            logger.info(f"✅ {symbol}: {len(df)} candles loaded via CCXT")
+            
             # Save raw data
-            output_file = self.data_dir / f"{symbol.replace('-', '_')}_raw.csv"
+            output_file = self.data_dir / f"{symbol.replace('/', '_')}_raw.csv"
             df.to_csv(output_file, index=False)
             
             logger.info(f"✅ {symbol}: {len(df)} kayıt indirildi ve kaydedildi")
@@ -354,6 +396,15 @@ class ModelTrainer:
             logger.error(f"❌ Toplu eğitim hatası: {e}")
             return {'error': str(e)}
 
+    async def cleanup(self):
+        """Cleanup resources"""
+        try:
+            if self.exchange_manager:
+                await self.exchange_manager.close()
+                logger.debug("✅ Exchange manager cleaned up")
+        except Exception as e:
+            logger.error(f"❌ Cleanup error: {e}")
+
 
 async def main():
     """Ana eğitim fonksiyonu"""
@@ -361,6 +412,7 @@ async def main():
     logger.info("=" * 50)
     
     trainer = ModelTrainer()
+    await trainer.initialize() # Call the new initialize method
     results = await trainer.train_all_models()
     
     if 'error' not in results:
@@ -375,6 +427,9 @@ async def main():
         logger.info("🚀 Artık bot'u çalıştırabilirsiniz!")
     else:
         logger.error(f"❌ Eğitim başarısız: {results['error']}")
+    
+    # Cleanup
+    await trainer.cleanup()
 
 
 if __name__ == "__main__":

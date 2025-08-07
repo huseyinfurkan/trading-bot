@@ -314,11 +314,23 @@ class AISignalFilter:
             if len(df) < 50:  # Need sufficient data for ML
                 return signals
             
-            # Get the trained models
-            models = self.models.get('5m', {})  # Use 5m models
+            # Get the trained models with fallback
+            models = self.models.get('5m', {})
+            
+            # If 5m models not available, try 15m models
+            if not models:
+                models = self.models.get('15m', {})
+                if models:
+                    logger.debug("Using 15m models as fallback for ML signals")
             
             if not models:
-                logger.debug("No trained ML models available")
+                logger.debug("No trained ML models available (checked 5m and 15m)")
+                # Try to load models if not initialized
+                await self._try_load_models()
+                models = self.models.get('5m', {}) or self.models.get('15m', {})
+                
+            if not models:
+                logger.warning("⚠️ ML models still not available after load attempt")
                 return signals
             
             # Prepare features for prediction
@@ -392,6 +404,67 @@ class AISignalFilter:
             logger.error(f"❌ ML signals error: {e}")
         
         return signals
+    
+    async def _try_load_models(self):
+        """Try to load ML models if not already loaded"""
+        try:
+            if not self.models:
+                logger.info("🔄 Attempting to load ML models...")
+                
+                # Try to load from common model paths
+                import os
+                import joblib
+                
+                model_paths = [
+                    'models/',
+                    'src/ai/models/',
+                    '../models/',
+                    './models/'
+                ]
+                
+                for model_path in model_paths:
+                    if os.path.exists(model_path):
+                        logger.debug(f"Checking model directory: {model_path}")
+                        
+                        # Look for model files
+                        for timeframe in ['5m', '15m']:
+                            gb_path = os.path.join(model_path, f'gradient_boosting_model_{timeframe}.joblib')
+                            rf_path = os.path.join(model_path, f'random_forest_model_{timeframe}.joblib')
+                            scaler_gb_path = os.path.join(model_path, f'scaler_gradient_boosting_{timeframe}.joblib')
+                            scaler_rf_path = os.path.join(model_path, f'scaler_random_forest_{timeframe}.joblib')
+                            
+                            if all(os.path.exists(p) for p in [gb_path, rf_path, scaler_gb_path, scaler_rf_path]):
+                                try:
+                                    # Load models
+                                    gb_model = joblib.load(gb_path)
+                                    rf_model = joblib.load(rf_path)
+                                    gb_scaler = joblib.load(scaler_gb_path)
+                                    rf_scaler = joblib.load(scaler_rf_path)
+                                    
+                                    # Initialize structures if needed
+                                    if timeframe not in self.models:
+                                        self.models[timeframe] = {}
+                                    if timeframe not in self.scalers:
+                                        self.scalers[timeframe] = {}
+                                    
+                                    # Store models
+                                    self.models[timeframe]['GradientBoosting'] = gb_model
+                                    self.models[timeframe]['RandomForest'] = rf_model
+                                    self.scalers[timeframe]['GradientBoosting'] = gb_scaler
+                                    self.scalers[timeframe]['RandomForest'] = rf_scaler
+                                    
+                                    logger.success(f"✅ Loaded {timeframe} models from {model_path}")
+                                    
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Failed to load {timeframe} models: {e}")
+                
+                if self.models:
+                    logger.success(f"✅ Successfully loaded models for timeframes: {list(self.models.keys())}")
+                else:
+                    logger.warning("⚠️ No models could be loaded from any path")
+                    
+        except Exception as e:
+            logger.error(f"❌ Error trying to load models: {e}")
     
     def _get_volume_signals(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Volume tabanlı sinyaller"""

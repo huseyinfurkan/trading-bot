@@ -442,37 +442,102 @@ class DatabaseManager:
             return 0.0
     
     async def save_trade(self, trade_data: Dict[str, Any]) -> Optional[int]:
-        """Trade bilgisini veritabanına kaydet"""
+        """Trade bilgisini veritabanına kaydet - with validation and retry"""
+        # DATA TYPE VALIDATION
+        if not self._validate_trade_data(trade_data):
+            logger.error("❌ Trade data validation failed")
+            return None
+        
+        # RETRY MECHANISM
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Ensure connection is healthy
+                if not await self._ensure_connection():
+                    if attempt == max_retries - 1:
+                        logger.error("❌ Database connection failed after retries")
+                        return None
+                    await asyncio.sleep(0.5)
+                    continue
+                
+                cursor = await self.connection.execute("""
+                    INSERT INTO trades (
+                        symbol, side, size, price, pnl, strategy, 
+                        confidence, exchange, order_id, position_id, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    trade_data.get('symbol'),
+                    trade_data.get('side'),
+                    float(trade_data.get('size', 0.0)),
+                    float(trade_data.get('price', 0.0)),
+                    float(trade_data.get('pnl', 0.0)),
+                    trade_data.get('strategy'),
+                    float(trade_data.get('confidence', 0.0)),
+                    trade_data.get('exchange'),
+                    trade_data.get('order_id'),
+                    trade_data.get('position_id'),
+                    trade_data.get('timestamp', datetime.now())
+                ))
+                
+                await self.connection.commit()
+                trade_id = cursor.lastrowid
+                
+                logger.debug(f"✅ Trade saved: {trade_data.get('symbol')} {trade_data.get('side')} - ID: {trade_id}")
+                return trade_id
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Save trade attempt {attempt + 1} failed: {e}")
+                await self.connection.rollback()
+                
+                if attempt == max_retries - 1:
+                    logger.error(f"❌ Error saving trade after {max_retries} attempts: {e}")
+                    return None
+                
+                # Wait before retry
+                await asyncio.sleep(0.5 * (attempt + 1))
+        
+        return None
+    
+    def _validate_trade_data(self, trade_data: Dict[str, Any]) -> bool:
+        """Trade data type validation"""
         try:
-            cursor = await self.connection.execute("""
-                INSERT INTO trades (
-                    symbol, side, size, price, pnl, strategy, 
-                    confidence, exchange, order_id, position_id, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                trade_data.get('symbol'),
-                trade_data.get('side'),
-                trade_data.get('size', 0.0),
-                trade_data.get('price', 0.0),
-                trade_data.get('pnl', 0.0),
-                trade_data.get('strategy'),
-                trade_data.get('confidence', 0.0),
-                trade_data.get('exchange'),
-                trade_data.get('order_id'),
-                trade_data.get('position_id'),
-                trade_data.get('timestamp', datetime.now())
-            ))
+            required_fields = ['symbol', 'side', 'size', 'price']
             
-            await self.connection.commit()
-            trade_id = cursor.lastrowid
+            # Check required fields
+            for field in required_fields:
+                if field not in trade_data:
+                    logger.error(f"❌ Missing required field: {field}")
+                    return False
             
-            logger.debug(f"✅ Trade saved: {trade_data.get('symbol')} {trade_data.get('side')} - ID: {trade_id}")
-            return trade_id
+            # Validate types
+            if not isinstance(trade_data.get('symbol'), str):
+                logger.error("❌ Symbol must be string")
+                return False
+                
+            if trade_data.get('side') not in ['BUY', 'SELL', 'LONG', 'SHORT']:
+                logger.error(f"❌ Invalid side: {trade_data.get('side')}")
+                return False
+            
+            # Validate numeric fields
+            try:
+                float(trade_data.get('size', 0))
+                float(trade_data.get('price', 0))
+                if 'pnl' in trade_data:
+                    float(trade_data.get('pnl'))
+                if 'confidence' in trade_data:
+                    confidence = float(trade_data.get('confidence'))
+                    if not 0 <= confidence <= 1:
+                        logger.error(f"❌ Confidence must be 0-1, got: {confidence}")
+                        return False
+            except (ValueError, TypeError) as e:
+                logger.error(f"❌ Numeric validation failed: {e}")
+                return False
+            
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Error saving trade: {e}")
-            await self.connection.rollback()
-            return None
+            logger.error(f"❌ Trade data validation error: {e}")
+            return False
     
     async def update_trade_pnl(self, trade_id: int, pnl: float) -> bool:
         """Trade PnL'ini güncelle"""

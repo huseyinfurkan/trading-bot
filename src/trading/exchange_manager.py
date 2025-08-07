@@ -240,9 +240,12 @@ class ExchangeManager:
                 'symbol': symbol,
                 'dataframe': df,
                 'current_price': ticker['last'],
+                'close': ticker['last'],  # CONSISTENCY: Add 'close' key for modules expecting it
+                'price': ticker['last'],  # CONSISTENCY: Add 'price' key as well
                 'bid': ticker['bid'],
                 'ask': ticker['ask'],
                 'volume_24h': ticker['quoteVolume'],
+                'volume': ticker['quoteVolume'],  # CONSISTENCY: Add 'volume' key
                 'change_24h': ticker['change'],
                 'change_24h_pct': ticker['percentage'],
                 'orderbook': orderbook,
@@ -271,10 +274,14 @@ class ExchangeManager:
             return {
                 'symbol': symbol,
                 'price': ticker['last'],
+                'current_price': ticker['last'],  # CONSISTENCY: Add current_price key
+                'close': ticker['last'],          # CONSISTENCY: Add close key
                 'bid': ticker['bid'],
                 'ask': ticker['ask'],
                 'volume': ticker['baseVolume'],
+                'volume_24h': ticker['quoteVolume'] if 'quoteVolume' in ticker else ticker['baseVolume'],
                 'change_24h': ticker['change'],
+                'change_pct_24h': ticker['percentage'],
                 'timestamp': datetime.now(),
                 'exchange': exchange
             }

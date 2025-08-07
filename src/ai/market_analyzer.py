@@ -174,52 +174,59 @@ class MarketAnalyzer:
             
             market_data = {}
             
-            # Fetch data for major cryptocurrencies using yfinance
+            # Fetch data for major cryptocurrencies using ASYNC CCXT
             for symbol in self.major_symbols:
                 try:
-                    ticker = yf.Ticker(symbol)
+                    # Get historical data (last 30 days) from exchange
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=30)
                     
-                    # Get historical data (last 30 days)
-                    hist = ticker.history(period="30d", interval="1d")
+                    hist = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe='1d',
+                        start_date=start_date,
+                        end_date=end_date
+                    )
                     
-                    if hist.empty:
+                    if hist is None or len(hist) < 2:
+                        logger.warning(f"⚠️ Insufficient data for {symbol}")
                         continue
                     
-                    # Get current info
-                    info = ticker.info
-                    
-                    # Calculate technical indicators
-                    current_price = hist['Close'].iloc[-1]
-                    prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                    # Calculate technical indicators (CCXT uses lowercase column names)
+                    current_price = hist['close'].iloc[-1]
+                    prev_price = hist['close'].iloc[-2] if len(hist) > 1 else current_price
                     
                     # Moving averages
-                    ma_7 = hist['Close'].rolling(7).mean().iloc[-1]
-                    ma_20 = hist['Close'].rolling(20).mean().iloc[-1] if len(hist) >= 20 else current_price
+                    ma_7 = hist['close'].rolling(7).mean().iloc[-1]
+                    ma_20 = hist['close'].rolling(20).mean().iloc[-1] if len(hist) >= 20 else current_price
                     
-                    # Volatility
-                    returns = hist['Close'].pct_change().dropna()
-                    volatility = returns.std() * np.sqrt(252)  # Annualized volatility
+                    # Volatility (30-day)
+                    returns = hist['close'].pct_change().dropna()
+                    volatility = returns.std() * np.sqrt(365) if len(returns) > 1 else 0
                     
                     # RSI calculation
-                    delta = hist['Close'].diff()
+                    delta = hist['close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                     rs = gain / loss
                     rsi = 100 - (100 / (1 + rs))
                     current_rsi = rsi.iloc[-1] if not rsi.empty else 50
                     
+                    # Get current market data for 24h change
+                    current_market_data = await self.exchange_manager.get_real_time_data(symbol)
+                    change_24h = current_market_data.get('change_24h', 0) if current_market_data else 0
+                    
                     market_data[symbol] = {
                         'current_price': current_price,
                         'prev_price': prev_price,
-                        'change_24h': current_price - prev_price,
+                        'change_24h': change_24h,
                         'change_24h_pct': ((current_price - prev_price) / prev_price) * 100,
-                        'volume': hist['Volume'].iloc[-1],
-                        'volume_avg': hist['Volume'].rolling(7).mean().iloc[-1],
+                        'volume': hist['volume'].iloc[-1],
+                        'volume_avg': hist['volume'].rolling(7).mean().iloc[-1],
                         'ma_7': ma_7,
                         'ma_20': ma_20,
                         'volatility': volatility,
                         'rsi': current_rsi,
-                        'market_cap': info.get('marketCap', 0),
                         'dataframe': hist,
                         'timestamp': datetime.now()
                     }
