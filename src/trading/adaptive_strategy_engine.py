@@ -9,16 +9,18 @@ import traceback
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
+from src.core.risk_manager import RiskManager
 
 
 class AdaptiveStrategyEngine:
     """2 RESEARCH-BACKED Strategies: Williams Alligator + BB/RSI/StochRSI"""
     
-    def __init__(self, config: Dict, exchange_manager, ai_signal_filter):
+    def __init__(self, config: Dict, exchange_manager, ai_signal_filter, risk_manager=None):
         """Initialize with 2 research-proven strategies"""
         self.config = config
         self.exchange_manager = exchange_manager
         self.ai_signal_filter = ai_signal_filter
+        self.risk_manager = risk_manager  # For consistent position sizing in backtest
         
         # 2 RESEARCH-BACKED STRATEGIES with proven performance
         self.strategies = {
@@ -597,22 +599,53 @@ class AdaptiveStrategyEngine:
                     signal_confidence = signal.get('combined_confidence', signal.get('confidence', 0.0))
                     
                     if (signal['action'] == 'BUY' or signal['action'] == 'SELL') and signal_confidence > confidence_threshold:
-                        # Enter position with REALISTIC sizing for AI-filtered signals
-                        if actual_strategy == 'alligator_ma_momentum':
-                            # Realistic sizing for 15m trend following (AI filtered signals)
-                            risk_per_trade = 0.02   # 2% risk (realistic for trend following)
-                            leverage = 2.0          # Moderate leverage for trend trades
-                        elif actual_strategy == 'bollinger_rsi_stochrsi':
-                            # Realistic sizing for 5m mean reversion scalping (AI filtered)
-                            risk_per_trade = 0.015  # 1.5% risk (realistic for mean reversion)
-                            leverage = 1.8          # Moderate leverage for quick trades
+                        # Enter position with RISK MANAGER sizing (consistent with live trading)
+                        if self.risk_manager:
+                            # Use RiskManager for consistent position sizing
+                            try:
+                                position_calc = await self.risk_manager.calculate_position_size(
+                                    symbol=symbol,
+                                    action=signal,
+                                    current_price=current_price,
+                                    account_balance=capital,
+                                    confidence=signal_confidence
+                                )
+                                position_size = position_calc.get('size', 0)
+                                
+                                if position_size <= 0:
+                                    logger.debug(f"RiskManager rejected position for {symbol}")
+                                    continue
+                                    
+                                logger.debug(f"RiskManager position: {position_size} @ ${current_price}")
+                                
+                            except Exception as e:
+                                logger.warning(f"RiskManager error: {e}, using fallback sizing")
+                                # Fallback to realistic hardcoded sizing
+                                if actual_strategy == 'alligator_ma_momentum':
+                                    risk_per_trade = 0.02
+                                    leverage = 2.0
+                                else:
+                                    risk_per_trade = 0.015
+                                    leverage = 1.8
+                                position_value = capital * risk_per_trade * leverage
+                                position_size = position_value / current_price
                         else:
-                            # Default realistic sizing
-                            risk_per_trade = 0.02
-                            leverage = 2.0
-                        
-                        position_value = capital * risk_per_trade * leverage
-                        position_size = position_value / current_price
+                            # Fallback: Use realistic hardcoded sizing (for backward compatibility)
+                            if actual_strategy == 'alligator_ma_momentum':
+                                # Realistic sizing for 15m trend following (AI filtered signals)
+                                risk_per_trade = 0.02   # 2% risk (realistic for trend following)
+                                leverage = 2.0          # Moderate leverage for trend trades
+                            elif actual_strategy == 'bollinger_rsi_stochrsi':
+                                # Realistic sizing for 5m mean reversion scalping (AI filtered)
+                                risk_per_trade = 0.015  # 1.5% risk (realistic for mean reversion)
+                                leverage = 1.8          # Moderate leverage for quick trades
+                            else:
+                                # Default realistic sizing
+                                risk_per_trade = 0.02
+                                leverage = 2.0
+                            
+                            position_value = capital * risk_per_trade * leverage
+                            position_size = position_value / current_price
                         
                         if signal['action'] == 'BUY':
                             position = 'LONG'

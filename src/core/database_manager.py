@@ -428,6 +428,55 @@ class DatabaseManager:
             logger.error(f"❌ Total losses error: {e}")
             return 0.0
     
+    async def save_trade(self, trade_data: Dict[str, Any]) -> Optional[int]:
+        """Trade bilgisini veritabanına kaydet"""
+        try:
+            cursor = await self.connection.execute("""
+                INSERT INTO trades (
+                    symbol, side, size, price, pnl, strategy, 
+                    confidence, exchange, order_id, position_id, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                trade_data.get('symbol'),
+                trade_data.get('side'),
+                trade_data.get('size', 0.0),
+                trade_data.get('price', 0.0),
+                trade_data.get('pnl', 0.0),
+                trade_data.get('strategy'),
+                trade_data.get('confidence', 0.0),
+                trade_data.get('exchange'),
+                trade_data.get('order_id'),
+                trade_data.get('position_id'),
+                trade_data.get('timestamp', datetime.now())
+            ))
+            
+            await self.connection.commit()
+            trade_id = cursor.lastrowid
+            
+            logger.debug(f"✅ Trade saved: {trade_data.get('symbol')} {trade_data.get('side')} - ID: {trade_id}")
+            return trade_id
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving trade: {e}")
+            await self.connection.rollback()
+            return None
+    
+    async def update_trade_pnl(self, trade_id: int, pnl: float) -> bool:
+        """Trade PnL'ini güncelle"""
+        try:
+            await self.connection.execute("""
+                UPDATE trades SET pnl = ? WHERE id = ?
+            """, (pnl, trade_id))
+            
+            await self.connection.commit()
+            logger.debug(f"✅ Trade PnL updated: ID {trade_id} = {pnl}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating trade PnL: {e}")
+            await self.connection.rollback()
+            return False
+
     async def get_trades(self, symbol: str = None, limit: int = 100) -> List[Dict]:
         """Trade geçmişini getir"""
         try:

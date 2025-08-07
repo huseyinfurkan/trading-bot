@@ -361,9 +361,9 @@ class LiveDataEngine:
                 return {'action': 'HOLD', 'reason': f'Risk check failed: {risk_assessment["reason"]}'}
             
             # Check for entry signal
-            if entry_signal and entry_signal.get('signal') in ['BUY', 'SELL']:
+            if entry_signal and entry_signal.get('action') in ['BUY', 'SELL']:
                 return {
-                    'action': entry_signal['signal'],
+                    'action': entry_signal['action'],
                     'entry_price': entry_signal['entry_price'],
                     'stop_loss': entry_signal.get('stop_loss'),
                     'take_profit': entry_signal.get('take_profit'),

@@ -56,52 +56,176 @@ class ConfigManager:
             raise
     
     async def _validate_config(self):
-        """Konfigürasyonu doğrula"""
-        logger.info("🔍 Konfigürasyon doğrulanıyor...")
+        """Kapsamlı konfigürasyon doğrulaması - tip kontrolü ve tutarlılık"""
+        logger.info("🔍 Kapsamlı konfigürasyon doğrulaması başlatılıyor...")
         
-        # Gerekli ana bölümleri kontrol et (esnek validation)
-        required_sections = ['exchanges', 'strategies', 'risk_management']
-        optional_sections = ['trading_pairs', 'ai', 'notifications', 'database']
-        
-        for section in required_sections:
-            if section not in self.config:
-                raise ValueError(f"Eksik konfigürasyon bölümü: {section}")
-        
-        # Optional bölümler için default değerler
-        for section in optional_sections:
-            if section not in self.config:
-                self.config[section] = {}
-                logger.warning(f"⚠️ Optional section '{section}' eksik, boş dictionary olarak ayarlandı")
-        
-        # Exchange ayarlarını doğrula (esnek validation)
-        for exchange_name, exchange_config in self.config['exchanges'].items():
-            # Sadece enabled alanı yoksa otomatik false yap
-            if 'enabled' not in exchange_config:
-                exchange_config['enabled'] = False
-                logger.warning(f"⚠️ {exchange_name} exchange 'enabled' alanı eksik, false olarak ayarlandı")
-        
-        # Strateji ayarlarını doğrula (esnek validation)
-        for strategy_name, strategy_config in self.config['strategies'].items():
-            # Enabled alanı yoksa otomatik true yap
-            if 'enabled' not in strategy_config:
-                strategy_config['enabled'] = True
-                logger.warning(f"⚠️ {strategy_name} stratejisi 'enabled' alanı eksik, true olarak ayarlandı")
-            
-            if not strategy_config.get('enabled'):
-                continue
-            
-            # Required fields için default değerler
-            defaults = {
-                'weight': 0.25,
-                'parameters': {}
+        # Type validation schema
+        validation_schema = {
+            'exchanges': {
+                'type': dict,
+                'required_keys': ['api_key', 'secret'],
+                'optional_keys': ['sandbox', 'passphrase']
+            },
+            'strategies': {
+                'type': dict,
+                'required_strategies': ['alligator_ma_momentum', 'bollinger_rsi_stochrsi'],
+                'strategy_params': {
+                    'alligator_ma_momentum': {
+                        'risk_per_trade': {'type': float, 'min': 0.001, 'max': 0.05},
+                        'leverage': {'type': float, 'min': 1.0, 'max': 5.0},
+                        'profit_target': {'type': float, 'min': 0.02, 'max': 0.20},
+                        'stop_loss': {'type': float, 'min': 0.01, 'max': 0.10},
+                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100}
+                    },
+                    'bollinger_rsi_stochrsi': {
+                        'risk_per_trade': {'type': float, 'min': 0.001, 'max': 0.05},
+                        'leverage': {'type': float, 'min': 1.0, 'max': 5.0},
+                        'profit_target': {'type': float, 'min': 0.01, 'max': 0.15},
+                        'stop_loss': {'type': float, 'min': 0.005, 'max': 0.08},
+                        'max_hold_bars': {'type': int, 'min': 1, 'max': 100},
+                        'rsi_oversold': {'type': int, 'min': 10, 'max': 40},
+                        'rsi_overbought': {'type': int, 'min': 60, 'max': 90}
+                    }
+                }
+            },
+            'risk_management': {
+                'type': dict,
+                'required_params': {
+                    'max_daily_loss': {'type': float, 'min': 0.01, 'max': 0.20},
+                    'max_portfolio_risk': {'type': float, 'min': 0.01, 'max': 0.30},
+                    'max_positions': {'type': int, 'min': 1, 'max': 20}
+                }
+            },
+            'ai': {
+                'type': dict,
+                'required_params': {
+                    'confidence_threshold': {'type': float, 'min': 0.3, 'max': 0.9}
+                }
             }
-            
-            for field, default_value in defaults.items():
-                if field not in strategy_config:
-                    strategy_config[field] = default_value
-                    logger.warning(f"⚠️ {strategy_name} stratejisinde '{field}' alanı eksik, default değer ayarlandı")
+        }
         
-        logger.info("✅ Konfigürasyon doğrulaması başarıyla tamamlandı")
+        # Validate top-level structure
+        for section, schema in validation_schema.items():
+            if section not in self.config:
+                logger.error(f"❌ Eksik konfigürasyon bölümü: {section}")
+                raise ValueError(f"Required config section missing: {section}")
+            
+            if not isinstance(self.config[section], schema['type']):
+                logger.error(f"❌ Hatalı tip: {section} should be {schema['type'].__name__}")
+                raise TypeError(f"Config section {section} must be {schema['type'].__name__}")
+        
+        # Validate strategies in detail
+        await self._validate_strategies(validation_schema['strategies'])
+        
+        # Validate risk management parameters
+        await self._validate_risk_parameters(validation_schema['risk_management'])
+        
+        # Validate AI parameters
+        await self._validate_ai_parameters(validation_schema['ai'])
+        
+        # Check parameter name consistency
+        await self._check_parameter_consistency()
+        
+        logger.success("✅ Kapsamlı konfigürasyon doğrulaması tamamlandı")
+    
+    async def _validate_strategies(self, schema):
+        """Strateji parametrelerini detaylı doğrula"""
+        strategies = self.config['strategies']
+        
+        # Check required strategies exist
+        for required_strategy in schema['required_strategies']:
+            if required_strategy not in strategies:
+                logger.error(f"❌ Gerekli strateji eksik: {required_strategy}")
+                raise ValueError(f"Required strategy missing: {required_strategy}")
+        
+        # Validate each strategy's parameters
+        for strategy_name, strategy_config in strategies.items():
+            if strategy_name in schema['strategy_params']:
+                param_schema = schema['strategy_params'][strategy_name]
+                
+                for param_name, param_rules in param_schema.items():
+                    if param_name in strategy_config:
+                        value = strategy_config[param_name]
+                        
+                        # Type check
+                        if not isinstance(value, param_rules['type']):
+                            logger.error(f"❌ {strategy_name}.{param_name}: Expected {param_rules['type'].__name__}, got {type(value).__name__}")
+                            raise TypeError(f"Parameter {strategy_name}.{param_name} must be {param_rules['type'].__name__}")
+                        
+                        # Range check
+                        if 'min' in param_rules and value < param_rules['min']:
+                            logger.error(f"❌ {strategy_name}.{param_name}: {value} < {param_rules['min']}")
+                            raise ValueError(f"Parameter {strategy_name}.{param_name} must be >= {param_rules['min']}")
+                        
+                        if 'max' in param_rules and value > param_rules['max']:
+                            logger.error(f"❌ {strategy_name}.{param_name}: {value} > {param_rules['max']}")
+                            raise ValueError(f"Parameter {strategy_name}.{param_name} must be <= {param_rules['max']}")
+                        
+                        logger.debug(f"✅ {strategy_name}.{param_name}: {value} valid")
+    
+    async def _validate_risk_parameters(self, schema):
+        """Risk yönetimi parametrelerini doğrula"""
+        risk_config = self.config['risk_management']
+        
+        for param_name, param_rules in schema['required_params'].items():
+            if param_name not in risk_config:
+                logger.error(f"❌ Risk parametresi eksik: {param_name}")
+                raise ValueError(f"Required risk parameter missing: {param_name}")
+            
+            value = risk_config[param_name]
+            
+            # Type and range validation
+            if not isinstance(value, param_rules['type']):
+                raise TypeError(f"Risk parameter {param_name} must be {param_rules['type'].__name__}")
+            
+            if 'min' in param_rules and value < param_rules['min']:
+                raise ValueError(f"Risk parameter {param_name} must be >= {param_rules['min']}")
+            
+            if 'max' in param_rules and value > param_rules['max']:
+                raise ValueError(f"Risk parameter {param_name} must be <= {param_rules['max']}")
+    
+    async def _validate_ai_parameters(self, schema):
+        """AI parametrelerini doğrula"""
+        ai_config = self.config['ai']
+        
+        for param_name, param_rules in schema['required_params'].items():
+            if param_name in ai_config:
+                value = ai_config[param_name]
+                
+                if not isinstance(value, param_rules['type']):
+                    raise TypeError(f"AI parameter {param_name} must be {param_rules['type'].__name__}")
+                
+                if 'min' in param_rules and value < param_rules['min']:
+                    raise ValueError(f"AI parameter {param_name} must be >= {param_rules['min']}")
+                
+                if 'max' in param_rules and value > param_rules['max']:
+                    raise ValueError(f"AI parameter {param_name} must be <= {param_rules['max']}")
+    
+    async def _check_parameter_consistency(self):
+        """Parametre isim tutarlılığını kontrol et"""
+        strategies = self.config.get('strategies', {})
+        
+        # Expected strategy names (must match AdaptiveStrategyEngine)
+        expected_strategies = ['alligator_ma_momentum', 'bollinger_rsi_stochrsi']
+        
+        for strategy_name in strategies.keys():
+            if strategy_name not in expected_strategies:
+                logger.warning(f"⚠️ Bilinmeyen strateji ismi: {strategy_name}")
+                logger.warning(f"   Beklenen isimler: {expected_strategies}")
+        
+        # Check for old parameter names
+        deprecated_params = {
+            'max_hold_hours': 'max_hold_bars',
+            'mean_reversion_adaptive': 'bollinger_rsi_stochrsi',
+            'trend_following_adaptive': 'alligator_ma_momentum'
+        }
+        
+        for strategy_config in strategies.values():
+            for old_param, new_param in deprecated_params.items():
+                if old_param in strategy_config:
+                    logger.warning(f"⚠️ Deprecated parameter: {old_param} → use {new_param}")
+        
+        logger.info("✅ Parametre tutarlılık kontrolü tamamlandı")
     
     def _set_environment_variables(self):
         """Environment variables ile konfigürasyonu güncelle"""

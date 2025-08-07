@@ -38,7 +38,7 @@ class PositionManager:
         """Yeni pozisyon aç"""
         try:
             async with self.position_update_lock:
-                logger.info(f"🔓 {symbol} pozisyon açılıyor: {action['signal']} - Strateji: {strategy}")
+                logger.info(f"🔓 {symbol} pozisyon açılıyor: {action['action']} - Strateji: {strategy}")
                 
                 # Entry price
                 entry_price = action.get('entry_price')
@@ -47,7 +47,7 @@ class PositionManager:
                     if not market_data:
                         logger.error(f"❌ {symbol} market data alınamadı")
                         return None
-                    entry_price = market_data.get('close', 0)
+                    entry_price = market_data.get('current_price', market_data.get('close', 0))
                 
                 # Position size calculation
                 size_result = await self.risk_manager.calculate_position_size(
@@ -67,7 +67,7 @@ class PositionManager:
                 # Create order
                 order_result = await self._place_order(
                     symbol=symbol,
-                    side=action['signal'],
+                    side=action['action'],
                     size=position_size,
                     price=entry_price,
                     order_type='MARKET'
@@ -80,7 +80,7 @@ class PositionManager:
                 # Create position record
                 position_id = await self._create_position_record(
                     symbol=symbol,
-                    side=action['signal'],
+                    side=action['action'],
                     size=position_size,
                     entry_price=entry_price,
                     stop_loss=action.get('stop_loss'),
@@ -95,7 +95,7 @@ class PositionManager:
                     self.open_positions[position_id] = {
                         'id': position_id,
                         'symbol': symbol,
-                        'side': action['signal'],
+                        'side': action['action'],
                         'size': position_size,
                         'entry_price': entry_price,
                         'current_price': entry_price,
@@ -113,7 +113,7 @@ class PositionManager:
                     return {
                         'id': position_id,
                         'symbol': symbol,
-                        'side': action['signal'],
+                        'side': action['action'],
                         'size': position_size,
                         'entry_price': entry_price,
                         'status': 'OPEN'

@@ -164,7 +164,7 @@ class AISignalFilter:
                 signal_type = "HOLD"
             
             result = {
-                'signal': signal_type,
+                'action': signal_type,  # FIXED: Use 'action' key for consistency with all modules
                 'confidence': final_confidence,
                 'ml_probability': signal_prob[predicted_class],  # Fixed: Use actual predicted class probability
                 'regime': regime,
@@ -227,7 +227,7 @@ class AISignalFilter:
     def _get_default_signal_analysis(self, symbol: str, market_data: Dict[str, Any], regime: str) -> Dict[str, Any]:
         """Get default signal analysis when ML models are not available"""
         return {
-            'signal': 'HOLD',
+            'action': 'HOLD',  # FIXED: Use 'action' key for consistency 
             'confidence': 0.5,
             'ml_probability': 0.5,
             'regime': regime,

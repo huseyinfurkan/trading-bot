@@ -69,11 +69,20 @@ class BacktestRunner:
                 self.db_manager
             )
             
-            # Initialize strategy engine
+            # Initialize RiskManager for consistent position sizing
+            from src.core.risk_manager import RiskManager
+            self.risk_manager = RiskManager(
+                self.config.config.get('risk_management', {}),
+                self.db_manager,
+                self.market_analyzer
+            )
+            
+            # Initialize strategy engine WITH RiskManager
             self.strategy_engine = AdaptiveStrategyEngine(
                 self.config.config, 
                 self.exchange_manager, 
-                self.signal_filter
+                self.signal_filter,
+                self.risk_manager  # ADDED: For consistent position sizing with live trading
             )
             
             logger.success("✅ Backtesting components initialized")
