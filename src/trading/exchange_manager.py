@@ -29,10 +29,30 @@ class ExchangeManager:
         self.websocket_connections = {}
         self.market_data_cache = {}
         
-        # Rate limiting
+        # Enhanced rate limiting
         self.rate_limiter = {}
         self.last_request_time = {}
-        self.min_request_interval = 0.1  # 100ms between requests
+        self.request_counts = {}
+        self.rate_limit_windows = {}
+        
+        # Rate limit configuration per exchange
+        self.rate_limits = {
+            'bybit': {
+                'requests_per_second': 10,
+                'requests_per_minute': 600,
+                'requests_per_hour': 36000
+            },
+            'binance': {
+                'requests_per_second': 10,
+                'requests_per_minute': 1200,
+                'requests_per_hour': 72000
+            },
+            'okx': {
+                'requests_per_second': 6,
+                'requests_per_minute': 360,
+                'requests_per_hour': 21600
+            }
+        }
         
         # WebSocket callbacks
         self.price_callbacks = []
@@ -156,56 +176,115 @@ class ExchangeManager:
         return decorator
     
     async def _apply_rate_limit(self, exchange_name: str):
-        """Apply rate limiting for exchange requests"""
+        """Enhanced rate limiting with multiple time windows"""
         try:
-            current_time = time.time()
+            exchange_name = exchange_name.lower()
+            now = time.time()
             
-            if exchange_name in self.last_request_time:
-                time_since_last = current_time - self.last_request_time[exchange_name]
-                
-                if time_since_last < self.min_request_interval:
-                    sleep_time = self.min_request_interval - time_since_last
+            # Initialize rate limit tracking for this exchange
+            if exchange_name not in self.rate_limiter:
+                self.rate_limiter[exchange_name] = {
+                    'second_window': [],
+                    'minute_window': [],
+                    'hour_window': []
+                }
+                self.request_counts[exchange_name] = 0
+                self.rate_limit_windows[exchange_name] = now
+            
+            # Get rate limits for this exchange
+            limits = self.rate_limits.get(exchange_name, {
+                'requests_per_second': 5,
+                'requests_per_minute': 300,
+                'requests_per_hour': 18000
+            })
+            
+            # Clean old timestamps
+            self.rate_limiter[exchange_name]['second_window'] = [
+                t for t in self.rate_limiter[exchange_name]['second_window'] 
+                if now - t < 1.0
+            ]
+            self.rate_limiter[exchange_name]['minute_window'] = [
+                t for t in self.rate_limiter[exchange_name]['minute_window'] 
+                if now - t < 60.0
+            ]
+            self.rate_limiter[exchange_name]['hour_window'] = [
+                t for t in self.rate_limiter[exchange_name]['hour_window'] 
+                if now - t < 3600.0
+            ]
+            
+            # Check rate limits
+            if len(self.rate_limiter[exchange_name]['second_window']) >= limits['requests_per_second']:
+                sleep_time = 1.0 - (now - self.rate_limiter[exchange_name]['second_window'][0])
+                if sleep_time > 0:
+                    logger.debug(f"⏱️ Rate limit: sleeping {sleep_time:.2f}s for {exchange_name}")
                     await asyncio.sleep(sleep_time)
             
-            self.last_request_time[exchange_name] = time.time()
+            if len(self.rate_limiter[exchange_name]['minute_window']) >= limits['requests_per_minute']:
+                sleep_time = 60.0 - (now - self.rate_limiter[exchange_name]['minute_window'][0])
+                if sleep_time > 0:
+                    logger.warning(f"⚠️ Minute rate limit reached for {exchange_name}, sleeping {sleep_time:.2f}s")
+                    await asyncio.sleep(sleep_time)
+            
+            if len(self.rate_limiter[exchange_name]['hour_window']) >= limits['requests_per_hour']:
+                sleep_time = 3600.0 - (now - self.rate_limiter[exchange_name]['hour_window'][0])
+                if sleep_time > 0:
+                    logger.error(f"❌ Hour rate limit reached for {exchange_name}, sleeping {sleep_time:.2f}s")
+                    await asyncio.sleep(sleep_time)
+            
+            # Add current request timestamp
+            self.rate_limiter[exchange_name]['second_window'].append(now)
+            self.rate_limiter[exchange_name]['minute_window'].append(now)
+            self.rate_limiter[exchange_name]['hour_window'].append(now)
+            self.request_counts[exchange_name] += 1
             
         except Exception as e:
-            logger.warning(f"⚠️ Rate limiting error: {e}")
+            logger.error(f"❌ Rate limiting error: {e}")
+            # Fallback to simple delay
+            await asyncio.sleep(0.1)
     
     async def _execute_with_retry(self, func, *args, max_retries: int = 3, **kwargs):
-        """Execute exchange function with retry logic for rate limits"""
+        """Enhanced retry mechanism with exponential backoff"""
         for attempt in range(max_retries):
             try:
-                # Apply rate limiting
-                exchange_name = kwargs.get('exchange', 'bybit')
-                await self._apply_rate_limit(exchange_name)
-                
-                # Execute function
-                result = await func(*args, **kwargs)
-                return result
-                
+                return await func(*args, **kwargs)
             except Exception as e:
                 error_msg = str(e).lower()
                 
-                # Check for rate limit errors
-                if 'rate limit' in error_msg or 'too many requests' in error_msg:
-                    wait_time = min(2 ** attempt, 30)  # Exponential backoff, max 30s
-                    logger.warning(f"⚠️ Rate limit hit, waiting {wait_time}s (attempt {attempt + 1})")
+                # Determine if we should retry based on error type
+                if any(keyword in error_msg for keyword in ['rate limit', '429', 'too many requests']):
+                    wait_time = (2 ** attempt) * 1.0  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"⚠️ Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(wait_time)
                     continue
                 
-                # Check for network errors
-                elif 'network' in error_msg or 'timeout' in error_msg or 'connection' in error_msg:
-                    wait_time = min(1 * (attempt + 1), 10)  # Linear backoff for network issues
-                    logger.warning(f"⚠️ Network error, retrying in {wait_time}s (attempt {attempt + 1})")
+                elif any(keyword in error_msg for keyword in ['timeout', 'connection', 'network']):
+                    wait_time = (2 ** attempt) * 0.5  # Shorter backoff for network issues
+                    logger.warning(f"⚠️ Network error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(wait_time)
                     continue
                 
-                # Other errors - don't retry
+                elif any(keyword in error_msg for keyword in ['invalid', 'bad request', '400']):
+                    # Don't retry on bad requests
+                    logger.error(f"❌ Bad request error: {e}")
+                    raise
+                
+                elif any(keyword in error_msg for keyword in ['unauthorized', '401', '403']):
+                    # Don't retry on auth errors
+                    logger.error(f"❌ Authentication error: {e}")
+                    raise
+                
                 else:
-                    raise e
+                    # For other errors, retry with exponential backoff
+                    if attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) * 0.5
+                        logger.warning(f"⚠️ Error occurred, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries}): {e}")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ Max retries reached: {e}")
+                        raise
         
-        raise Exception(f"Failed after {max_retries} attempts")
+        raise Exception(f"Max retries ({max_retries}) exceeded")
 
     async def get_market_data(self, symbol: str, exchange: str = 'bybit') -> Optional[Dict[str, Any]]:
         """Gerçek market data al"""

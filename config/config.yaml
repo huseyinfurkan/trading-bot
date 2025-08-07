@@ -1,392 +1,338 @@
-# Advanced Trading Bot Configuration
-# Bu dosya botun tüm ayarlarını içerir
+# Trading Bot Configuration
+# Enhanced configuration with WebSocket, error handling, and performance monitoring
 
-# =============================================================================
-# EXCHANGE SETTINGS
-# =============================================================================
+# Exchange Configuration
 exchanges:
   bybit:
     enabled: true
-    api_key: ""  # Will be loaded from .env file (BYBIT_API_KEY)
-    secret: ""  # Will be loaded from .env file (BYBIT_SECRET)
-    sandbox: false  # Paper trading için true, live için false
-    default_type: "spot"  # spot, future, option
-    requests_per_second: 10
-    timeout: 30
-    
+    testnet: true  # Use testnet for safety
+    api_key: ${BYBIT_API_KEY}
+    api_secret: ${BYBIT_SECRET}
+    params:
+      testnet: true
+      defaultType: 'spot'
+  
   binance:
-    enabled: false
-    api_key: ""
-    secret: ""
-    sandbox: false
-    default_type: "spot"
-    requests_per_second: 10
-    timeout: 30
-    
+    enabled: false  # Disabled by default
+    testnet: true
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_SECRET}
+    params:
+      testnet: true
+      defaultType: 'spot'
+  
   okx:
-    enabled: false
-    api_key: ""
-    secret: ""
-    passphrase: ""
-    sandbox: false
-    default_type: "spot"
-    requests_per_second: 10
-    timeout: 30
+    enabled: false  # Disabled by default
+    testnet: true
+    api_key: ${OKX_API_KEY}
+    api_secret: ${OKX_SECRET}
+    passphrase: ${OKX_PASSPHRASE}
+    params:
+      testnet: true
+      defaultType: 'spot'
 
-# =============================================================================
-# TRADING STRATEGIES
-# =============================================================================
+# WebSocket Configuration
+websocket:
+  enabled: true
+  max_reconnect_attempts: 5
+  reconnect_delay: 10
+  message_timeout: 300  # 5 minutes
+  data_retention: 1000  # Keep last 1000 messages per symbol
+
+# Trading Configuration
+trading:
+  mode: "paper"  # paper, live
+  symbols:
+    - "BTC/USDT"
+    - "ETH/USDT"
+    - "BNB/USDT"
+    - "ADA/USDT"
+  
+  # Risk Management
+  risk_management:
+    max_portfolio_risk: 0.02  # 2% max portfolio risk
+    max_position_risk: 0.01   # 1% max position risk
+    max_daily_loss: 0.05      # 5% max daily loss
+    max_open_positions: 10
+    correlation_threshold: 0.7
+    min_position_size: 10     # $10 minimum
+    max_position_size: 10000  # $10,000 maximum
+    
+    # Position sizing methods
+    position_sizing:
+      method: "kelly"  # kelly, fixed, percentage
+      kelly_fraction: 0.25
+      fixed_amount: 100
+      percentage: 0.02
+    
+    # Stop loss and take profit
+    stop_loss:
+      default_percentage: 0.02  # 2%
+      trailing_enabled: true
+      trailing_distance: 0.01   # 1%
+    
+    take_profit:
+      default_percentage: 0.04  # 4%
+      trailing_enabled: true
+      trailing_distance: 0.005  # 0.5%
+
+# Strategy Configuration
 strategies:
-  scalping:
+  alligator_ma_momentum:
     enabled: true
-    weight: 0.25
-    parameters:
-      move_threshold: 0.005  # 0.5% price move
-      stop_loss_pct: 0.002   # 0.2% stop loss
-      take_profit_pct: 0.004 # 0.4% take profit
-      max_position_time: 300 # 5 minutes max hold
-      
-  swing_trading:
-    enabled: true
-    weight: 0.35
-    parameters:
-      sma_short: 20
-      sma_long: 50
-      stop_loss_pct: 0.03    # 3% stop loss
-      take_profit_pct: 0.06  # 6% take profit
-      max_position_time: 86400 # 24 hours max hold
-      
-  trend_following:
-    enabled: true
-    weight: 0.25
-    parameters:
-      sma_short: 50
-      sma_long: 100
-      stop_loss_pct: 0.05    # 5% stop loss
-      take_profit_pct: 0.10  # 10% take profit
-      max_position_time: 259200 # 72 hours max hold
-      
-  mean_reversion:
-    enabled: true
-    weight: 0.15
-    parameters:
-      bollinger_period: 20
-      bollinger_std: 2
-      stop_loss_pct: 0.04    # 4% stop loss
-      take_profit_pct: 0.02  # 2% take profit (back to mean)
-      max_position_time: 43200 # 12 hours max hold
-
-# =============================================================================
-# RISK MANAGEMENT
-# =============================================================================
-risk_management:
-  max_portfolio_risk: 0.02      # 2% maximum portfolio risk
-  max_position_risk: 0.005      # 0.5% maximum position risk
-  max_daily_loss: 0.05          # 5% maximum daily loss
-  max_open_positions: 10        # Maximum number of open positions
-  correlation_threshold: 0.7    # Maximum correlation between positions
+    timeframe: "15m"
+    description: "Williams Alligator + MA (Trend Following)"
+    market_conditions: ["trending_market", "breakout_market"]
+    weight: 0.6
   
-  # Position sizing
-  position_sizing_method: "kelly"  # kelly, fixed, percentage
-  default_position_size: 0.01   # 1% of portfolio for fixed method
-  
-  # Kelly Criterion settings
-  kelly:
+  bollinger_rsi_stochrsi:
     enabled: true
-    win_rate: 0.55              # Historical win rate (55%)
-    reward_risk_ratio: 1.5      # Average reward/risk ratio
-    max_kelly_fraction: 0.25    # Maximum 25% of portfolio
-    min_kelly_fraction: 0.001   # Minimum 0.1% of portfolio
-    
-  # Stop loss settings
-  trailing_stop:
-    enabled: true
-    default_distance: 0.02      # 2% trailing distance
-    
-  # Circuit breakers
-  circuit_breakers:
-    enabled: true
-    daily_loss_limit: 0.05      # Stop trading if 5% daily loss
-    consecutive_losses: 5       # Stop after 5 consecutive losses
-    drawdown_limit: 0.15        # Stop if 15% drawdown
+    timeframe: "5m"
+    description: "BB + RSI + Stochastic RSI (Mean Reversion)"
+    market_conditions: ["sideways_market", "consolidation_market", "ranging_market"]
+    weight: 0.4
 
-# =============================================================================
-# AI & MACHINE LEARNING
-# =============================================================================
+# Strategy Parameters
+strategy_parameters:
+  alligator_ma_momentum:
+    # Williams Alligator
+    jaw_period: 13
+    jaw_shift: 8
+    teeth_period: 8
+    teeth_shift: 5
+    lips_period: 5
+    lips_shift: 3
+    
+    # Moving Averages
+    sma_200: 200
+    fast_sma: 10
+    slow_sma: 20
+    max_hold_bars: 12
+    
+    # Exit Strategy
+    profit_target: 0.08
+    stop_loss: 0.025
+    risk_per_trade: 0.02
+    leverage: 2.0
+    
+    # Advanced Exit
+    trailing_stop_enabled: true
+    trailing_stop_activation: 0.03
+    trailing_stop_distance: 0.015
+    volatility_stop_enabled: true
+    atr_stop_multiplier: 2.0
+    
+    # Optimization ranges
+    optimization_ranges:
+      fast_sma: [8, 12, 15]
+      slow_sma: [15, 20, 25]
+      profit_target: [0.06, 0.08, 0.10]
+      stop_loss: [0.02, 0.025, 0.03]
+  
+  bollinger_rsi_stochrsi:
+    # Bollinger Bands
+    bb_period: 20
+    bb_std_dev: 2.0
+    
+    # RSI
+    rsi_period: 14
+    rsi_oversold: 30
+    rsi_overbought: 70
+    
+    # Stochastic RSI
+    stochrsi_period: 14
+    stochrsi_oversold: 20
+    stochrsi_overbought: 80
+    max_hold_bars: 6
+    
+    # Exit Strategy
+    profit_target: 0.04
+    stop_loss: 0.012
+    risk_per_trade: 0.015
+    leverage: 1.8
+    
+    # Advanced Exit
+    trailing_stop_enabled: true
+    trailing_stop_activation: 0.02
+    trailing_stop_distance: 0.008
+    volatility_stop_enabled: true
+    atr_stop_multiplier: 1.5
+    
+    # Optimization ranges
+    optimization_ranges:
+      bb_std_dev: [1.8, 2.0, 2.2]
+      rsi_oversold: [25, 30, 35]
+      rsi_overbought: [65, 70, 75]
+      profit_target: [0.03, 0.04, 0.05]
+
+# Parameter Optimization
+parameter_optimization:
+  enabled: true
+  interval_hours: 24
+  optimization_method: "grid_search"
+  max_combinations: 10
+  validation_period_days: 7
+
+# AI Configuration
 ai:
-  enabled: true
-  confidence_threshold: 0.7     # Minimum confidence for trades
-  signal_strength_min: 0.65     # Minimum signal strength
+  confidence_threshold: 0.6
+  retrain_frequency_hours: 24
+  model_validation:
+    enabled: true
+    min_accuracy: 0.6
+    min_f1_score: 0.5
   
-  # Model settings
-  models:
-    ensemble_enabled: true
-    retrain_days: 7             # Retrain models every 7 days
-    models_to_use:
-      - "gradient_boosting"
-      - "random_forest"
-      - "lstm"
-      
-  # Technical indicators
-  indicators:
-    rsi:
-      enabled: true
-      period: 14
-      overbought: 70
-      oversold: 30
-      
-    macd:
-      enabled: true
-      fast_period: 12
-      slow_period: 26
-      signal_period: 9
-      
-    bollinger_bands:
-      enabled: true
-      period: 20
-      std_dev: 2
-      
-    moving_averages:
-      enabled: true
-      periods: [7, 20, 50, 100, 200]
-      
-    volume_indicators:
-      enabled: true
-      obv: true
-      volume_sma: 20
+  # Signal weights
+  signal_weights:
+    technical: 0.35
+    ml: 0.35
+    volume: 0.2
+    regime: 0.1
 
-# =============================================================================
-# MARKET ANALYSIS
-# =============================================================================
+# Market Analysis
 market_analysis:
-  enabled: true
-  update_interval: 300          # 5 minutes
-  
-  # Market condition detection
-  trend_detection:
-    short_period: 20
-    medium_period: 50
-    long_period: 100
-    
-  volatility_analysis:
-    period: 14
-    threshold_high: 0.8
-    threshold_low: 0.3
-    
-  # Fear & Greed Index
-  sentiment_analysis:
-    enabled: true
-    weight: 0.3
-    
-  # Market dominance
-  dominance_analysis:
-    enabled: true
-    btc_dominance_threshold: 0.45
+  timeframes: ["15m", "1h", "4h"]
+  symbols_for_regime: ["BTC/USDT", "ETH/USDT", "BNB/USDT"]
+  volatility_threshold: 0.8
+  trend_strength_threshold: 0.7
 
-# =============================================================================
-# LIVE DATA ENGINE
-# =============================================================================
+# Live Data Engine
 live_data:
-  enabled: true
+  analysis_interval: 60  # seconds
+  decision_cooldown: 300  # seconds
+  data_retention_hours: 24
+  cache_ttl: 300  # 5 minutes
   
-  # Data collection
-  data_update_interval: 10      # seconds
-  symbols: ["BTCUSDT", "ETHUSDT", "ADAUSDT", "BNBUSDT"]
-  timeframes: ["1m", "5m", "1h"]
-  
-  # Analysis engine
-  analysis_interval: 60         # seconds
-  decision_cooldown: 300        # 5 minutes between decisions
-  
-  # WebSocket settings
-  websocket:
+  # Dynamic intervals
+  dynamic_intervals:
     enabled: true
-    timeout: 30
-    reconnect_attempts: 5
-    reconnect_delay: 10
+    volatility_multiplier: 0.5
+    trend_multiplier: 0.8
+    normal_multiplier: 1.2
 
-# =============================================================================
-# DATABASE
-# =============================================================================
-database:
-  url: "sqlite:///data/trading_bot.db"
-  pool_size: 20
-  echo: false
+# Error Handling
+error_handling:
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 60
+    success_threshold: 2
   
-  # WAL mode for better concurrency
-  wal_mode: true
+  error_thresholds:
+    low: 10
+    medium: 5
+    high: 3
+    critical: 1
   
-  # Data retention
-  retention:
-    market_data_days: 365       # Keep market data for 1 year
-    trades_days: 730            # Keep trades for 2 years
-    logs_days: 90               # Keep logs for 3 months
-
-# =============================================================================
-# NOTIFICATIONS
-# =============================================================================
-notifications:
-  telegram:
-    enabled: true
-    bot_token: ""               # .env dosyasından alınacak
-    chat_id: ""                 # .env dosyasından alınacak
-    
-  discord:
-    enabled: false
-    webhook_url: ""             # .env dosyasından alınacak
-    
-  email:
-    enabled: false
-    smtp_server: "smtp.gmail.com"
-    smtp_port: 587
-    email: ""                   # .env dosyasından alınacak
-    password: ""                # .env dosyasından alınacak
-
-# =============================================================================
-# MONITORING
-# =============================================================================
-monitoring:
-  enabled: true
-  check_interval: 60            # seconds
-  
-  # System thresholds
-  cpu_threshold: 80             # %
-  memory_threshold: 80          # %
-  disk_threshold: 90            # %
-  
-  # Performance monitoring
-  performance_tracking:
-    enabled: true
-    metrics_interval: 300       # 5 minutes
-    
-  # Alerts
   alerts:
-    system_health: true
-    trading_performance: true
-    error_notifications: true
+    enabled: true
+    cooldown_seconds: 300
 
-# =============================================================================
-# LOGGING
-# =============================================================================
+# Performance Monitoring
+performance_monitoring:
+  enabled: true
+  monitoring_interval: 60  # seconds
+  retention_hours: 24
+  max_metrics_count: 1000
+  
+  thresholds:
+    cpu_usage: 80
+    memory_usage: 80
+    disk_usage: 90
+    response_time: 5.0
+    error_rate: 0.1
+  
+  alert_cooldown: 300  # 5 minutes
+
+# Database Configuration
+database:
+  path: "data/trading_bot.db"
+  pool_size: 20
+  retention_days: 30
+  
+  # Performance settings
+  pragma:
+    journal_mode: "WAL"
+    synchronous: "NORMAL"
+    temp_store: "MEMORY"
+    mmap_size: 268435456  # 256MB
+    cache_size: 10000
+    page_size: 4096
+
+# Logging Configuration
 logging:
-  level: "DEBUG"                # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  file_path: "logs/trading_bot.log"
-  max_bytes: 10485760           # 10MB
-  backup_count: 5
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} | {message}"
+  rotation: "1 day"
+  retention: "30 days"
+  
+  # File logging
+  file:
+    enabled: true
+    path: "logs/trading_bot.log"
+    max_size: "10 MB"
   
   # Console logging
   console:
     enabled: true
-    level: "INFO"
-    
-  # File logging
-  file:
-    enabled: true
-    level: "DEBUG"
-    
-  # Performance logging
-  performance:
-    enabled: true
-    file_path: "logs/performance.log"
+    colorize: true
 
-# =============================================================================
-# BACKTESTING
-# =============================================================================
+# Notifications
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+  
+  discord:
+    enabled: false
+    webhook_url: ${DISCORD_WEBHOOK_URL}
+  
+  email:
+    enabled: false
+    smtp_host: ${EMAIL_SMTP_HOST}
+    smtp_port: ${EMAIL_SMTP_PORT}
+    from_email: ${EMAIL_FROM}
+    password: ${EMAIL_PASSWORD}
+    to_email: ${EMAIL_TO}
+
+# Backtesting Configuration
 backtesting:
-  initial_capital: 10000        # $10,000
-  commission: 0.001             # 0.1% commission
-  slippage: 0.0005              # 0.05% slippage
+  enabled: true
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  initial_capital: 10000
+  trading_fee: 0.001
   
-  # Data settings
-  data_period_days: 180         # 6 months of data
-  timeframe: "1h"
-  
-  # Optimization
-  optimization:
-    enabled: true
-    parameter_ranges:
-      scalping:
-        move_threshold: [0.003, 0.005, 0.007, 0.010]
-        stop_loss_pct: [0.002, 0.003, 0.005]
-        take_profit_pct: [0.004, 0.006, 0.008]
+  # Performance metrics
+  metrics:
+    - "total_return"
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+    - "calmar_ratio"
 
-# =============================================================================
-# TRADING PAIRS
-# =============================================================================
-trading_pairs:
-  # Major cryptocurrencies - High volume, stable
-  major:
-    - "BTCUSDT"
-    - "ETHUSDT" 
-    - "BNBUSDT"
-    
-  # Mid-cap altcoins - Good volume
-  altcoins:
-    - "ADAUSDT"
-    - "SOLUSDT"
-    - "MATICUSDT"
-    - "DOTUSDT"
-    - "LINKUSDT"
-    
-  # DeFi tokens - Higher volatility
-  defi:
-    - "AVAXUSDT"
-    - "ATOMUSDT"
-    - "UNIUSDT"
-    - "AAVEUSDT"
-    - "COMPUSDT"
-    - "SUSHIUSDT"
-
-# =============================================================================
-# TRADING SETTINGS
-# =============================================================================
-trading:
-  mode: "paper"                 # paper, live
-  initial_capital: 10000        # Starting capital for paper trading
-  
-  # Default settings
-  default_symbols: ["BTCUSDT", "ETHUSDT", "ADAUSDT", "BNBUSDT"]
-  default_timeframe: "1h"
-  
-  # Order settings
-  order_timeout: 30             # seconds
-  order_retry_attempts: 3
-  
-  # Paper trading
-  paper_trading:
-    enabled: true
-    initial_balance: 10000
-    realistic_slippage: true
-    realistic_fees: true
-
-# =============================================================================
-# SECURITY
-# =============================================================================
+# Security Configuration
 security:
-  # API rate limiting
-  rate_limiting:
-    enabled: true
-    requests_per_second: 10
-    
-  # Encryption
-  encryption:
-    enabled: false              # Will be implemented if needed
-    
-  # IP whitelist (for exchange APIs)
-  ip_whitelist:
-    enabled: false              # Configure on exchange side
+  api_key_encryption: false  # Enable for production
+  sensitive_data_masking: true
+  audit_logging: true
+  
+  # Rate limiting
+  rate_limits:
+    requests_per_second: 5
+    requests_per_minute: 300
+    requests_per_hour: 18000
 
-# =============================================================================
-# DEVELOPMENT & DEBUG
-# =============================================================================
+# Development Configuration
 development:
   debug_mode: false
-  verbose_logging: false
-  save_market_data: true        # Save market data for analysis
-  simulation_mode: false        # Use simulated data instead of real API calls
+  save_market_data: true
+  simulation_mode: true
   
   # Testing
   testing:
-    mock_orders: false          # Use mock orders for testing
-    mock_data: false            # Use mock market data
-    fast_mode: false            # Speed up for testing
+    enabled: false
+    test_symbols: ["BTC/USDT"]
+    test_timeframe: "1h"
+    test_duration_hours: 24

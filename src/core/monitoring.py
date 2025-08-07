@@ -1,221 +1,368 @@
 """
-System Monitoring
-Performans ve sistem durumu izleme
+Enhanced Monitoring System
+Comprehensive system health monitoring and alerting
 """
 
 import asyncio
 import psutil
+import time
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 from loguru import logger
+import json
 
 
 class MonitoringSystem:
-    """Sistem ve performans monitoring"""
+    """Enhanced monitoring system with health checks and alerting"""
     
-    def __init__(self, monitoring_config: Dict[str, Any], db_manager, notification_manager):
+    def __init__(self, config: Dict[str, Any], db_manager, notification_manager):
         """
         Args:
-            monitoring_config: Monitoring konfigürasyonu
+            config: Monitoring konfigürasyonu
             db_manager: Veritabanı yöneticisi
             notification_manager: Bildirim yöneticisi
         """
-        self.config = monitoring_config
+        self.config = config
         self.db_manager = db_manager
         self.notification_manager = notification_manager
         
-        # Monitoring parameters
-        self.check_interval = monitoring_config.get('check_interval', 60)
-        self.cpu_threshold = monitoring_config.get('cpu_threshold', 80)
-        self.memory_threshold = monitoring_config.get('memory_threshold', 80)
-        self.disk_threshold = monitoring_config.get('disk_threshold', 90)
+        # System thresholds
+        self.cpu_threshold = config.get('cpu_threshold', 80)
+        self.memory_threshold = config.get('memory_threshold', 80)
+        self.disk_threshold = config.get('disk_threshold', 90)
         
-        # System state
-        self.running = False
-        self.monitoring_task = None
-        self.last_cleanup = datetime.now()
+        # Performance tracking
+        self.performance_metrics = {
+            'system_health': [],
+            'trading_performance': [],
+            'error_counts': {},
+            'last_alert_time': {}
+        }
         
-        logger.info("📊 Monitoring System initialized")
+        # Alert cooldown (prevent spam)
+        self.alert_cooldown = 300  # 5 minutes
+        
+        # Health check intervals
+        self.system_check_interval = 60  # 1 minute
+        self.performance_check_interval = 300  # 5 minutes
+        self.error_check_interval = 30  # 30 seconds
+        
+        logger.info("🔍 Enhanced Monitoring System initialized")
     
-    async def start(self) -> None:
-        """Monitoring'i başlat"""
+    async def start_monitoring(self):
+        """Monitoring sistemini başlat"""
         try:
-            self.running = True
-            logger.info("📊 Monitoring System başlatıldı")
+            logger.info("🚀 Starting comprehensive monitoring system...")
             
-            # Monitoring task'ını başlat
-            self.monitoring_task = asyncio.create_task(self._monitoring_loop())
+            # Start monitoring tasks
+            tasks = [
+                asyncio.create_task(self._system_health_monitor()),
+                asyncio.create_task(self._trading_performance_monitor()),
+                asyncio.create_task(self._error_monitor()),
+                asyncio.create_task(self._database_health_monitor()),
+                asyncio.create_task(self._api_health_monitor())
+            ]
+            
+            await asyncio.gather(*tasks)
             
         except Exception as e:
-            logger.error(f"❌ Monitoring başlatma hatası: {e}")
-            raise
+            logger.error(f"❌ Monitoring start error: {e}")
     
-    async def stop(self) -> None:
-        """Monitoring'i durdur"""
-        try:
-            self.running = False
-            
-            if self.monitoring_task:
-                self.monitoring_task.cancel()
-                try:
-                    await self.monitoring_task
-                except asyncio.CancelledError:
-                    pass
-            
-            logger.info("📊 Monitoring System durduruldu")
-            
-        except Exception as e:
-            logger.error(f"❌ Monitoring durdurma hatası: {e}")
-    
-    async def _monitoring_loop(self) -> None:
-        """Ana monitoring döngüsü"""
-        try:
-            while self.running:
-                try:
-                    # System health check
-                    await self._check_system_health()
-                    
-                    # Performance metrics
-                    await self.check_performance()
-                    
-                    # Sleep for check interval
-                    await asyncio.sleep(self.check_interval)
-                    
-                except Exception as e:
-                    logger.error(f"❌ Monitoring loop hatası: {e}")
-                    await asyncio.sleep(30)  # Error recovery sleep
-                    
-        except Exception as e:
-            logger.error(f"❌ Monitoring loop fatal hatası: {e}")
-    
-    async def _check_system_health(self) -> None:
-        """Sistem sağlığını kontrol et"""
-        try:
-            # CPU usage check
-            cpu_usage = psutil.cpu_percent(interval=1)
-            if cpu_usage > self.cpu_threshold:
-                await self._send_alert(f"⚠️ High CPU usage: {cpu_usage:.1f}%")
-            
-            # Memory usage check
-            memory = psutil.virtual_memory()
-            memory_usage = memory.percent
-            if memory_usage > self.memory_threshold:
-                await self._send_alert(f"⚠️ High memory usage: {memory_usage:.1f}%")
-            
-            # Disk usage check
-            disk = psutil.disk_usage('/')
-            disk_usage = (disk.used / disk.total) * 100
-            if disk_usage > self.disk_threshold:
-                await self._send_alert(f"⚠️ High disk usage: {disk_usage:.1f}%")
-            
-            logger.debug(f"💻 System: CPU {cpu_usage:.1f}% | Memory {memory_usage:.1f}% | Disk {disk_usage:.1f}%")
-            
-        except Exception as e:
-            logger.error(f"❌ System health check hatası: {e}")
-    
-    async def check_performance(self) -> Dict[str, Any]:
-        """Performance metriklerini kontrol et"""
-        try:
-            # Get system metrics
-            cpu_usage = psutil.cpu_percent()
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            
-            # Get trading metrics from database
-            trading_metrics = await self._get_trading_metrics()
-            
-            performance = {
-                'timestamp': datetime.now(),
-                'system': {
-                    'cpu_usage': cpu_usage,
-                    'memory_usage': memory.percent,
-                    'memory_total': memory.total,
-                    'disk_usage': (disk.used / disk.total) * 100,
-                    'disk_free': disk.free
-                },
-                'trading': trading_metrics
-            }
-            
-            # Log to performance logger if available
+    async def _system_health_monitor(self):
+        """Sistem sağlığı izleme"""
+        while True:
             try:
-                from src.utils.logger_setup import log_system_metrics
-                log_system_metrics({
-                    'cpu_usage': cpu_usage,
-                    'memory_usage': memory.percent,
-                    'active_positions': trading_metrics.get('active_positions', 0),
-                    'total_pnl': trading_metrics.get('total_pnl', 0)
+                # CPU usage
+                cpu_percent = psutil.cpu_percent(interval=1)
+                
+                # Memory usage
+                memory = psutil.virtual_memory()
+                memory_percent = memory.percent
+                
+                # Disk usage
+                disk = psutil.disk_usage('/')
+                disk_percent = (disk.used / disk.total) * 100
+                
+                # Network I/O
+                network = psutil.net_io_counters()
+                
+                # System load (Linux only)
+                try:
+                    load_avg = psutil.getloadavg()
+                except:
+                    load_avg = (0, 0, 0)
+                
+                # Check thresholds and alert
+                alerts = []
+                
+                if cpu_percent > self.cpu_threshold:
+                    alerts.append(f"🚨 High CPU usage: {cpu_percent:.1f}%")
+                
+                if memory_percent > self.memory_threshold:
+                    alerts.append(f"🚨 High memory usage: {memory_percent:.1f}%")
+                
+                if disk_percent > self.disk_threshold:
+                    alerts.append(f"🚨 High disk usage: {disk_percent:.1f}%")
+                
+                # Store metrics
+                self.performance_metrics['system_health'].append({
+                    'timestamp': datetime.now(),
+                    'cpu_percent': cpu_percent,
+                    'memory_percent': memory_percent,
+                    'disk_percent': disk_percent,
+                    'load_avg': load_avg,
+                    'network_bytes_sent': network.bytes_sent,
+                    'network_bytes_recv': network.bytes_recv
                 })
-            except ImportError:
-                pass
-            
-            return performance
-            
-        except Exception as e:
-            logger.error(f"❌ Performance check hatası: {e}")
-            return {}
+                
+                # Keep only last 100 entries
+                if len(self.performance_metrics['system_health']) > 100:
+                    self.performance_metrics['system_health'] = self.performance_metrics['system_health'][-100:]
+                
+                # Send alerts if any
+                if alerts:
+                    await self._send_alert("System Health Alert", "\n".join(alerts))
+                
+                # Log metrics every 5 minutes
+                if len(self.performance_metrics['system_health']) % 5 == 0:
+                    logger.info(f"📊 System Health: CPU {cpu_percent:.1f}%, Memory {memory_percent:.1f}%, Disk {disk_percent:.1f}%")
+                
+                await asyncio.sleep(self.system_check_interval)
+                
+            except Exception as e:
+                logger.error(f"❌ System health monitor error: {e}")
+                await asyncio.sleep(10)
     
-    async def _get_trading_metrics(self) -> Dict[str, Any]:
-        """Trading metriklerini al"""
-        try:
-            metrics = {
-                'active_positions': 0,
-                'total_pnl': 0.0,
-                'total_trades': 0,
-                'win_rate': 0.0
-            }
-            
-            if self.db_manager:
-                # Get active positions count
-                positions = await self.db_manager.get_positions()
-                active_positions = [p for p in positions if p.get('status') == 'open']
-                metrics['active_positions'] = len(active_positions)
+    async def _trading_performance_monitor(self):
+        """Trading performans izleme"""
+        while True:
+            try:
+                # Get recent trades
+                recent_trades = await self.db_manager.get_trades(limit=50)
                 
-                # Calculate total PnL
-                total_pnl = sum(p.get('pnl', 0) for p in active_positions)
-                metrics['total_pnl'] = total_pnl
+                if recent_trades:
+                    # Calculate performance metrics
+                    total_trades = len(recent_trades)
+                    winning_trades = len([t for t in recent_trades if t.get('pnl', 0) > 0])
+                    losing_trades = len([t for t in recent_trades if t.get('pnl', 0) < 0])
+                    
+                    win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+                    
+                    total_pnl = sum(t.get('pnl', 0) for t in recent_trades)
+                    avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+                    
+                    # Calculate drawdown
+                    cumulative_pnl = []
+                    running_total = 0
+                    for trade in recent_trades:
+                        running_total += trade.get('pnl', 0)
+                        cumulative_pnl.append(running_total)
+                    
+                    if cumulative_pnl:
+                        max_drawdown = min(cumulative_pnl) - max(cumulative_pnl)
+                    else:
+                        max_drawdown = 0
+                    
+                    # Store metrics
+                    self.performance_metrics['trading_performance'].append({
+                        'timestamp': datetime.now(),
+                        'total_trades': total_trades,
+                        'winning_trades': winning_trades,
+                        'losing_trades': losing_trades,
+                        'win_rate': win_rate,
+                        'total_pnl': total_pnl,
+                        'avg_pnl': avg_pnl,
+                        'max_drawdown': max_drawdown
+                    })
+                    
+                    # Keep only last 50 entries
+                    if len(self.performance_metrics['trading_performance']) > 50:
+                        self.performance_metrics['trading_performance'] = self.performance_metrics['trading_performance'][-50:]
+                    
+                    # Check for performance alerts
+                    alerts = []
+                    
+                    if win_rate < 40:  # Low win rate
+                        alerts.append(f"📉 Low win rate: {win_rate:.1f}%")
+                    
+                    if total_pnl < -100:  # Significant losses
+                        alerts.append(f"📉 Significant losses: ${total_pnl:.2f}")
+                    
+                    if max_drawdown < -50:  # High drawdown
+                        alerts.append(f"📉 High drawdown: ${max_drawdown:.2f}")
+                    
+                    # Send alerts if any
+                    if alerts:
+                        await self._send_alert("Trading Performance Alert", "\n".join(alerts))
+                    
+                    # Log performance every 10 minutes
+                    if len(self.performance_metrics['trading_performance']) % 2 == 0:
+                        logger.info(f"📈 Trading Performance: Win Rate {win_rate:.1f}%, PnL ${total_pnl:.2f}, Drawdown ${max_drawdown:.2f}")
                 
-                # Get trade statistics
-                trades = await self.db_manager.get_trades()
-                metrics['total_trades'] = len(trades)
+                await asyncio.sleep(self.performance_check_interval)
                 
-                if trades:
-                    winning_trades = [t for t in trades if t.get('pnl', 0) > 0]
-                    metrics['win_rate'] = len(winning_trades) / len(trades) * 100
-            
-            return metrics
-            
-        except Exception as e:
-            logger.error(f"❌ Trading metrics hatası: {e}")
-            return {
-                'active_positions': 0,
-                'total_pnl': 0.0,
-                'total_trades': 0,
-                'win_rate': 0.0
-            }
+            except Exception as e:
+                logger.error(f"❌ Trading performance monitor error: {e}")
+                await asyncio.sleep(30)
     
-    async def _send_alert(self, message: str) -> None:
+    async def _error_monitor(self):
+        """Hata izleme"""
+        while True:
+            try:
+                # Get recent system logs
+                recent_logs = await self.db_manager.execute_with_retry(
+                    "SELECT level, message, timestamp FROM system_logs WHERE timestamp > datetime('now', '-1 hour') ORDER BY timestamp DESC LIMIT 100"
+                )
+                
+                if recent_logs:
+                    # Count errors by type
+                    error_counts = {}
+                    for log in recent_logs:
+                        level = log[0]
+                        if level in ['ERROR', 'CRITICAL']:
+                            # Extract error type from message
+                            message = log[1]
+                            error_type = self._extract_error_type(message)
+                            error_counts[error_type] = error_counts.get(error_type, 0) + 1
+                    
+                    # Check for error thresholds
+                    alerts = []
+                    for error_type, count in error_counts.items():
+                        if count > 5:  # More than 5 errors of same type in 1 hour
+                            alerts.append(f"🚨 High {error_type} errors: {count} in last hour")
+                    
+                    # Send alerts if any
+                    if alerts:
+                        await self._send_alert("Error Alert", "\n".join(alerts))
+                
+                await asyncio.sleep(self.error_check_interval)
+                
+            except Exception as e:
+                logger.error(f"❌ Error monitor error: {e}")
+                await asyncio.sleep(10)
+    
+    async def _database_health_monitor(self):
+        """Veritabanı sağlığı izleme"""
+        while True:
+            try:
+                # Check database connection
+                is_healthy = await self.db_manager.check_connection_health()
+                
+                if not is_healthy:
+                    await self._send_alert("Database Health Alert", "🚨 Database connection issues detected")
+                
+                # Check database size
+                try:
+                    db_size = await self.db_manager.execute_with_retry(
+                        "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()"
+                    )
+                    if db_size and db_size[0][0] > 100 * 1024 * 1024:  # 100MB
+                        await self._send_alert("Database Size Alert", "📊 Database size exceeds 100MB")
+                except:
+                    pass
+                
+                await asyncio.sleep(300)  # Check every 5 minutes
+                
+            except Exception as e:
+                logger.error(f"❌ Database health monitor error: {e}")
+                await asyncio.sleep(60)
+    
+    async def _api_health_monitor(self):
+        """API sağlığı izleme"""
+        while True:
+            try:
+                # This would check exchange API health
+                # For now, just log that it's running
+                logger.debug("🔍 API health check running")
+                
+                await asyncio.sleep(300)  # Check every 5 minutes
+                
+            except Exception as e:
+                logger.error(f"❌ API health monitor error: {e}")
+                await asyncio.sleep(60)
+    
+    def _extract_error_type(self, message: str) -> str:
+        """Hata mesajından hata tipini çıkar"""
+        message_lower = message.lower()
+        
+        if 'rate limit' in message_lower:
+            return 'Rate Limit'
+        elif 'network' in message_lower or 'connection' in message_lower:
+            return 'Network'
+        elif 'database' in message_lower or 'sql' in message_lower:
+            return 'Database'
+        elif 'api' in message_lower:
+            return 'API'
+        elif 'authentication' in message_lower or 'auth' in message_lower:
+            return 'Authentication'
+        else:
+            return 'General'
+    
+    async def _send_alert(self, title: str, message: str):
         """Alert gönder"""
         try:
-            if self.notification_manager:
-                await self.notification_manager.send_message(message, "alert", "high")
+            # Check cooldown
+            alert_key = f"{title}_{message[:50]}"
+            now = time.time()
             
-            logger.warning(message)
+            if alert_key in self.performance_metrics['last_alert_time']:
+                time_since_last = now - self.performance_metrics['last_alert_time'][alert_key]
+                if time_since_last < self.alert_cooldown:
+                    return  # Still in cooldown
+            
+            # Update last alert time
+            self.performance_metrics['last_alert_time'][alert_key] = now
+            
+            # Send notification
+            full_message = f"🚨 {title}\n\n{message}\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            if self.notification_manager:
+                await self.notification_manager.send_message(full_message)
+            
+            logger.warning(f"🚨 Alert sent: {title}")
             
         except Exception as e:
-            logger.error(f"❌ Alert gönderme hatası: {e}")
+            logger.error(f"❌ Alert sending error: {e}")
     
     async def get_system_status(self) -> Dict[str, Any]:
-        """Sistem durumunu al"""
+        """Sistem durumunu döndür"""
         try:
-            status = {
-                'running': self.running,
-                'uptime': datetime.now() - self.last_cleanup,
-                'last_check': datetime.now(),
-                'health': 'healthy'
+            # Current system metrics
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            # Recent performance
+            recent_performance = self.performance_metrics['trading_performance'][-1] if self.performance_metrics['trading_performance'] else {}
+            
+            # Error counts
+            error_summary = {}
+            for error_type, count in self.performance_metrics['error_counts'].items():
+                error_summary[error_type] = count
+            
+            return {
+                'system_health': {
+                    'cpu_percent': cpu_percent,
+                    'memory_percent': memory.percent,
+                    'disk_percent': (disk.used / disk.total) * 100,
+                    'status': 'healthy' if cpu_percent < self.cpu_threshold and memory.percent < self.memory_threshold else 'warning'
+                },
+                'trading_performance': recent_performance,
+                'error_summary': error_summary,
+                'last_update': datetime.now().isoformat()
             }
             
-            return status
+        except Exception as e:
+            logger.error(f"❌ System status error: {e}")
+            return {'error': str(e)}
+    
+    async def close(self):
+        """Monitoring sistemini kapat"""
+        try:
+            logger.info("🛑 Closing monitoring system...")
+            # Cleanup tasks
+            self.performance_metrics.clear()
+            logger.success("✅ Monitoring system closed")
             
         except Exception as e:
-            logger.error(f"❌ System status hatası: {e}")
-            return {'running': False, 'health': 'error'}
+            logger.error(f"❌ Monitoring close error: {e}")

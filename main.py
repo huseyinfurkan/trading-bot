@@ -1,288 +1,326 @@
 #!/usr/bin/env python3
 """
-Advanced Multi-Coin Trading Bot
-AI-powered cryptocurrency trading with live data analysis
+Enhanced Trading Bot - Main Entry Point
+Integrated with WebSocket, Error Handling, and Performance Monitoring
 """
 
 import asyncio
 import signal
 import sys
-import traceback
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 from loguru import logger
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
-# Core modules
 from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager
 from src.core.risk_manager import RiskManager
 from src.core.monitoring import MonitoringSystem
 from src.core.live_data_engine import LiveDataEngine
+from src.core.bot_coordinator import BotCoordinator
+from src.core.websocket_manager import WebSocketManager
+from src.core.error_handler import ErrorHandler
+from src.core.performance_monitor import PerformanceMonitor
 
-# Trading modules
 from src.trading.exchange_manager import ExchangeManager
 from src.trading.position_manager import PositionManager
+from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
 
-# AI modules
 from src.ai.signal_filter import AISignalFilter
 from src.ai.market_analyzer import MarketAnalyzer
 from src.ai.confidence_calculator import ConfidenceCalculator
 
-# Utils
 from src.utils.notifications import NotificationManager
 from src.utils.logger_setup import setup_logger
 
 
-class AdvancedTradingBot:
-    """Advanced Multi-Coin Trading Bot with Live Data Analysis"""
+class EnhancedTradingBot:
+    """Enhanced Trading Bot with comprehensive monitoring and error handling"""
     
-    def __init__(self, config_path: str = "config/config.yaml"):
-        """Initialize the trading bot"""
-        self.config_path = config_path
+    def __init__(self):
+        self.config = None
+        self.components = {}
         self.running = False
         
-        # Core components
-        self.config_manager = None
-        self.config = None
-        self.db_manager = None
-        self.risk_manager = None
-        self.monitoring_system = None
-        self.live_data_engine = None
+        # Signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
         
-        # Trading components
-        self.exchange_manager = None
-        self.strategy_engine = None
-        self.position_manager = None
-        
-        # AI components
-        self.ai_signal_filter = None
-        self.market_analyzer = None
-        self.confidence_calculator = None
-        
-        # Utils
-        self.notification_manager = None
-        
-        logger.info("🤖 Advanced Trading Bot initialized")
+        logger.info("🤖 Enhanced Trading Bot initializing...")
+    
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        logger.info(f"🛑 Received signal {signum}, shutting down gracefully...")
+        self.running = False
     
     async def initialize(self):
-        """Initialize all components"""
+        """Initialize all bot components"""
         try:
-            logger.info("🚀 Advanced Trading Bot initializing...")
+            logger.info("🔧 Initializing bot components...")
             
-            # Load configuration
-            self.config_manager = ConfigManager(self.config_path)
+            # 1. Load configuration
+            config_path = Path(__file__).parent / 'config' / 'config.yaml'
+            self.config_manager = ConfigManager(str(config_path))
             self.config = await self.config_manager.load_config()
             
-            # Setup logging
+            # 2. Setup logging
             setup_logger(self.config.get('logging', {}))
+            logger.info("✅ Logging system initialized")
             
-            # Initialize database
+            # 3. Initialize error handler
+            self.error_handler = ErrorHandler(self.config.get('error_handling', {}))
+            logger.info("✅ Error handler initialized")
+            
+            # 4. Initialize performance monitor
+            self.performance_monitor = PerformanceMonitor(self.config.get('performance_monitoring', {}))
+            logger.info("✅ Performance monitor initialized")
+            
+            # 5. Initialize database
             self.db_manager = DatabaseManager(self.config.get('database', {}))
             await self.db_manager.initialize()
+            logger.info("✅ Database initialized")
             
-            # Initialize notification system
-            self.notification_manager = NotificationManager(
-                self.config.get('notifications', {})
-            )
-            await self.notification_manager.initialize()
-            
-            # Initialize exchange manager
-            self.exchange_manager = ExchangeManager(
-                self.config.get('exchanges', {})
-            )
+            # 6. Initialize exchange manager
+            self.exchange_manager = ExchangeManager(self.config.get('exchanges', {}))
             await self.exchange_manager.initialize()
+            logger.info("✅ Exchange manager initialized")
             
-            # Initialize risk manager
-            self.risk_manager = RiskManager(
-                self.config.get('risk_management', {}),
-                self.db_manager
-            )
+            # 7. Initialize WebSocket manager
+            self.websocket_manager = WebSocketManager(self.config)
+            await self.websocket_manager.initialize()
+            logger.info("✅ WebSocket manager initialized")
             
-            # Initialize AI components
-            self.ai_signal_filter = AISignalFilter(
-                self.config.get('ai_settings', {}),
-                self.db_manager,
-                self.exchange_manager
-            )
+            # 8. Initialize AI components
+            self.ai_signal_filter = AISignalFilter(self.config.get('ai', {}))
             await self.ai_signal_filter.initialize()
             
-            self.market_analyzer = MarketAnalyzer(
-                self.config,
-                self.exchange_manager
-            )
+            self.market_analyzer = MarketAnalyzer(self.exchange_manager, self.config.get('market_analysis', {}))
+            self.confidence_calculator = ConfidenceCalculator()
             
-            self.confidence_calculator = ConfidenceCalculator(
-                self.config.get('ai_settings', {}),
-                self.db_manager
-            )
+            logger.info("✅ AI components initialized")
             
-            # Initialize NEW adaptive trading components
-            from src.trading.adaptive_strategy_engine import AdaptiveStrategyEngine
+            # 9. Initialize trading components
+            self.risk_manager = RiskManager(self.config.get('trading', {}).get('risk_management', {}))
+            self.position_manager = PositionManager(self.exchange_manager, self.db_manager, self.risk_manager)
+            
             self.strategy_engine = AdaptiveStrategyEngine(
-                self.config.get('strategies', {}),
-                self.exchange_manager,
-                self.ai_signal_filter
+                self.config, 
+                self.exchange_manager, 
+                self.ai_signal_filter, 
+                self.risk_manager
             )
             
-            self.position_manager = PositionManager(
+            logger.info("✅ Trading components initialized")
+            
+            # 10. Initialize monitoring system
+            self.monitoring_system = MonitoringSystem(self.config.get('monitoring', {}))
+            
+            # 11. Initialize live data engine
+            self.live_data_engine = LiveDataEngine(
                 self.exchange_manager,
+                self.market_analyzer,
+                self.ai_signal_filter,
+                self.strategy_engine,
+                self.position_manager,
+                self.risk_manager
+            )
+            
+            logger.info("✅ Live data engine initialized")
+            
+            # 12. Initialize bot coordinator
+            self.bot_coordinator = BotCoordinator(
+                self.config,
+                self.exchange_manager,
+                self.position_manager,
                 self.risk_manager,
+                self.monitoring_system,
                 self.db_manager
             )
             
-            # Initialize live data engine
-            self.live_data_engine = LiveDataEngine(
-                exchange_manager=self.exchange_manager,
-                market_analyzer=self.market_analyzer,
-                ai_signal_filter=self.ai_signal_filter,
-                strategy_engine=self.strategy_engine,
-                position_manager=self.position_manager,
-                risk_manager=self.risk_manager
-            )
+            logger.info("✅ Bot coordinator initialized")
             
-            # Initialize monitoring system
-            self.monitoring_system = MonitoringSystem(
-                self.config.get('performance', {}),
-                self.db_manager,
-                self.notification_manager
-            )
+            # 13. Initialize notifications
+            self.notifications = NotificationManager(self.config.get('notifications', {}))
             
-            logger.success("✅ All components initialized successfully!")
+            # Store all components for easy access
+            self.components = {
+                'config_manager': self.config_manager,
+                'error_handler': self.error_handler,
+                'performance_monitor': self.performance_monitor,
+                'db_manager': self.db_manager,
+                'exchange_manager': self.exchange_manager,
+                'websocket_manager': self.websocket_manager,
+                'ai_signal_filter': self.ai_signal_filter,
+                'market_analyzer': self.market_analyzer,
+                'confidence_calculator': self.confidence_calculator,
+                'risk_manager': self.risk_manager,
+                'position_manager': self.position_manager,
+                'strategy_engine': self.strategy_engine,
+                'monitoring_system': self.monitoring_system,
+                'live_data_engine': self.live_data_engine,
+                'bot_coordinator': self.bot_coordinator,
+                'notifications': self.notifications
+            }
+            
+            logger.success("🎉 All components initialized successfully!")
             
         except Exception as e:
-            logger.error(f"❌ Bot initialization error: {e}")
-            logger.error(traceback.format_exc())
+            logger.error(f"❌ Initialization failed: {e}")
+            await self.cleanup()
             raise
     
-    async def start_trading(self):
-        """Start the trading system"""
+    async def start(self):
+        """Start the trading bot"""
         try:
+            logger.info("🚀 Starting Enhanced Trading Bot...")
             self.running = True
-            logger.info("📈 Starting trading system...")
             
-            # Get trading pairs
-            trading_pairs = self.config.get('trading_pairs', {})
-            all_pairs = []
-            for category, pairs in trading_pairs.items():
-                all_pairs.extend(pairs)
+            # Start performance monitoring
+            asyncio.create_task(self.performance_monitor.start_monitoring())
             
-            logger.info(f"💎 Monitoring {len(all_pairs)} trading pairs: {all_pairs}")
+            # Start WebSocket monitoring
+            asyncio.create_task(self.websocket_manager.monitor_connections())
             
-            # Send startup notification
-            await self.notification_manager.send_message(
-                "🤖 Advanced Trading Bot started!\n"
-                f"📊 {len(all_pairs)} coins monitored\n"
-                f"🧠 AI filtering active\n"
-                f"⚡ Multi-strategy enabled\n"
-                f"🔥 Live data analysis running"
-            )
+            # Start monitoring system
+            asyncio.create_task(self.monitoring_system.start_monitoring())
+            
+            # Start bot coordinator
+            asyncio.create_task(self.bot_coordinator.start())
             
             # Start live data engine
-            live_task = asyncio.create_task(self.live_data_engine.start_live_analysis())
+            asyncio.create_task(self.live_data_engine.start_live_analysis())
             
-            # Main monitoring loop
+            # Send startup notification
+            await self.notifications.send_message(
+                f"🤖 Trading Bot Started\nBot started successfully at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "info"
+            )
+            
+            logger.success("✅ Trading bot started successfully!")
+            
+            # Main loop
             while self.running:
                 try:
-                    # Get live engine status
-                    live_status = self.live_data_engine.get_live_status()
+                    # Check system health
+                    health_status = await self.monitoring_system.get_system_health()
                     
-                    # Log status every 5 minutes
-                    if hasattr(self, '_last_status_log'):
-                        time_diff = (datetime.now() - self._last_status_log).seconds
-                        if time_diff > 300:  # 5 minutes
-                            logger.info(f"🔥 Live Engine Status:")
-                            logger.info(f"   📈 Analyses: {live_status['total_analyses']}")
-                            logger.info(f"   🎯 Decisions: {live_status['total_decisions']}")
-                            logger.info(f"   💾 Symbols tracked: {live_status['symbols_tracked']}")
-                            self._last_status_log = datetime.now()
-                    else:
-                        self._last_status_log = datetime.now()
+                    if not health_status['healthy']:
+                        logger.warning(f"⚠️ System health issues: {health_status['issues']}")
+                        
+                        # Send health alert
+                        await self.notifications.send_message(
+                            f"⚠️ System Health Alert\nHealth issues detected: {', '.join(health_status['issues'])}",
+                            "warning"
+                        )
                     
-                    # Update trailing stops
-                    await self.position_manager.update_trailing_stops()
+                    # Log periodic status
+                    if datetime.now().minute % 10 == 0:  # Every 10 minutes
+                        await self._log_status()
                     
-                    # Run monitoring checks
-                    await self.monitoring_system.check_performance()
-                    
-                    # Wait before next cycle (live system handles frequency)
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(60)  # Check every minute
                     
                 except Exception as e:
-                    logger.error(f"❌ Trading loop error: {e}")
-                    await asyncio.sleep(5)
-                    continue
-                    
+                    logger.error(f"❌ Main loop error: {e}")
+                    await asyncio.sleep(10)
+            
         except Exception as e:
-            logger.error(f"❌ Trading start error: {e}")
+            logger.error(f"❌ Bot start failed: {e}")
+            await self.cleanup()
             raise
     
-    async def shutdown(self):
-        """Gracefully shutdown the bot"""
+    async def _log_status(self):
+        """Log periodic status information"""
         try:
-            logger.info("🛑 Shutting down Advanced Trading Bot...")
-            self.running = False
+            # Get performance summary
+            perf_summary = self.performance_monitor.get_performance_summary()
             
-            # Close components in reverse order
-            if self.monitoring_system:
-                await self.monitoring_system.close()
+            # Get WebSocket status
+            ws_status = self.websocket_manager.get_connection_status()
             
-            if self.position_manager:
-                await self.position_manager.close()
+            # Get live data status
+            live_status = self.live_data_engine.get_enhanced_live_status()
             
-            if self.exchange_manager:
-                await self.exchange_manager.close()
+            # Get error statistics
+            error_stats = self.error_handler.get_error_statistics()
             
-            if self.db_manager:
-                await self.db_manager.close()
-            
-            # Send shutdown notification
-            if self.notification_manager:
-                await self.notification_manager.send_message(
-                    "🛑 Advanced Trading Bot safely shut down"
-                )
-                await self.notification_manager.close()
-            
-            logger.success("✅ Bot shutdown completed")
+            logger.info("📊 Bot Status Summary:")
+            logger.info(f"   Performance: CPU {perf_summary.get('system_performance', {}).get('current_cpu_usage', 0):.1f}%, "
+                       f"Memory {perf_summary.get('system_performance', {}).get('current_memory_usage', 0):.1f}%")
+            logger.info(f"   WebSocket: {ws_status.get('connections', {}).get('bybit', {}).get('connected', False)}")
+            logger.info(f"   Live Data: {live_status.get('symbols_with_data', 0)}/{live_status.get('symbols_tracked', 0)} symbols")
+            logger.info(f"   Errors: {error_stats.get('total_errors', 0)} total")
             
         except Exception as e:
-            logger.error(f"❌ Shutdown error: {e}")
-
-
-def signal_handler(signum, frame):
-    """Signal handler for graceful shutdown"""
-    logger.info(f"📡 Signal {signum} received, shutting down...")
-    sys.exit(0)
+            logger.error(f"❌ Status logging error: {e}")
+    
+    async def stop(self):
+        """Stop the trading bot gracefully"""
+        try:
+            logger.info("🛑 Stopping trading bot...")
+            self.running = False
+            
+            # Send shutdown notification
+            await self.notifications.send_notification(
+                "🛑 Trading Bot Stopped",
+                f"Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            
+            # Wait a bit for graceful shutdown
+            await asyncio.sleep(5)
+            
+        except Exception as e:
+            logger.error(f"❌ Stop error: {e}")
+    
+    async def cleanup(self):
+        """Cleanup all resources"""
+        try:
+            logger.info("🧹 Cleaning up resources...")
+            
+            # Close WebSocket connections
+            if hasattr(self, 'websocket_manager'):
+                await self.websocket_manager.close()
+            
+            # Close exchange connections
+            if hasattr(self, 'exchange_manager'):
+                await self.exchange_manager.close()
+            
+            # Close database connections
+            if hasattr(self, 'db_manager'):
+                await self.db_manager.close()
+            
+            logger.success("✅ Cleanup completed")
+            
+        except Exception as e:
+            logger.error(f"❌ Cleanup error: {e}")
 
 
 async def main():
-    """Main function"""
-    # Setup signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+    """Main entry point"""
     bot = None
+    
     try:
-        # Create and start bot
-        bot = AdvancedTradingBot()
+        # Create and initialize bot
+        bot = EnhancedTradingBot()
         await bot.initialize()
-        await bot.start_trading()
+        
+        # Start bot
+        await bot.start()
         
     except KeyboardInterrupt:
-        logger.info("⌨️ Interrupted by user")
+        logger.info("🛑 Keyboard interrupt received")
     except Exception as e:
-        logger.error(f"❌ Critical error: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"❌ Fatal error: {e}")
     finally:
+        # Cleanup
         if bot:
-            await bot.shutdown()
+            await bot.stop()
+            await bot.cleanup()
+        
+        logger.info("👋 Trading bot shutdown complete")
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"❌ Program error: {e}")
-        sys.exit(1)
+    # Run the bot
+    asyncio.run(main())

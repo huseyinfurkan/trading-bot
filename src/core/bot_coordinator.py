@@ -12,29 +12,33 @@ from loguru import logger
 class BotCoordinator:
     """Bot koordinasyon sistemi"""
     
-    def __init__(self, exchange_manager, strategy_engine, position_manager,
-                 risk_manager, market_analyzer, ai_signal_filter, db_manager):
+    def __init__(self, config: Dict[str, Any], exchange_manager, position_manager,
+                 risk_manager, monitoring_system, db_manager):
         """
         Args:
+            config: Bot konfigürasyonu
             exchange_manager: Exchange yöneticisi
-            strategy_engine: Strateji motoru
             position_manager: Pozisyon yöneticisi
             risk_manager: Risk yöneticisi
-            market_analyzer: Market analizöru
-            ai_signal_filter: AI sinyal filtreleme
+            monitoring_system: Monitoring sistemi
             db_manager: Veritabanı yöneticisi
         """
+        self.config = config
         self.exchange_manager = exchange_manager
-        self.strategy_engine = strategy_engine
         self.position_manager = position_manager
         self.risk_manager = risk_manager
-        self.market_analyzer = market_analyzer
-        self.ai_signal_filter = ai_signal_filter
+        self.monitoring_system = monitoring_system
         self.db_manager = db_manager
         
         # Coordination state
         self.running = False
         self.main_task = None
+        
+        # Performance tracking
+        self.start_time = datetime.now()
+        self.health_checks = 0
+        self.risk_checks = 0
+        self.maintenance_runs = 0
         
         logger.info("🎯 Bot Coordinator initialized")
     
@@ -100,73 +104,109 @@ class BotCoordinator:
             logger.error(f"❌ Koordinasyon döngüsü fatal hatası: {e}")
     
     async def _check_system_health(self) -> None:
-        """Sistem sağlığını kontrol et"""
+        """Sistem sağlık kontrolü"""
         try:
-            # Check active components
-            components = {
-                'exchange_manager': self.exchange_manager,
-                'strategy_engine': self.strategy_engine,
-                'position_manager': self.position_manager,
-                'risk_manager': self.risk_manager,
-                'market_analyzer': self.market_analyzer,
-                'ai_signal_filter': self.ai_signal_filter,
-                'db_manager': self.db_manager
-            }
+            self.health_checks += 1
             
-            for name, component in components.items():
-                if component is None:
-                    logger.warning(f"⚠️ {name} is None")
-                    
+            # Check exchange connectivity
+            exchange_status = await self.exchange_manager.get_exchange_status()
+            if not exchange_status.get('connected', False):
+                logger.warning("⚠️ Exchange bağlantısı kesildi")
+            
+            # Check database connectivity
+            db_status = await self.db_manager.check_connection()
+            if not db_status.get('healthy', False):
+                logger.warning("⚠️ Database bağlantısı sorunlu")
+            
+            # Check monitoring system
+            if hasattr(self.monitoring_system, 'get_system_health'):
+                health_status = await self.monitoring_system.get_system_health()
+                if not health_status.get('healthy', True):
+                    logger.warning(f"⚠️ Sistem sağlık sorunları: {health_status.get('issues', [])}")
+            
+            # Log periodic health summary
+            if self.health_checks % 20 == 0:  # Every 10 minutes
+                logger.info(f"📊 Sistem sağlık kontrolü: {self.health_checks} kez çalıştı")
+                
         except Exception as e:
-            logger.error(f"❌ System health check error: {e}")
+            logger.error(f"❌ Sistem sağlık kontrolü hatası: {e}")
     
     async def _monitor_risk_levels(self) -> None:
         """Risk seviyelerini izle"""
         try:
-            # Get current risk metrics
-            risk_metrics = self.risk_manager.get_risk_metrics()
+            self.risk_checks += 1
+            
+            # Get current risk status
+            risk_status = await self.risk_manager.get_risk_status()
             
             # Check portfolio risk
-            portfolio_risk = risk_metrics.get('current_portfolio_risk', 0)
-            max_risk = risk_metrics.get('max_portfolio_risk', 0.02)
+            portfolio_risk = risk_status.get('portfolio_risk', 0)
+            if portfolio_risk > 0.8:  # 80% portfolio risk
+                logger.warning(f"⚠️ Yüksek portföy riski: {portfolio_risk:.2%}")
             
-            if portfolio_risk > max_risk * 0.8:  # 80% of max risk
-                logger.warning(f"⚠️ High portfolio risk: {portfolio_risk:.2%}")
-                
+            # Check daily loss
+            daily_loss = risk_status.get('daily_loss', 0)
+            if daily_loss > 0.05:  # 5% daily loss
+                logger.warning(f"⚠️ Günlük kayıp limiti aşıldı: {daily_loss:.2%}")
+            
+            # Check open positions
+            open_positions = risk_status.get('open_positions', 0)
+            max_positions = self.config.get('trading', {}).get('risk_management', {}).get('max_open_positions', 10)
+            if open_positions >= max_positions:
+                logger.warning(f"⚠️ Maksimum açık pozisyon sayısına ulaşıldı: {open_positions}")
+            
         except Exception as e:
-            logger.error(f"❌ Risk monitoring error: {e}")
+            logger.error(f"❌ Risk izleme hatası: {e}")
     
     async def _track_performance(self) -> None:
         """Performans takibi"""
         try:
-            # Get open positions
-            open_positions = await self.position_manager.get_open_positions()
-            position_count = len(open_positions)
-            
-            if position_count > 0:
-                logger.debug(f"📊 Active positions: {position_count}")
+            # Get trading performance
+            if hasattr(self.position_manager, 'get_performance_summary'):
+                performance = await self.position_manager.get_performance_summary()
                 
+                # Log performance metrics
+                total_trades = performance.get('total_trades', 0)
+                win_rate = performance.get('win_rate', 0)
+                total_pnl = performance.get('total_pnl', 0)
+                
+                if total_trades > 0 and self.risk_checks % 40 == 0:  # Every 20 minutes
+                    logger.info(f"📈 Performans: {total_trades} işlem, {win_rate:.1%} kazanma oranı, {total_pnl:.2f} PnL")
+            
         except Exception as e:
-            logger.error(f"❌ Performance tracking error: {e}")
+            logger.error(f"❌ Performans takibi hatası: {e}")
     
     async def _perform_maintenance(self) -> None:
         """Düzenli bakım işlemleri"""
         try:
-            # Clean old data periodically
-            current_time = datetime.now()
+            self.maintenance_runs += 1
             
-            # Daily cleanup
-            if hasattr(self, '_last_cleanup'):
-                time_diff = current_time - self._last_cleanup
-                if time_diff > timedelta(hours=24):
-                    await self.db_manager.cleanup_old_data()
-                    self._last_cleanup = current_time
-            else:
-                self._last_cleanup = current_time
-                
+            # Clean old data
+            if hasattr(self.db_manager, 'cleanup_old_data'):
+                await self.db_manager.cleanup_old_data()
+            
+            # Update trailing stops
+            if hasattr(self.position_manager, 'update_trailing_stops'):
+                await self.position_manager.update_trailing_stops()
+            
+            # Log maintenance summary
+            if self.maintenance_runs % 60 == 0:  # Every 30 minutes
+                uptime = datetime.now() - self.start_time
+                logger.info(f"🔧 Bakım: {self.maintenance_runs} kez çalıştı, Uptime: {uptime}")
+            
         except Exception as e:
-            logger.error(f"❌ Maintenance error: {e}")
+            logger.error(f"❌ Bakım hatası: {e}")
     
     async def run(self):
-        """Run the coordinator"""
-        await self.start()
+        """Bot koordinasyonunu çalıştır"""
+        try:
+            await self.start()
+            
+            # Keep running until stopped
+            while self.running:
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"❌ Bot koordinasyon çalıştırma hatası: {e}")
+        finally:
+            await self.stop()

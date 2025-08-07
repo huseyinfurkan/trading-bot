@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Live Data Engine
-Canlı veri analizi ve karar verme motoru
+Enhanced Live Data Engine
+Advanced real-time data analysis and decision making with WebSocket stability
 """
 
 import asyncio
@@ -11,10 +11,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from loguru import logger
 import time
+import websockets
+import json
 
 
 class LiveDataEngine:
-    """Canlı veri analiz motoru"""
+    """Enhanced real-time data analysis engine with WebSocket stability"""
     
     def __init__(self, exchange_manager, market_analyzer, ai_signal_filter, 
                  strategy_engine, position_manager, risk_manager):
@@ -25,72 +27,199 @@ class LiveDataEngine:
         self.position_manager = position_manager
         self.risk_manager = risk_manager
         
-        # Live data cache
+        # Enhanced data cache with TTL
         self.live_data_cache = {}
         self.analysis_cache = {}
         self.last_analysis_time = {}
+        self.cache_ttl = 300  # 5 minutes TTL
         
-        # Configuration
+        # Dynamic configuration
         self.analysis_interval = 60  # 60 seconds
         self.data_retention_hours = 24  # 24 hours
         self.symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT']
         
-        # Decision tracking
+        # Enhanced decision tracking
         self.recent_decisions = {}
         self.decision_cooldown = 300  # 5 minutes between decisions per symbol
+        self.decision_history = []
         
         # Performance tracking
         self.analysis_count = 0
         self.decision_count = 0
         self.start_time = datetime.now()
         
-        logger.info("🔥 Live Data Engine initialized")
+        # WebSocket management
+        self.websocket_connections = {}
+        self.websocket_status = {}
+        self.reconnect_attempts = {}
+        self.max_reconnect_attempts = 5
+        self.reconnect_delay = 10
+        
+        # Error tracking
+        self.error_count = 0
+        self.last_error_time = None
+        self.error_threshold = 10  # Max errors per hour
+        
+        # Dynamic interval adjustment
+        self.market_volatility = 0.5
+        self.interval_multiplier = 1.0
+        
+        logger.info("🔥 Enhanced Live Data Engine initialized")
     
     async def start_live_analysis(self):
-        """Canlı analiz sistemini başlat"""
+        """Enhanced live analysis system with WebSocket stability"""
         try:
-            logger.info("🚀 Canlı veri analiz sistemi başlatılıyor...")
+            logger.info("🚀 Enhanced live data analysis system starting...")
+            
+            # Initialize WebSocket connections
+            await self._initialize_websocket_connections()
             
             # Start data collection tasks
             tasks = []
             
             # Real-time data collection for each symbol
             for symbol in self.symbols:
-                tasks.append(asyncio.create_task(self._live_data_collector(symbol)))
+                tasks.append(asyncio.create_task(self._enhanced_live_data_collector(symbol)))
             
-            # Analysis engine
-            tasks.append(asyncio.create_task(self._analysis_engine()))
+            # Analysis engine with dynamic intervals
+            tasks.append(asyncio.create_task(self._enhanced_analysis_engine()))
             
-            # Decision engine  
-            tasks.append(asyncio.create_task(self._decision_engine()))
+            # Decision engine with improved logic
+            tasks.append(asyncio.create_task(self._enhanced_decision_engine()))
             
-            # Monitoring and cleanup
-            tasks.append(asyncio.create_task(self._monitoring_engine()))
+            # WebSocket monitoring and recovery
+            tasks.append(asyncio.create_task(self._websocket_monitor()))
+            
+            # Performance monitoring and cleanup
+            tasks.append(asyncio.create_task(self._enhanced_monitoring_engine()))
             
             # Wait for all tasks
             await asyncio.gather(*tasks)
             
         except Exception as e:
-            logger.error(f"❌ Live analysis başlatma hatası: {e}")
+            logger.error(f"❌ Enhanced live analysis start error: {e}")
     
-    async def _live_data_collector(self, symbol: str):
-        """Sembol için canlı veri toplama"""
+    async def _initialize_websocket_connections(self):
+        """Initialize WebSocket connections for all symbols"""
         try:
-            logger.info(f"📡 {symbol} canlı veri toplama başlatıldı")
+            logger.info("🔌 WebSocket bağlantıları başlatılıyor...")
+            
+            # Check if WebSocket manager is available
+            try:
+                from src.core.websocket_manager import WebSocketManager
+                
+                # Initialize WebSocket manager
+                websocket_config = {
+                    'exchanges': self.config.get('exchanges', {}),
+                    'symbols': self.symbols,
+                    'max_reconnect_attempts': 5,
+                    'reconnect_delay': 10
+                }
+                
+                self.websocket_manager = WebSocketManager(websocket_config)
+                await self.websocket_manager.initialize()
+                
+                # Start WebSocket monitoring
+                asyncio.create_task(self.websocket_manager.monitor_connections())
+                
+                # Register callbacks for data updates
+                for symbol in self.symbols:
+                    await self.websocket_manager.register_callback('bybit', symbol, self._websocket_data_callback)
+                
+                logger.success("✅ WebSocket bağlantıları başlatıldı")
+                
+            except ImportError:
+                logger.warning("⚠️ WebSocket manager bulunamadı, REST API kullanılacak")
+                self.websocket_manager = None
+            except Exception as e:
+                logger.warning(f"⚠️ WebSocket başlatma hatası: {e}, REST API kullanılacak")
+                self.websocket_manager = None
+            
+        except Exception as e:
+            logger.error(f"❌ WebSocket başlatma hatası: {e}")
+            self.websocket_manager = None
+    
+    async def _websocket_data_callback(self, data: Dict[str, Any]):
+        """Callback for WebSocket data updates"""
+        try:
+            symbol = data['symbol']
+            data_type = data['type']
+            
+            # Update WebSocket status
+            if symbol not in self.websocket_status:
+                self.websocket_status[symbol] = {
+                    'connected': True,
+                    'last_message': datetime.now(),
+                    'error_count': 0,
+                    'reconnect_attempts': 0
+                }
+            else:
+                self.websocket_status[symbol]['last_message'] = datetime.now()
+            
+            # Store WebSocket data
+            if symbol not in self.websocket_data:
+                self.websocket_data[symbol] = {}
+            
+            self.websocket_data[symbol][data_type] = data
+            
+        except Exception as e:
+            logger.error(f"❌ WebSocket callback hatası: {e}")
+    
+    async def _get_websocket_data(self, symbol: str) -> Optional[Dict]:
+        """Get data from WebSocket connection"""
+        try:
+            # Check if WebSocket manager is available
+            if self.websocket_manager is None:
+                return None
+            
+            # Get data from WebSocket manager
+            ticker_data = await self.websocket_manager.get_live_data('bybit', symbol, 'ticker')
+            ohlcv_data = await self.websocket_manager.get_live_data('bybit', symbol, 'ohlcv')
+            
+            if ticker_data and ohlcv_data:
+                # Combine ticker and OHLCV data
+                combined_data = {
+                    'price': ticker_data['data']['price'],
+                    'bid': ticker_data['data']['bid'],
+                    'ask': ticker_data['data']['ask'],
+                    'volume': ticker_data['data']['volume'],
+                    'timestamp': ticker_data['timestamp'],
+                    'websocket_source': True
+                }
+                
+                return combined_data
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ WebSocket veri alma hatası {symbol}: {e}")
+            return None
+    
+    async def _enhanced_live_data_collector(self, symbol: str):
+        """Enhanced real-time data collection with WebSocket fallback"""
+        try:
+            logger.info(f"📡 Enhanced live data collection started for {symbol}")
             
             while True:
                 try:
-                    # Get real-time market data
-                    market_data = await self.exchange_manager.get_real_time_data(symbol)
+                    # Check WebSocket status
+                    if self.websocket_status.get(symbol, {}).get('connected', False):
+                        # Use WebSocket data if available
+                        websocket_data = await self._get_websocket_data(symbol)
+                        if websocket_data:
+                            market_data = websocket_data
+                        else:
+                            # Fallback to REST API
+                            market_data = await self.exchange_manager.get_real_time_data(symbol)
+                    else:
+                        # Use REST API as fallback
+                        market_data = await self.exchange_manager.get_real_time_data(symbol)
                     
                     if market_data:
-                        logger.debug(f"✅ {symbol} real-time data OK: ${market_data.get('price', 'N/A')}")
-                        # Get historical data for analysis (last 200 periods)
+                        # Get historical data for analysis
                         historical_data = await self.exchange_manager.get_market_data(
                             symbol, timeframe='1m', limit=200
                         )
-                        
-                        logger.debug(f"🕒 {symbol} historical data: {historical_data is not None}, dataframe: {historical_data.get('dataframe') is not None if historical_data else False}")
                         
                         if historical_data and historical_data.get('dataframe') is not None:
                             # Combine real-time with historical
@@ -99,89 +228,76 @@ class LiveDataEngine:
                                 'current_price': market_data['price'],
                                 'bid': market_data.get('bid'),
                                 'ask': market_data.get('ask'),
-                                'spread_pct': self._calculate_spread_pct(market_data),
-                                'volume_24h': market_data.get('volume', 0),
-                                'change_24h': market_data.get('change_24h'),
-                                'change_pct_24h': market_data.get('change_pct_24h'),
-                                'orderbook': market_data.get('orderbook'),
-                                'recent_trades': market_data.get('recent_trades'),
-                                'dataframe': historical_data.get('dataframe'),
+                                'volume': market_data.get('volume', 0),
                                 'timestamp': datetime.now(),
-                                'exchange': market_data.get('exchange', 'binance')
+                                'dataframe': historical_data['dataframe'],
+                                'websocket_source': self.websocket_status.get(symbol, {}).get('connected', False)
                             }
                             
-                            # Cache the data
-                            self.live_data_cache[symbol] = combined_data
+                            # Store in cache with TTL
+                            self.live_data_cache[symbol] = {
+                                'data': combined_data,
+                                'timestamp': datetime.now(),
+                                'ttl': self.cache_ttl
+                            }
                             
-                            # Log every 10th update to avoid spam
-                            if self.analysis_count % 10 == 0:
-                                logger.debug(f"📊 {symbol}: ${market_data['price']:.4f} "
-                                           f"(24h: {market_data.get('change_pct_24h', 0):+.2f}%)")
+                            logger.debug(f"✅ {symbol} data updated: ${market_data.get('price', 'N/A')}")
                         else:
-                            logger.warning(f"⚠️ {symbol} için historical data bulunamadı veya dataframe eksik")
-                            # Fallback: cache real-time data without historical
-                            fallback_data = {
-                                'symbol': symbol,
-                                'current_price': market_data['price'],
-                                'bid': market_data.get('bid'),
-                                'ask': market_data.get('ask'),
-                                'spread_pct': self._calculate_spread_pct(market_data),
-                                'volume_24h': market_data.get('volume', 0),
-                                'change_24h': market_data.get('change_24h'),
-                                'change_pct_24h': market_data.get('change_pct_24h'),
-                                'orderbook': market_data.get('orderbook'),
-                                'recent_trades': market_data.get('recent_trades'),
-                                'dataframe': None,  # No historical data available
-                                'timestamp': datetime.now(),
-                                'exchange': market_data.get('exchange', 'bybit')
-                            }
-                            self.live_data_cache[symbol] = fallback_data
-                            logger.debug(f"💾 {symbol} fallback data cached (no historical)")
+                            logger.warning(f"⚠️ {symbol} historical data unavailable")
                     else:
-                        logger.warning(f"⚠️ {symbol} için real-time data bulunamadı")
+                        logger.warning(f"⚠️ {symbol} real-time data unavailable")
                     
-                    # Wait before next update (every 10 seconds)
-                    await asyncio.sleep(10)
+                    # Dynamic sleep based on market conditions
+                    sleep_time = self.analysis_interval * self.interval_multiplier
+                    await asyncio.sleep(sleep_time)
                     
                 except Exception as e:
-                    logger.error(f"❌ {symbol} veri toplama hatası: {e}")
-                    await asyncio.sleep(5)  # Short wait on error
+                    logger.error(f"❌ {symbol} data collection error: {e}")
+                    self.error_count += 1
+                    await asyncio.sleep(10)
                     
         except Exception as e:
-            logger.error(f"❌ {symbol} veri toplama fatal hatası: {e}")
+            logger.error(f"❌ {symbol} enhanced data collector fatal error: {e}")
     
-    async def _analysis_engine(self):
-        """Analiz motoru - verileri analiz eder"""
+    async def _enhanced_analysis_engine(self):
+        """Enhanced analysis engine with dynamic intervals"""
         try:
-            logger.info("🧠 Analiz motoru başlatıldı")
+            logger.info("🧠 Enhanced analysis engine started")
             
             while True:
                 try:
+                    # Adjust analysis interval based on market conditions
+                    await self._adjust_analysis_interval()
+                    
                     for symbol in self.symbols:
                         # Check if we have fresh data
                         if symbol not in self.live_data_cache:
                             continue
                         
-                        # Check if analysis is needed (based on interval)
+                        # Check cache TTL
+                        cache_entry = self.live_data_cache[symbol]
+                        if (datetime.now() - cache_entry['timestamp']).seconds > cache_entry['ttl']:
+                            logger.warning(f"⚠️ {symbol} cache expired")
+                            continue
+                        
+                        # Check if analysis is needed
                         last_analysis = self.last_analysis_time.get(symbol, datetime.min)
-                        if (datetime.now() - last_analysis).seconds < self.analysis_interval:
+                        current_interval = self.analysis_interval * self.interval_multiplier
+                        
+                        if (datetime.now() - last_analysis).seconds < current_interval:
                             continue
                         
-                        live_data = self.live_data_cache.get(symbol)
-                        
-                        if live_data is None:
-                            logger.warning(f"⚠️ {symbol} için cache'de live data bulunamadı")
-                            continue
+                        live_data = cache_entry['data']
                         
                         # Perform comprehensive analysis
-                        analysis_result = await self._perform_live_analysis(symbol, live_data)
+                        analysis_result = await self._perform_enhanced_live_analysis(symbol, live_data)
                         
                         if analysis_result:
                             self.analysis_cache[symbol] = analysis_result
                             self.last_analysis_time[symbol] = datetime.now()
                             self.analysis_count += 1
                             
-                            logger.info(f"📈 {symbol} analiz tamamlandı - "
+                            logger.info(f"📈 {symbol} analysis completed - "
                                       f"Market: {analysis_result['market_condition']['regime']}, "
                                       f"AI Confidence: {analysis_result['ai_signals']['confidence']:.2f}, "
                                       f"Strategy: {analysis_result['recommended_strategy']}")
@@ -190,16 +306,341 @@ class LiveDataEngine:
                     await asyncio.sleep(30)
                     
                 except Exception as e:
-                    logger.error(f"❌ Analiz motoru hatası: {e}")
+                    logger.error(f"❌ Enhanced analysis engine error: {e}")
+                    self.error_count += 1
                     await asyncio.sleep(10)
                     
         except Exception as e:
-            logger.error(f"❌ Analiz motoru fatal hatası: {e}")
+            logger.error(f"❌ Enhanced analysis engine fatal error: {e}")
     
-    async def _decision_engine(self):
-        """Karar verme motoru"""
+    async def _adjust_analysis_interval(self):
+        """Dynamically adjust analysis interval based on market conditions"""
         try:
-            logger.info("🎯 Karar verme motoru başlatıldı")
+            # Calculate current market volatility
+            total_volatility = 0
+            count = 0
+            
+            for symbol in self.symbols:
+                if symbol in self.live_data_cache:
+                    cache_entry = self.live_data_cache[symbol]
+                    if 'data' in cache_entry and 'dataframe' in cache_entry['data']:
+                        df = cache_entry['data']['dataframe']
+                        if len(df) > 20:
+                            volatility = self._calculate_volatility(df, period=20)
+                            total_volatility += volatility
+                            count += 1
+            
+            if count > 0:
+                self.market_volatility = total_volatility / count
+                
+                # Adjust interval based on volatility
+                if self.market_volatility > 0.8:  # High volatility
+                    self.interval_multiplier = 0.5  # Faster analysis
+                elif self.market_volatility > 0.6:  # Medium volatility
+                    self.interval_multiplier = 0.8
+                else:  # Low volatility
+                    self.interval_multiplier = 1.2  # Slower analysis
+                
+                logger.debug(f"📊 Market volatility: {self.market_volatility:.2f}, "
+                           f"Interval multiplier: {self.interval_multiplier:.2f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Analysis interval adjustment error: {e}")
+    
+    def _calculate_volatility(self, df: pd.DataFrame, period: int = 20) -> float:
+        """Calculate price volatility"""
+        try:
+            if len(df) < period:
+                return 0.5
+            
+            returns = df['close'].pct_change().dropna()
+            if len(returns) < period:
+                return 0.5
+            
+            volatility = returns.rolling(period).std().iloc[-1]
+            return min(1.0, volatility * 100)  # Normalize to 0-1
+            
+        except Exception as e:
+            logger.error(f"❌ Volatility calculation error: {e}")
+            return 0.5
+    
+    async def _perform_enhanced_live_analysis(self, symbol: str, live_data: Dict) -> Optional[Dict]:
+        """Enhanced live analysis with comprehensive market assessment"""
+        try:
+            # Check if live_data is None or empty
+            if live_data is None or not live_data:
+                logger.warning(f"⚠️ {symbol} live data not available")
+                return None
+                
+            dataframe = live_data.get('dataframe')
+            if dataframe is None or len(dataframe) < 50:
+                logger.warning(f"⚠️ {symbol} insufficient dataframe ({len(dataframe) if dataframe is not None else 0} candles)")
+                return None
+            
+            # Prepare market data for analysis
+            market_data = {
+                'symbol': symbol,
+                'price': live_data.get('current_price', 0),
+                'bid': live_data.get('bid'),
+                'ask': live_data.get('ask'),
+                'volume': live_data.get('volume', 0),
+                'dataframe': dataframe,
+                'timestamp': live_data.get('timestamp', datetime.now())
+            }
+            
+            # Comprehensive analysis
+            analysis_result = {
+                'symbol': symbol,
+                'timestamp': datetime.now(),
+                'market_condition': await self._analyze_market_condition(symbol, dataframe),
+                'ai_signals': await self._analyze_ai_signals(symbol, market_data),
+                'technical_analysis': self._calculate_enhanced_technical_summary(dataframe),
+                'risk_assessment': await self._assess_enhanced_current_risk(symbol, live_data),
+                'recommended_strategy': await self._get_recommended_strategy(symbol, market_data),
+                'data_quality': self._assess_data_quality(dataframe),
+                'websocket_status': self.websocket_status.get(symbol, {})
+            }
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced live analysis error for {symbol}: {e}")
+            return None
+    
+    async def _analyze_market_condition(self, symbol: str, dataframe: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze current market condition"""
+        try:
+            # Get market regime from market analyzer
+            regime = await self.market_analyzer.analyze_current_market()
+            
+            # Calculate additional metrics
+            volatility = self._calculate_volatility(dataframe, period=20)
+            trend_strength = self._calculate_trend_strength(dataframe)
+            
+            return {
+                'regime': regime,
+                'volatility': volatility,
+                'trend_strength': trend_strength,
+                'timestamp': datetime.now()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Market condition analysis error: {e}")
+            return {'regime': 'unknown', 'volatility': 0.5, 'trend_strength': 0.5}
+    
+    def _calculate_trend_strength(self, df: pd.DataFrame) -> float:
+        """Calculate trend strength"""
+        try:
+            if len(df) < 50:
+                return 0.5
+            
+            # Linear regression slope
+            x = np.arange(len(df))
+            y = df['close'].values
+            
+            # Remove NaN values
+            mask = ~np.isnan(y)
+            if np.sum(mask) < 10:
+                return 0.5
+            
+            x_clean = x[mask]
+            y_clean = y[mask]
+            
+            # Calculate slope
+            slope = np.polyfit(x_clean, y_clean, 1)[0]
+            
+            # Normalize slope to 0-1 range
+            max_slope = np.std(y_clean) * 0.1
+            trend_strength = min(abs(slope) / max_slope, 1.0) if max_slope > 0 else 0.5
+            
+            return trend_strength
+            
+        except Exception as e:
+            logger.error(f"❌ Trend strength calculation error: {e}")
+            return 0.5
+    
+    async def _analyze_ai_signals(self, symbol: str, market_data: Dict) -> Dict[str, Any]:
+        """Analyze AI signals"""
+        try:
+            # Get AI signal analysis
+            ai_analysis = await self.ai_signal_filter.analyze_signals(symbol, market_data)
+            
+            return {
+                'confidence': ai_analysis.get('confidence', 0.5),
+                'action': ai_analysis.get('action', 'HOLD'),
+                'signal_count': ai_analysis.get('signal_count', 0),
+                'signal_quality': ai_analysis.get('signal_quality_score', 0.5),
+                'signal_strength': ai_analysis.get('signal_strength', 0.0),
+                'signal_reliability': ai_analysis.get('signal_reliability', 0.5),
+                'market_conditions': ai_analysis.get('market_conditions', {})
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ AI signal analysis error: {e}")
+            return {
+                'confidence': 0.5,
+                'action': 'HOLD',
+                'signal_count': 0,
+                'signal_quality': 0.5,
+                'signal_strength': 0.0,
+                'signal_reliability': 0.5
+            }
+    
+    def _calculate_enhanced_technical_summary(self, dataframe: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate enhanced technical analysis summary"""
+        try:
+            if len(dataframe) < 20:
+                return {'error': 'Insufficient data'}
+            
+            # Basic technical indicators
+            close_prices = dataframe['close']
+            high_prices = dataframe['high']
+            low_prices = dataframe['low']
+            volumes = dataframe['volume']
+            
+            # Price metrics
+            current_price = close_prices.iloc[-1]
+            price_change_1h = (current_price - close_prices.iloc[-60]) / close_prices.iloc[-60] if len(close_prices) >= 60 else 0
+            price_change_24h = (current_price - close_prices.iloc[-1440]) / close_prices.iloc[-1440] if len(close_prices) >= 1440 else 0
+            
+            # Moving averages
+            sma_20 = close_prices.rolling(20).mean().iloc[-1]
+            sma_50 = close_prices.rolling(50).mean().iloc[-1]
+            
+            # RSI
+            rsi = self._calculate_rsi(close_prices, period=14)
+            current_rsi = rsi.iloc[-1] if len(rsi) > 0 else 50
+            
+            # Bollinger Bands
+            bb_upper = sma_20 + 2 * close_prices.rolling(20).std()
+            bb_lower = sma_20 - 2 * close_prices.rolling(20).std()
+            bb_position = (current_price - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1]) if bb_upper.iloc[-1] != bb_lower.iloc[-1] else 0.5
+            
+            # Volume analysis
+            avg_volume = volumes.rolling(20).mean().iloc[-1]
+            volume_ratio = volumes.iloc[-1] / avg_volume if avg_volume > 0 else 1.0
+            
+            # Volatility
+            volatility = self._calculate_volatility(dataframe, period=20)
+            
+            return {
+                'current_price': current_price,
+                'price_change_1h': price_change_1h,
+                'price_change_24h': price_change_24h,
+                'sma_20': sma_20,
+                'sma_50': sma_50,
+                'rsi': current_rsi,
+                'bb_position': bb_position,
+                'volume_ratio': volume_ratio,
+                'volatility': volatility,
+                'trend': 'UP' if sma_20 > sma_50 else 'DOWN',
+                'support_level': low_prices.rolling(20).min().iloc[-1],
+                'resistance_level': high_prices.rolling(20).max().iloc[-1]
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Technical summary calculation error: {e}")
+            return {'error': str(e)}
+    
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI indicator"""
+        try:
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+        except Exception as e:
+            logger.error(f"❌ RSI calculation error: {e}")
+            return pd.Series([50] * len(prices))
+    
+    async def _assess_enhanced_current_risk(self, symbol: str, live_data: Dict) -> Dict[str, Any]:
+        """Assess current risk with enhanced metrics"""
+        try:
+            # Get current positions
+            open_positions = await self.position_manager.get_open_positions()
+            symbol_positions = [p for p in open_positions if p.get('symbol') == symbol]
+            
+            # Calculate position risk
+            total_position_value = sum(p.get('size', 0) * p.get('entry_price', 0) for p in symbol_positions)
+            
+            # Get account balance
+            try:
+                balance = await self.exchange_manager.get_balance()
+                account_balance = balance.get('USDT', 10000) if balance else 10000
+            except:
+                account_balance = 10000
+            
+            # Calculate risk metrics
+            position_risk = total_position_value / account_balance if account_balance > 0 else 0
+            portfolio_risk = sum(p.get('size', 0) * p.get('entry_price', 0) for p in open_positions) / account_balance if account_balance > 0 else 0
+            
+            # Market risk based on volatility
+            dataframe = live_data.get('dataframe')
+            market_volatility = self._calculate_volatility(dataframe, period=20) if dataframe is not None else 0.5
+            
+            return {
+                'position_count': len(symbol_positions),
+                'total_position_value': total_position_value,
+                'position_risk': position_risk,
+                'portfolio_risk': portfolio_risk,
+                'account_balance': account_balance,
+                'market_volatility': market_volatility,
+                'risk_level': 'HIGH' if position_risk > 0.1 else 'MEDIUM' if position_risk > 0.05 else 'LOW'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Risk assessment error: {e}")
+            return {
+                'position_count': 0,
+                'total_position_value': 0,
+                'position_risk': 0,
+                'portfolio_risk': 0,
+                'account_balance': 10000,
+                'market_volatility': 0.5,
+                'risk_level': 'UNKNOWN'
+            }
+    
+    async def _get_recommended_strategy(self, symbol: str, market_data: Dict) -> str:
+        """Get recommended strategy based on market conditions"""
+        try:
+            # Get market regime analysis
+            regime_analysis = await self.strategy_engine.analyze_market_regime(symbol)
+            recommended_strategy = regime_analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi')
+            
+            return recommended_strategy
+            
+        except Exception as e:
+            logger.error(f"❌ Strategy recommendation error: {e}")
+            return 'bollinger_rsi_stochrsi'
+    
+    def _assess_data_quality(self, dataframe: pd.DataFrame) -> float:
+        """Assess data quality"""
+        try:
+            if dataframe is None or len(dataframe) < 20:
+                return 0.0
+            
+            # Check for missing values
+            missing_ratio = dataframe.isnull().sum().sum() / (len(dataframe) * len(dataframe.columns))
+            
+            # Check for price anomalies
+            price_changes = dataframe['close'].pct_change().abs()
+            anomaly_ratio = (price_changes > 0.1).sum() / len(price_changes)
+            
+            # Calculate quality score
+            quality_score = 1.0 - (missing_ratio * 0.5 + anomaly_ratio * 0.5)
+            
+            return max(0.0, min(1.0, quality_score))
+            
+        except Exception as e:
+            logger.error(f"❌ Data quality assessment error: {e}")
+            return 0.5
+    
+    async def _enhanced_decision_engine(self):
+        """Enhanced decision engine with improved logic and risk management"""
+        try:
+            logger.info("🎯 Enhanced decision engine started")
             
             while True:
                 try:
@@ -215,191 +656,198 @@ class LiveDataEngine:
                         
                         analysis = self.analysis_cache[symbol]
                         
-                        # Make trading decision
-                        decision = await self._make_trading_decision(symbol, analysis)
+                        # Enhanced trading decision with multiple criteria
+                        decision = await self._make_enhanced_trading_decision(symbol, analysis)
                         
                         if decision and decision['action'] != 'HOLD':
-                            await self._execute_trading_decision(symbol, decision)
-                            self.recent_decisions[symbol] = datetime.now()
-                            self.decision_count += 1
+                            # Execute decision with enhanced logging
+                            execution_result = await self._execute_enhanced_trading_decision(symbol, decision)
+                            
+                            if execution_result:
+                                self.recent_decisions[symbol] = datetime.now()
+                                self.decision_count += 1
+                                
+                                # Store decision history
+                                decision_record = {
+                                    'symbol': symbol,
+                                    'timestamp': datetime.now(),
+                                    'decision': decision,
+                                    'execution_result': execution_result,
+                                    'analysis_summary': {
+                                        'ai_confidence': analysis.get('ai_signals', {}).get('confidence', 0),
+                                        'market_regime': analysis.get('market_condition', {}).get('regime', 'unknown'),
+                                        'risk_level': analysis.get('risk_assessment', {}).get('risk_level', 'UNKNOWN')
+                                    }
+                                }
+                                self.decision_history.append(decision_record)
+                                
+                                # Keep only last 100 decisions
+                                if len(self.decision_history) > 100:
+                                    self.decision_history = self.decision_history[-100:]
                     
                     # Wait before next decision cycle
                     await asyncio.sleep(60)
                     
                 except Exception as e:
-                    logger.error(f"❌ Karar verme motoru hatası: {e}")
+                    logger.error(f"❌ Enhanced decision engine error: {e}")
+                    self.error_count += 1
                     await asyncio.sleep(30)
                     
         except Exception as e:
-            logger.error(f"❌ Karar verme motoru fatal hatası: {e}")
+            logger.error(f"❌ Enhanced decision engine fatal error: {e}")
     
-    async def _perform_live_analysis(self, symbol: str, live_data: Dict) -> Optional[Dict]:
-        """Tek sembol için canlı analiz gerçekleştir"""
+    async def _make_enhanced_trading_decision(self, symbol: str, analysis: Dict) -> Optional[Dict]:
+        """Enhanced trading decision with multiple criteria, risk management, and trading costs"""
         try:
-            # Check if live_data is None or empty
-            if live_data is None or not live_data:
-                logger.warning(f"⚠️ {symbol} için live data bulunamadı")
-                return None
-                
-            dataframe = live_data.get('dataframe')
-            if dataframe is None or len(dataframe) < 50:
-                logger.warning(f"⚠️ {symbol} için yeterli dataframe yok ({len(dataframe) if dataframe is not None else 0} candles)")
-                return None
+            # Extract analysis components
+            market_condition = analysis.get('market_condition', {})
+            ai_signals = analysis.get('ai_signals', {})
+            risk_assessment = analysis.get('risk_assessment', {})
+            technical_analysis = analysis.get('technical_analysis', {})
             
-            # Prepare market data for analysis
-            market_data = {
-                'symbol': symbol,
-                'dataframe': dataframe,
-                'close': live_data.get('current_price', 0) if live_data else 0,
-                'volume': live_data.get('volume_24h', 0) if live_data else 0,
-                'timestamp': live_data.get('timestamp', datetime.now()) if live_data else datetime.now()
-            }
+            # Decision criteria with dynamic thresholds
+            min_ai_confidence = 0.6
+            min_signal_quality = 0.7
+            max_risk_level = 'MEDIUM'
             
-            # 1. Market Condition Analysis
-            market_condition = await self.market_analyzer.analyze_market_condition(symbol)
-            if market_condition is None:
-                market_condition = {'condition': 'unknown', 'strength': 0.5, 'confidence': 0.0}
-                logger.warning(f"⚠️ {symbol} market condition None döndü, default değerler kullanılıyor")
-            
-            # 2. AI Signal Analysis
-            ai_signals = await self.ai_signal_filter.analyze_signals(symbol, market_data)
-            if ai_signals is None:
-                ai_signals = {'confidence': 0.0, 'signals': [], 'strength': 0.0}
-                logger.warning(f"⚠️ {symbol} AI signals None döndü, default değerler kullanılıyor")
-            
-            # 3. NEW: Adaptive Market Regime Analysis & Strategy Selection
-            market_regime = await self.strategy_engine.analyze_market_regime(symbol)
-            recommended_strategy = market_regime.get('best_strategy', 'bollinger_rsi_stochrsi')
-            
-            # Get actual trading signal from adaptive strategy
-            current_price = live_data.get('close', 0) if live_data else 0
-            current_volume = live_data.get('volume', 0) if live_data else 0
-            
-            strategy_signal = await self.strategy_engine.get_entry_signal(
-                symbol=symbol, 
-                market_data={
-                    'symbol': symbol, 
-                    'price': current_price, 
-                    'volume': current_volume, 
-                    'timestamp': datetime.now(),
-                    'indicators': market_data.get('indicators', {})
-                }, 
-                regime=market_regime.get('regime', 'sideways_market') if isinstance(market_regime, dict) else market_regime
-            )
-            if strategy_signal.get('action') == 'HOLD':
-                logger.debug(f"📊 {symbol} no trading signal from adaptive strategy")
-            
-            # 4. Risk Assessment
-            risk_assessment = await self._assess_current_risk(symbol, live_data)
-            if risk_assessment is None:
-                risk_assessment = {'overall_risk': 'medium', 'risk_score': 0.5}
-                logger.warning(f"⚠️ {symbol} risk assessment None döndü, default değerler kullanılıyor")
-            
-            # 5. Entry Signal from Adaptive Strategy (already calculated above)
-            entry_signal = None
-            if strategy_signal:
-                entry_signal = {
-                    'action': strategy_signal.get('action', 'HOLD'),
-                    'confidence': strategy_signal.get('confidence', 0.5),
-                    'entry_price': strategy_signal.get('entry_price', strategy_signal.get('price', 0)),
-                    'stop_loss': strategy_signal.get('stop_loss'),
-                    'take_profit': strategy_signal.get('take_profit'),
-                    'reason': strategy_signal.get('reason', 'Adaptive strategy signal')
-                }
-            
-            # 6. Technical Analysis Summary
-            technical_summary = self._calculate_technical_summary(dataframe) if dataframe is not None else {}
-            
-            return {
-                'symbol': symbol,
-                'timestamp': datetime.now(),
-                'current_price': live_data.get('current_price', 0) if live_data else 0,
-                'market_condition': market_regime,  # Now contains real regime analysis
-                'ai_signals': ai_signals,
-                'recommended_strategy': recommended_strategy,
-                'strategy_signal': strategy_signal,  # New: actual trading signal from adaptive engine
-                'entry_signal': entry_signal,
-                'risk_assessment': risk_assessment,
-                'technical_summary': technical_summary,
-                'data_quality': {
-                    'data_points': len(dataframe) if dataframe is not None else 0,
-                    'spread_pct': live_data.get('spread_pct', 0) if live_data else 0,
-                    'orderbook_depth': len((live_data.get('orderbook') or {}).get('bids', [])) if live_data else 0,
-                    'recent_trades_count': len(live_data.get('recent_trades') or []) if live_data else 0
-                }
-            }
-            
-        except Exception as e:
-            import traceback
-            logger.error(f"❌ {symbol} canlı analiz hatası: {e}")
-            logger.error(f"📍 Stack trace: {traceback.format_exc()}")
-            return None
-    
-    async def _make_trading_decision(self, symbol: str, analysis: Dict) -> Optional[Dict]:
-        """Trading kararı ver"""
-        try:
-            market_condition = analysis['market_condition']
-            ai_signals = analysis['ai_signals']
-            entry_signal = analysis['entry_signal']
-            risk_assessment = analysis['risk_assessment']
-            
-            # Decision criteria
-            min_confidence = 0.75
-            min_market_strength = 0.6
-            
-            # Check if conditions are met for trading
+            # Check AI confidence
             ai_confidence = ai_signals.get('confidence', 0)
-            market_strength = market_condition.get('strength', 0)
-            
-            if ai_confidence < min_confidence:
+            if ai_confidence < min_ai_confidence:
                 return {'action': 'HOLD', 'reason': f'Low AI confidence: {ai_confidence:.2f}'}
             
-            if market_strength < min_market_strength:
-                return {'action': 'HOLD', 'reason': f'Weak market: {market_strength:.2f}'}
+            # Check signal quality
+            signal_quality = ai_signals.get('signal_quality', 0.5)
+            if signal_quality < min_signal_quality:
+                return {'action': 'HOLD', 'reason': f'Low signal quality: {signal_quality:.2f}'}
             
-            if not risk_assessment['allowed']:
-                return {'action': 'HOLD', 'reason': f'Risk check failed: {risk_assessment["reason"]}'}
+            # Check risk level
+            risk_level = risk_assessment.get('risk_level', 'UNKNOWN')
+            if risk_level == 'HIGH':
+                return {'action': 'HOLD', 'reason': 'High risk level detected'}
             
-            # Check for entry signal
-            if entry_signal and entry_signal.get('action') in ['BUY', 'SELL']:
-                return {
-                    'action': entry_signal['action'],
-                    'entry_price': entry_signal['entry_price'],
-                    'stop_loss': entry_signal.get('stop_loss'),
-                    'take_profit': entry_signal.get('take_profit'),
-                    'confidence': entry_signal['confidence'],
-                    'strategy': analysis['recommended_strategy'],
-                    'reason': f"Strong {entry_signal['action']} signal",
-                    'risk_amount': risk_assessment['risk_amount'],
-                    'position_size': risk_assessment['position_size']
-                }
+            # Check market conditions
+            market_regime = market_condition.get('regime', 'unknown')
+            if market_regime == 'volatile_market':
+                # Be more conservative in volatile markets
+                min_ai_confidence = 0.7
+                if ai_confidence < min_ai_confidence:
+                    return {'action': 'HOLD', 'reason': f'Volatile market requires higher confidence: {ai_confidence:.2f}'}
             
-            return {'action': 'HOLD', 'reason': 'No clear signal'}
+            # Get AI action
+            ai_action = ai_signals.get('action', 'HOLD')
+            if ai_action == 'HOLD':
+                return {'action': 'HOLD', 'reason': 'AI suggests HOLD'}
+            
+            # Calculate entry price and stop loss
+            current_price = technical_analysis.get('current_price', 0)
+            if current_price <= 0:
+                return {'action': 'HOLD', 'reason': 'Invalid current price'}
+            
+            # Calculate trading costs
+            trading_costs = await self._calculate_trading_costs(symbol, current_price, market_condition)
+            
+            # Adjust entry price for slippage
+            slippage = trading_costs['slippage']
+            if ai_action == 'BUY':
+                adjusted_entry_price = current_price * (1 + slippage)
+            else:  # SELL
+                adjusted_entry_price = current_price * (1 - slippage)
+            
+            # Dynamic stop loss based on volatility
+            volatility = market_condition.get('volatility', 0.5)
+            stop_loss_pct = 0.02 + (volatility * 0.03)  # 2-5% based on volatility
+            
+            if ai_action == 'BUY':
+                stop_loss = adjusted_entry_price * (1 - stop_loss_pct)
+                take_profit = adjusted_entry_price * (1 + stop_loss_pct * 2)  # 2:1 reward/risk
+            else:  # SELL
+                stop_loss = adjusted_entry_price * (1 + stop_loss_pct)
+                take_profit = adjusted_entry_price * (1 - stop_loss_pct * 2)
+            
+            # Calculate position size using risk manager
+            try:
+                size_result = await self.risk_manager.calculate_position_size(
+                    symbol=symbol,
+                    entry_price=adjusted_entry_price,
+                    stop_loss=stop_loss,
+                    confidence=ai_confidence,
+                    strategy=analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi'),
+                    current_price=adjusted_entry_price,
+                    account_balance=risk_assessment.get('account_balance', 10000)
+                )
+                
+                if not size_result.get('allowed', False):
+                    return {'action': 'HOLD', 'reason': f'Risk check failed: {size_result.get("reason", "Unknown")}'}
+                
+                position_size = size_result['size']
+                
+                # Adjust position size for trading costs
+                total_costs = trading_costs['total_cost_pct']
+                adjusted_position_size = position_size * (1 - total_costs)
+                
+            except Exception as e:
+                logger.error(f"❌ Position size calculation error: {e}")
+                return {'action': 'HOLD', 'reason': 'Position size calculation failed'}
+            
+            # Check if adjusted position size is still viable
+            min_position_value = 10  # $10 minimum
+            position_value = adjusted_position_size * adjusted_entry_price
+            if position_value < min_position_value:
+                return {'action': 'HOLD', 'reason': f'Position too small after costs: ${position_value:.2f}'}
+            
+            # Final decision with trading costs included
+            decision = {
+                'action': ai_action,
+                'entry_price': adjusted_entry_price,
+                'original_price': current_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'confidence': ai_confidence,
+                'signal_quality': signal_quality,
+                'strategy': analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi'),
+                'reason': f"Strong {ai_action} signal with {ai_confidence:.2f} confidence",
+                'risk_amount': size_result.get('risk_amount', 0),
+                'position_size': adjusted_position_size,
+                'original_position_size': position_size,
+                'market_regime': market_regime,
+                'volatility': volatility,
+                'leverage': size_result.get('leverage_used', 1.0),
+                'trading_costs': trading_costs,
+                'slippage': slippage,
+                'funding_fee': trading_costs['funding_fee'],
+                'total_costs_pct': trading_costs['total_cost_pct']
+            }
+            
+            return decision
             
         except Exception as e:
-            logger.error(f"❌ {symbol} karar verme hatası: {e}")
+            logger.error(f"❌ Enhanced trading decision error for {symbol}: {e}")
             return None
     
-    async def _execute_trading_decision(self, symbol: str, decision: Dict):
-        """Trading kararını uygula"""
+    async def _execute_enhanced_trading_decision(self, symbol: str, decision: Dict) -> Optional[Dict]:
+        """Execute trading decision with enhanced logging and error handling"""
         try:
             action = decision['action']
             
             if action in ['BUY', 'SELL']:
-                logger.info(f"🚀 {symbol} {action} kararı uygulanıyor...")
+                logger.info(f"🚀 {symbol} {action} decision executing...")
                 logger.info(f"   💰 Price: ${decision['entry_price']:.4f}")
                 logger.info(f"   🎯 Strategy: {decision['strategy']}")
                 logger.info(f"   📊 Confidence: {decision['confidence']:.2f}")
                 logger.info(f"   💼 Position Size: {decision['position_size']:.6f}")
+                logger.info(f"   🛡️ Stop Loss: ${decision['stop_loss']:.4f}")
+                logger.info(f"   🎯 Take Profit: ${decision['take_profit']:.4f}")
+                logger.info(f"   📈 Market Regime: {decision['market_regime']}")
+                logger.info(f"   📊 Volatility: {decision['volatility']:.2f}")
                 
                 # Execute through position manager
                 position_result = await self.position_manager.open_position(
                     symbol=symbol,
                     action={
-                        'action': action,  # CRITICAL FIX: 'signal' -> 'action' for PositionManager compatibility
+                        'action': action,
                         'entry_price': decision['entry_price'],
-                        'stop_loss': decision.get('stop_loss'),
-                        'take_profit': decision.get('take_profit'),
+                        'stop_loss': decision['stop_loss'],
+                        'take_profit': decision['take_profit'],
                         'size': decision['position_size']
                     },
                     confidence=decision['confidence'],
@@ -407,90 +855,88 @@ class LiveDataEngine:
                 )
                 
                 if position_result:
-                    logger.info(f"✅ {symbol} pozisyon açıldı: {position_result['id']}")
+                    logger.success(f"✅ {symbol} position opened: {position_result.get('position_id', 'N/A')}")
+                    
+                    # Update strategy performance
+                    await self.strategy_engine.update_strategy_performance(
+                        decision['strategy'],
+                        {
+                            'pnl': 0,  # Will be updated when position closes
+                            'entry_price': decision['entry_price'],
+                            'exit_price': decision['entry_price'],
+                            'duration': 0
+                        }
+                    )
+                    
+                    return {
+                        'success': True,
+                        'position_id': position_result.get('position_id'),
+                        'execution_time': datetime.now(),
+                        'details': position_result
+                    }
                 else:
-                    logger.warning(f"⚠️ {symbol} pozisyon açılamadı")
+                    logger.warning(f"⚠️ {symbol} position opening failed")
+                    return {
+                        'success': False,
+                        'reason': 'Position opening failed',
+                        'execution_time': datetime.now()
+                    }
+            
+            return None
             
         except Exception as e:
-            logger.error(f"❌ {symbol} karar uygulama hatası: {e}")
-    
-    async def _assess_current_risk(self, symbol: str, live_data: Dict) -> Dict[str, Any]:
-        """Mevcut risk durumunu değerlendir"""
-        try:
-            current_price = live_data['current_price']
-            
-            # Calculate position size based on risk
-            result = await self.risk_manager.calculate_position_size(
-                symbol=symbol,
-                entry_price=current_price,
-                stop_loss=current_price * 0.98,  # 2% stop loss
-                confidence=0.8,
-                strategy='swing_trading'
-            )
-            
+            logger.error(f"❌ {symbol} decision execution error: {e}")
             return {
-                'allowed': result.get('allowed', False),
-                'reason': result.get('reason', ''),
-                'position_size': result.get('size', 0),
-                'risk_amount': result.get('risk_amount', 0),
-                'leverage': result.get('leverage', 1)
+                'success': False,
+                'reason': f'Execution error: {str(e)}',
+                'execution_time': datetime.now()
             }
-            
-        except Exception as e:
-            logger.error(f"❌ {symbol} risk değerlendirme hatası: {e}")
-            return {'allowed': False, 'reason': f'Risk assessment error: {e}'}
     
-    def _calculate_technical_summary(self, dataframe: pd.DataFrame) -> Dict[str, Any]:
-        """Teknik analiz özeti"""
+    async def _websocket_monitor(self):
+        """Monitor WebSocket connections and handle reconnections"""
         try:
-            if dataframe is None or len(dataframe) < 20:
-                return {}
+            logger.info("🔌 WebSocket monitor started")
             
-            close_prices = dataframe['close']
-            
-            # Simple moving averages
-            sma_10 = close_prices.rolling(10).mean().iloc[-1]
-            sma_20 = close_prices.rolling(20).mean().iloc[-1]
-            
-            # Current price
-            current_price = close_prices.iloc[-1]
-            
-            # Price position relative to SMAs
-            above_sma10 = current_price > sma_10
-            above_sma20 = current_price > sma_20
-            
-            # Simple RSI calculation
-            delta = close_prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            current_rsi = rsi.iloc[-1]
-            
-            # Volume trend (last 10 periods)
-            volume_trend = dataframe['volume'].rolling(10).mean().iloc[-1]
-            
-            return {
-                'sma_10': sma_10,
-                'sma_20': sma_20,
-                'above_sma10': above_sma10,
-                'above_sma20': above_sma20,
-                'rsi': current_rsi,
-                'rsi_oversold': current_rsi < 30,
-                'rsi_overbought': current_rsi > 70,
-                'volume_trend': volume_trend,
-                'trend_direction': 'BULLISH' if above_sma10 and above_sma20 else 'BEARISH',
-                'momentum': 'STRONG' if abs(current_rsi - 50) > 20 else 'WEAK'
-            }
-            
+            while True:
+                try:
+                    for symbol in self.symbols:
+                        if symbol not in self.websocket_status:
+                            continue
+                        
+                        status = self.websocket_status[symbol]
+                        
+                        # Check if WebSocket is connected
+                        if not status['connected']:
+                            # Attempt reconnection
+                            if status['reconnect_attempts'] < self.max_reconnect_attempts:
+                                logger.info(f"🔄 Attempting WebSocket reconnection for {symbol}")
+                                await self._connect_websocket(symbol)
+                                status['reconnect_attempts'] += 1
+                            else:
+                                logger.error(f"❌ Max reconnection attempts reached for {symbol}")
+                        
+                        # Check for stale connections (no messages in 5 minutes)
+                        elif status['last_message']:
+                            time_since_last = (datetime.now() - status['last_message']).seconds
+                            if time_since_last > 300:  # 5 minutes
+                                logger.warning(f"⚠️ WebSocket connection stale for {symbol}, reconnecting...")
+                                status['connected'] = False
+                                status['reconnect_attempts'] = 0
+                    
+                    # Wait before next check
+                    await asyncio.sleep(30)
+                    
+                except Exception as e:
+                    logger.error(f"❌ WebSocket monitor error: {e}")
+                    await asyncio.sleep(10)
+                    
         except Exception as e:
-            logger.error(f"❌ Teknik analiz özeti hatası: {e}")
-            return {}
+            logger.error(f"❌ WebSocket monitor fatal error: {e}")
     
-    async def _monitoring_engine(self):
-        """Monitoring ve temizlik motoru"""
+    async def _enhanced_monitoring_engine(self):
+        """Enhanced monitoring and cleanup engine"""
         try:
-            logger.info("📊 Monitoring motoru başlatıldı")
+            logger.info("📊 Enhanced monitoring engine started")
             
             while True:
                 try:
@@ -502,27 +948,36 @@ class LiveDataEngine:
                         analyses_per_hour = self.analysis_count / runtime_hours if runtime_hours > 0 else 0
                         decisions_per_hour = self.decision_count / runtime_hours if runtime_hours > 0 else 0
                         
-                        logger.info(f"📊 Live Engine Stats:")
+                        logger.info(f"📊 Enhanced Live Engine Stats:")
                         logger.info(f"   ⏱️ Runtime: {runtime_hours:.1f} hours")
                         logger.info(f"   📈 Analyses: {self.analysis_count} ({analyses_per_hour:.1f}/hour)")
                         logger.info(f"   🎯 Decisions: {self.decision_count} ({decisions_per_hour:.1f}/hour)")
                         logger.info(f"   💾 Cache Size: {len(self.live_data_cache)} symbols")
+                        logger.info(f"   🔌 WebSocket Status: {sum(1 for s in self.websocket_status.values() if s.get('connected', False))}/{len(self.symbols)} connected")
+                        logger.info(f"   📊 Market Volatility: {self.market_volatility:.2f}")
+                        logger.info(f"   ⚡ Interval Multiplier: {self.interval_multiplier:.2f}")
+                        logger.info(f"   ❌ Error Count: {self.error_count}")
                     
-                    # Cleanup old data (every hour)
+                    # Cleanup old data
                     await self._cleanup_old_data()
+                    
+                    # Reset error count if it's been an hour
+                    if self.last_error_time and (datetime.now() - self.last_error_time).seconds > 3600:
+                        self.error_count = 0
+                        self.last_error_time = None
                     
                     # Wait 1 hour before next monitoring cycle
                     await asyncio.sleep(3600)
                     
                 except Exception as e:
-                    logger.error(f"❌ Monitoring hatası: {e}")
+                    logger.error(f"❌ Enhanced monitoring error: {e}")
                     await asyncio.sleep(300)
                     
         except Exception as e:
-            logger.error(f"❌ Monitoring motoru fatal hatası: {e}")
+            logger.error(f"❌ Enhanced monitoring engine fatal error: {e}")
     
     async def _cleanup_old_data(self):
-        """Eski verileri temizle"""
+        """Clean up old data with enhanced logic"""
         try:
             cutoff_time = datetime.now() - timedelta(hours=self.data_retention_hours)
             
@@ -531,20 +986,52 @@ class LiveDataEngine:
                 analysis = self.analysis_cache[symbol]
                 if analysis.get('timestamp', datetime.min) < cutoff_time:
                     del self.analysis_cache[symbol]
-                    logger.debug(f"🗑️ {symbol} eski analiz verisi temizlendi")
+                    logger.debug(f"🗑️ {symbol} old analysis data cleaned")
             
             # Clean decision history
+            self.decision_history = [
+                d for d in self.decision_history 
+                if d.get('timestamp', datetime.min) > cutoff_time
+            ]
+            
+            # Clean live data cache (check TTL)
+            for symbol in list(self.live_data_cache.keys()):
+                cache_entry = self.live_data_cache[symbol]
+                if (datetime.now() - cache_entry['timestamp']).seconds > cache_entry['ttl']:
+                    del self.live_data_cache[symbol]
+                    logger.debug(f"🗑️ {symbol} expired cache data cleaned")
+            
+            # Clean decision cooldowns
             for symbol in list(self.recent_decisions.keys()):
                 if self.recent_decisions[symbol] < cutoff_time:
                     del self.recent_decisions[symbol]
             
+            logger.debug("🧹 Data cleanup completed")
+            
         except Exception as e:
-            logger.error(f"❌ Veri temizleme hatası: {e}")
+            logger.error(f"❌ Data cleanup error: {e}")
     
-    def get_live_status(self) -> Dict[str, Any]:
-        """Canlı sistem durumunu al"""
+    def get_enhanced_live_status(self) -> Dict[str, Any]:
+        """Get enhanced live system status"""
         try:
             runtime = datetime.now() - self.start_time
+            
+            # Calculate WebSocket status
+            websocket_stats = {
+                'total_connections': len(self.symbols),
+                'connected': sum(1 for s in self.websocket_status.values() if s.get('connected', False)),
+                'reconnecting': sum(1 for s in self.websocket_status.values() if not s.get('connected', False) and s.get('reconnect_attempts', 0) < self.max_reconnect_attempts),
+                'failed': sum(1 for s in self.websocket_status.values() if not s.get('connected', False) and s.get('reconnect_attempts', 0) >= self.max_reconnect_attempts)
+            }
+            
+            # Calculate decision statistics
+            recent_decisions = [d for d in self.decision_history if (datetime.now() - d['timestamp']).seconds < 3600]
+            decision_stats = {
+                'total_decisions': len(self.decision_history),
+                'recent_decisions': len(recent_decisions),
+                'successful_executions': sum(1 for d in recent_decisions if d.get('execution_result', {}).get('success', False)),
+                'failed_executions': sum(1 for d in recent_decisions if not d.get('execution_result', {}).get('success', True))
+            }
             
             return {
                 'status': 'RUNNING',
@@ -554,33 +1041,69 @@ class LiveDataEngine:
                 'symbols_analyzed': len(self.analysis_cache),
                 'total_analyses': self.analysis_count,
                 'total_decisions': self.decision_count,
+                'websocket_status': websocket_stats,
+                'decision_statistics': decision_stats,
+                'performance_metrics': {
+                    'market_volatility': self.market_volatility,
+                    'interval_multiplier': self.interval_multiplier,
+                    'error_count': self.error_count,
+                    'cache_ttl': self.cache_ttl
+                },
                 'recent_analyses': {
                     symbol: {
                         'timestamp': analysis.get('timestamp'),
-                        'market_condition': analysis.get('market_condition', {}).get('condition'),
+                        'market_regime': analysis.get('market_condition', {}).get('regime'),
                         'ai_confidence': analysis.get('ai_signals', {}).get('confidence'),
-                        'recommended_strategy': analysis.get('recommended_strategy')
+                        'recommended_strategy': analysis.get('recommended_strategy'),
+                        'data_quality': analysis.get('data_quality', 0)
                     }
                     for symbol, analysis in self.analysis_cache.items()
-                },
-                'cache_status': {
-                    'live_data_cache_size': len(self.live_data_cache),
-                    'analysis_cache_size': len(self.analysis_cache),
-                    'decision_cooldowns': len(self.recent_decisions)
                 }
             }
             
         except Exception as e:
-            logger.error(f"❌ Live status hatası: {e}")
+            logger.error(f"❌ Enhanced live status error: {e}")
             return {'status': 'ERROR', 'error': str(e)}
     
-    def _calculate_spread_pct(self, market_data: Dict) -> float:
-        """Spread yüzdesini hesapla"""
+    async def _calculate_trading_costs(self, symbol: str, price: float, market_condition: Dict) -> Dict[str, Any]:
+        """Calculate trading costs including fees, slippage, and funding"""
         try:
-            bid = market_data.get('bid', 0)
-            ask = market_data.get('ask', 0)
-            if bid > 0 and ask > 0:
-                return ((ask - bid) / bid) * 100
-            return 0.0
-        except:
-            return 0.0
+            # Base trading fee (0.1% for spot trading)
+            trading_fee = 0.001
+            
+            # Dynamic slippage based on market conditions
+            volatility = market_condition.get('volatility', 0.5)
+            volume = market_condition.get('volume', 1000000)  # Default volume
+            
+            # Slippage increases with volatility and decreases with volume
+            base_slippage = 0.0005  # 0.05% base slippage
+            volatility_multiplier = 1 + (volatility * 2)  # 1x to 3x based on volatility
+            volume_multiplier = max(0.5, min(1.5, 1000000 / volume))  # 0.5x to 1.5x based on volume
+            
+            slippage = base_slippage * volatility_multiplier * volume_multiplier
+            
+            # Funding fee (for perpetual futures)
+            funding_fee = 0.0001  # 0.01% per 8 hours (simplified)
+            
+            # Total costs
+            total_cost_pct = trading_fee + slippage + funding_fee
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage': slippage,
+                'funding_fee': funding_fee,
+                'total_cost_pct': total_cost_pct,
+                'volatility_multiplier': volatility_multiplier,
+                'volume_multiplier': volume_multiplier
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Trading costs calculation error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage': 0.0005,
+                'funding_fee': 0.0001,
+                'total_cost_pct': 0.0016,
+                'volatility_multiplier': 1.0,
+                'volume_multiplier': 1.0
+            }

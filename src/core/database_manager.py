@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 from loguru import logger
+import sqlite3
 
 
 class DatabaseManager:
@@ -23,6 +24,8 @@ class DatabaseManager:
         self.config = db_config
         self.db_path = Path(db_config.get('path', 'data/trading_bot.db'))
         self.connection = None
+        self.connection_pool = []
+        self.max_connections = db_config.get('pool_size', 10)
         
         # Create data directory if it doesn't exist
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,21 +37,66 @@ class DatabaseManager:
         try:
             logger.info("💾 Initializing database...")
             
-            # Enable WAL mode for better concurrency
-            self.connection = await aiosqlite.connect(str(self.db_path))
-            await self.connection.execute("PRAGMA journal_mode=WAL")
-            await self.connection.execute("PRAGMA synchronous=NORMAL")
-            await self.connection.execute("PRAGMA temp_store=MEMORY")
-            await self.connection.execute("PRAGMA mmap_size=268435456")  # 256MB
+            # Initialize connection pool
+            await self._initialize_connection_pool()
             
             # Create tables
             await self._create_tables()
+            
+            # Create indexes for better performance
+            await self._create_indexes()
             
             logger.success("✅ Database initialized successfully")
             
         except Exception as e:
             logger.error(f"❌ Database initialization error: {e}")
             raise
+    
+    async def _initialize_connection_pool(self):
+        """Connection pool başlat"""
+        try:
+            # Create main connection
+            self.connection = await aiosqlite.connect(str(self.db_path))
+            
+            # Configure for better performance
+            await self.connection.execute("PRAGMA journal_mode=WAL")
+            await self.connection.execute("PRAGMA synchronous=NORMAL")
+            await self.connection.execute("PRAGMA temp_store=MEMORY")
+            await self.connection.execute("PRAGMA mmap_size=268435456")  # 256MB
+            await self.connection.execute("PRAGMA cache_size=10000")
+            await self.connection.execute("PRAGMA page_size=4096")
+            
+            # Create additional connections for pool
+            for i in range(self.max_connections - 1):
+                conn = await aiosqlite.connect(str(self.db_path))
+                await conn.execute("PRAGMA journal_mode=WAL")
+                await conn.execute("PRAGMA synchronous=NORMAL")
+                await conn.execute("PRAGMA temp_store=MEMORY")
+                self.connection_pool.append(conn)
+            
+            logger.info(f"✅ Connection pool initialized with {self.max_connections} connections")
+            
+        except Exception as e:
+            logger.error(f"❌ Connection pool initialization error: {e}")
+            raise
+    
+    async def _get_connection(self):
+        """Connection pool'dan connection al"""
+        if self.connection_pool:
+            return self.connection_pool.pop()
+        else:
+            # Create new connection if pool is empty
+            conn = await aiosqlite.connect(str(self.db_path))
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            return conn
+    
+    async def _return_connection(self, conn):
+        """Connection'ı pool'a geri ver"""
+        if len(self.connection_pool) < self.max_connections:
+            self.connection_pool.append(conn)
+        else:
+            await conn.close()
     
     async def _create_tables(self):
         """Veritabanı tablolarını oluştur"""
@@ -70,9 +118,12 @@ class DatabaseManager:
                     confidence REAL,
                     exchange TEXT,
                     order_id TEXT,
+                    leverage REAL DEFAULT 1.0,
+                    margin_required REAL DEFAULT 0.0,
                     opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     closed_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
@@ -101,12 +152,10 @@ class DatabaseManager:
                     symbol TEXT NOT NULL,
                     signal_type TEXT NOT NULL,
                     confidence REAL NOT NULL,
-                    strength REAL NOT NULL,
-                    source TEXT NOT NULL,
-                    reason TEXT,
+                    strategy TEXT,
                     price REAL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    metadata TEXT
                 )
             """)
             
@@ -117,49 +166,88 @@ class DatabaseManager:
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
                     size REAL NOT NULL,
-                    price REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    exit_price REAL,
                     pnl REAL DEFAULT 0,
+                    fees REAL DEFAULT 0,
                     strategy TEXT,
                     confidence REAL,
-                    exchange TEXT,
-                    order_id TEXT,
-                    position_id INTEGER,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (position_id) REFERENCES positions (id)
+                    entry_time TIMESTAMP NOT NULL,
+                    exit_time TIMESTAMP,
+                    duration_seconds INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Performance stats table
+            # Performance metrics table
             await self.connection.execute("""
-                CREATE TABLE IF NOT EXISTS performance_stats (
+                CREATE TABLE IF NOT EXISTS performance_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date DATE NOT NULL,
                     total_trades INTEGER DEFAULT 0,
                     winning_trades INTEGER DEFAULT 0,
                     losing_trades INTEGER DEFAULT 0,
-                    total_pnl REAL DEFAULT 0,
                     win_rate REAL DEFAULT 0,
-                    profit_factor REAL DEFAULT 0,
+                    total_pnl REAL DEFAULT 0,
                     max_drawdown REAL DEFAULT 0,
-                    portfolio_value REAL DEFAULT 0,
+                    sharpe_ratio REAL DEFAULT 0,
+                    profit_factor REAL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(date)
                 )
             """)
             
-            # Create indexes for better performance
-            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol)")
-            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)")
-            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, timestamp)")
-            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_symbol_time ON signals(symbol, timestamp)")
-            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol_time ON trades(symbol, timestamp)")
+            # System logs table
+            await self.connection.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    module TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    metadata TEXT
+                )
+            """)
             
             await self.connection.commit()
-            logger.info("✅ Database tables created/verified")
+            logger.success("✅ Database tables created successfully")
             
         except Exception as e:
             logger.error(f"❌ Table creation error: {e}")
+            raise
+    
+    async def _create_indexes(self):
+        """Performans için indexler oluştur"""
+        try:
+            # Positions indexes
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_strategy ON positions(strategy)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions(opened_at)")
+            
+            # Market data indexes
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_symbol ON market_data(symbol)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_timestamp ON market_data(timestamp)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_market_data_timeframe ON market_data(timeframe)")
+            
+            # Signals indexes
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type)")
+            
+            # Trades indexes
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_trades_entry_time ON trades(entry_time)")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy)")
+            
+            # Performance metrics indexes
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_performance_date ON performance_metrics(date)")
+            
+            await self.connection.commit()
+            logger.success("✅ Database indexes created successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Index creation error: {e}")
             raise
     
     async def save_position(self, position_data: Dict[str, Any]) -> int:

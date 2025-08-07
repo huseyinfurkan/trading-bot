@@ -45,85 +45,83 @@ class RiskManager:
         
         logger.info("⚖️ Risk Manager initialized")
     
-    async def calculate_position_size(self, symbol: str = None, entry_price: float = None,
-                                    stop_loss: float = None, confidence: float = None,
-                                    strategy: str = None, action: Dict[str, Any] = None,
+    async def calculate_position_size(self, symbol: str, entry_price: float, stop_loss: float, 
+                                    confidence: float = 0.5, strategy: str = None, 
                                     current_price: float = None, account_balance: float = None) -> Dict[str, Any]:
-        """Pozisyon boyutunu hesapla"""
+        """Enhanced position size calculation with dynamic correlation and costs"""
         try:
-            # 1. Risk check - position limit
-            if self.open_positions_count >= self.max_open_positions:
-                return {
-                    'allowed': False,
-                    'reason': f'Maximum position limit reached: {self.max_open_positions}',
-                    'size': 0,
-                    'risk_amount': 0
-                }
+            # Get current account balance
+            if account_balance is None:
+                balance_info = await self.get_account_balance()
+                account_balance = balance_info.get('total_balance', 10000)
             
-            # 2. Correlation check
-            correlation_check = await self._check_correlation(symbol)
+            # Get current price if not provided
+            if current_price is None:
+                current_price = entry_price
+            
+            # Calculate risk amount
+            risk_amount = account_balance * self.max_position_risk
+            
+            # Calculate position risk (entry to stop loss)
+            position_risk_pct = abs(entry_price - stop_loss) / entry_price
+            
+            # Calculate base position size
+            base_position_size = risk_amount / (account_balance * position_risk_pct)
+            
+            # Apply confidence multiplier
+            confidence_multiplier = min(confidence * 1.5, 1.0)  # Max 1.0
+            adjusted_position_size = base_position_size * confidence_multiplier
+            
+            # Apply strategy-specific adjustments
+            strategy_multiplier = self._get_strategy_risk_multiplier(strategy)
+            adjusted_position_size *= strategy_multiplier
+            
+            # Check correlation limits
+            correlation_check = await self._check_correlation_limits(symbol, adjusted_position_size)
             if not correlation_check['allowed']:
                 return {
                     'allowed': False,
-                    'reason': correlation_check['reason'],
+                    'reason': f"Correlation limit exceeded: {correlation_check['reason']}",
                     'size': 0,
                     'risk_amount': 0
                 }
             
-            # 3. Daily loss check
-            daily_loss_check = await self._check_daily_loss()
-            if not daily_loss_check['allowed']:
+            # Calculate trading costs
+            trading_costs = await self._calculate_trading_costs(symbol, adjusted_position_size, entry_price)
+            
+            # Apply cost adjustment
+            cost_adjusted_size = adjusted_position_size * (1 - trading_costs['total_cost_pct'])
+            
+            # Check position limits
+            position_check = await self._check_position_limits(symbol, cost_adjusted_size, entry_price)
+            if not position_check['allowed']:
                 return {
                     'allowed': False,
-                    'reason': daily_loss_check['reason'],
+                    'reason': position_check['reason'],
                     'size': 0,
                     'risk_amount': 0
                 }
             
-            # 4. Calculate risk amount
-            risk_amount = self._calculate_risk_amount(confidence, strategy)
-            
-            # 5. Calculate position size based on stop loss
-            if stop_loss <= 0 or entry_price <= 0:
-                return {
-                    'allowed': False,
-                    'reason': 'Invalid entry price or stop loss',
-                    'size': 0,
-                    'risk_amount': 0
-                }
-            
-            # Risk per unit
-            risk_per_unit = abs(entry_price - stop_loss)
-            
-            # Position size calculation
-            if risk_per_unit > 0:
-                position_size = risk_amount / risk_per_unit
-            else:
-                position_size = 0
-            
-            # Apply size limits
-            position_size = max(self.min_position_size / entry_price, position_size)
-            position_size = min(self.max_position_size / entry_price, position_size)
-            
-            # Position value check
-            position_value = position_size * entry_price
+            # Final position size
+            final_position_size = min(cost_adjusted_size, position_check['max_allowed_size'])
             
             return {
                 'allowed': True,
-                'reason': 'Risk assessment passed',
-                'size': position_size,
+                'size': final_position_size,
                 'risk_amount': risk_amount,
-                'position_value': position_value,
-                'risk_per_trade': risk_amount / self.portfolio_value,
-                'stop_loss': stop_loss,
-                'leverage': 1.0  # Default no leverage
+                'confidence_multiplier': confidence_multiplier,
+                'strategy_multiplier': strategy_multiplier,
+                'trading_costs': trading_costs,
+                'correlation_check': correlation_check,
+                'position_check': position_check,
+                'leverage_used': 1.0  # Default leverage
             }
             
         except Exception as e:
             logger.error(f"❌ Position size calculation error: {e}")
             return {
                 'allowed': False,
-                'reason': f'Calculation error: {e}',
+                'reason': f"Calculation error: {str(e)}",
                 'size': 0,
                 'risk_amount': 0
             }
@@ -176,6 +174,180 @@ class RiskManager:
             }
     
 
+    
+    async def _check_correlation_limits(self, symbol: str, position_size: float) -> Dict[str, Any]:
+        """Enhanced correlation check with dynamic calculation"""
+        try:
+            # Get current open positions
+            open_positions = await self.get_open_positions()
+            
+            if not open_positions:
+                return {'allowed': True, 'reason': 'No existing positions'}
+            
+            # Calculate correlation with existing positions
+            correlations = []
+            total_correlated_exposure = 0
+            
+            for position in open_positions:
+                pos_symbol = position.get('symbol')
+                if pos_symbol != symbol:
+                    # Calculate correlation between symbols
+                    correlation = await self._calculate_symbol_correlation(symbol, pos_symbol)
+                    correlations.append(correlation)
+                    
+                    # If correlation is high, add to correlated exposure
+                    if correlation > self.correlation_threshold:
+                        pos_value = position.get('size', 0) * position.get('entry_price', 0)
+                        total_correlated_exposure += pos_value
+            
+            # Check if new position would exceed correlation limits
+            new_position_value = position_size * self.get_current_price(symbol)
+            total_exposure = total_correlated_exposure + new_position_value
+            
+            # Calculate portfolio correlation risk
+            avg_correlation = np.mean(correlations) if correlations else 0
+            correlation_risk = avg_correlation * (total_exposure / self.get_account_balance())
+            
+            if correlation_risk > self.max_portfolio_risk:
+                return {
+                    'allowed': False,
+                    'reason': f"Correlation risk too high: {correlation_risk:.2%} > {self.max_portfolio_risk:.2%}"
+                }
+            
+            return {
+                'allowed': True,
+                'reason': f"Correlation check passed: {correlation_risk:.2%}",
+                'correlation_risk': correlation_risk,
+                'avg_correlation': avg_correlation
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Correlation check error: {e}")
+            return {'allowed': True, 'reason': f'Correlation check error: {str(e)}'}
+    
+    async def _calculate_symbol_correlation(self, symbol1: str, symbol2: str) -> float:
+        """Calculate correlation between two symbols using historical data"""
+        try:
+            # Get historical data for both symbols
+            data1 = await self.get_historical_data(symbol1, '1h', limit=100)
+            data2 = await self.get_historical_data(symbol2, '1h', limit=100)
+            
+            if not data1 or not data2:
+                return 0.5  # Default correlation if no data
+            
+            # Calculate returns
+            returns1 = data1['close'].pct_change().dropna()
+            returns2 = data2['close'].pct_change().dropna()
+            
+            # Align data
+            min_length = min(len(returns1), len(returns2))
+            returns1 = returns1.tail(min_length)
+            returns2 = returns2.tail(min_length)
+            
+            # Calculate correlation
+            correlation = returns1.corr(returns2)
+            
+            return abs(correlation) if not np.isnan(correlation) else 0.5
+            
+        except Exception as e:
+            logger.error(f"❌ Correlation calculation error: {e}")
+            return 0.5  # Default correlation
+    
+    async def _calculate_trading_costs(self, symbol: str, position_size: float, price: float) -> Dict[str, Any]:
+        """Calculate trading costs including fees, slippage, and funding"""
+        try:
+            position_value = position_size * price
+            
+            # Trading fees (typically 0.1% for spot trading)
+            trading_fee = position_value * 0.001
+            
+            # Slippage estimation (0.05% for liquid pairs)
+            slippage = position_value * 0.0005
+            
+            # Funding fees (for perpetual futures, 0.01% per 8 hours)
+            funding_fee = position_value * 0.0001  # Simplified
+            
+            # Total costs
+            total_cost = trading_fee + slippage + funding_fee
+            total_cost_pct = total_cost / position_value
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage': slippage,
+                'funding_fee': funding_fee,
+                'total_cost': total_cost,
+                'total_cost_pct': total_cost_pct
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Trading cost calculation error: {e}")
+            return {
+                'trading_fee': 0,
+                'slippage': 0,
+                'funding_fee': 0,
+                'total_cost': 0,
+                'total_cost_pct': 0
+            }
+    
+    def _get_strategy_risk_multiplier(self, strategy: str) -> float:
+        """Get risk multiplier based on strategy"""
+        strategy_multipliers = {
+            'alligator_ma_momentum': 1.0,      # Standard risk
+            'bollinger_rsi_stochrsi': 0.8,     # Lower risk for mean reversion
+            'scalping': 0.6,                   # Lower risk for scalping
+            'swing_trading': 1.2,              # Higher risk for swing
+            'trend_following': 1.1,            # Slightly higher risk
+            'mean_reversion': 0.9              # Lower risk
+        }
+        
+        return strategy_multipliers.get(strategy, 1.0)
+    
+    async def _check_position_limits(self, symbol: str, position_size: float, price: float) -> Dict[str, Any]:
+        """Check position size limits"""
+        try:
+            position_value = position_size * price
+            account_balance = self.get_account_balance()
+            
+            # Check minimum position size
+            min_position_value = self.config.get('min_position_size', 10)
+            if position_value < min_position_value:
+                return {
+                    'allowed': False,
+                    'reason': f"Position too small: ${position_value:.2f} < ${min_position_value}"
+                }
+            
+            # Check maximum position size
+            max_position_value = self.config.get('max_position_size', 10000)
+            if position_value > max_position_value:
+                return {
+                    'allowed': True,
+                    'max_allowed_size': max_position_value / price,
+                    'reason': f"Position capped at ${max_position_value}"
+                }
+            
+            # Check portfolio percentage
+            portfolio_pct = position_value / account_balance
+            max_portfolio_pct = self.config.get('max_position_risk', 0.01)
+            if portfolio_pct > max_portfolio_pct:
+                max_allowed_value = account_balance * max_portfolio_pct
+                return {
+                    'allowed': True,
+                    'max_allowed_size': max_allowed_value / price,
+                    'reason': f"Position capped at {max_portfolio_pct:.1%} of portfolio"
+                }
+            
+            return {
+                'allowed': True,
+                'max_allowed_size': position_size,
+                'reason': "Position size within limits"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Position limit check error: {e}")
+            return {
+                'allowed': False,
+                'reason': f"Position limit check error: {str(e)}"
+            }
     
     async def _check_correlation(self, symbol: str) -> Dict[str, Any]:
         """Gerçek correlation kontrolü"""
@@ -549,3 +721,87 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Market condition factor error: {e}")
             return 0.9  # Slightly conservative default
+    
+    def _calculate_position_size_with_leverage(self, entry_price: float, stop_loss: float, 
+                                             risk_amount: float, account_balance: float, 
+                                             strategy: str) -> float:
+        """Leverage ve margin gereksinimlerini hesaba katarak pozisyon boyutunu hesapla"""
+        try:
+            # Get strategy-specific leverage
+            leverage = self._get_strategy_leverage(strategy)
+            
+            # Calculate risk per unit
+            risk_per_unit = abs(entry_price - stop_loss)
+            
+            # Calculate base position size (without leverage)
+            base_position_size = risk_amount / risk_per_unit
+            
+            # Apply leverage
+            leveraged_position_size = base_position_size * leverage
+            
+            # Check margin requirements
+            margin_required = leveraged_position_size / leverage
+            
+            # Ensure we don't exceed account balance
+            if account_balance and margin_required > account_balance * 0.95:  # 95% of balance
+                max_position_size = account_balance * 0.95 * leverage
+                logger.warning(f"⚠️ Position size reduced due to margin requirements")
+                return max_position_size
+            
+            return leveraged_position_size
+            
+        except Exception as e:
+            logger.error(f"❌ Leverage calculation error: {e}")
+            return 0.0
+    
+    def _get_strategy_leverage(self, strategy: str) -> float:
+        """Strateji bazında leverage değeri döndür"""
+        leverage_map = {
+            'alligator_ma_momentum': 2.0,
+            'bollinger_rsi_stochrsi': 1.8,
+            'scalping': 1.5,
+            'swing_trading': 1.2,
+            'trend_following': 1.5,
+            'mean_reversion': 1.3
+        }
+        return leverage_map.get(strategy, 1.0)
+
+    async def get_open_positions(self) -> List[Dict[str, Any]]:
+        """Get current open positions from database"""
+        try:
+            # This should be implemented to get positions from database
+            # For now, return empty list
+            return []
+        except Exception as e:
+            logger.error(f"❌ Get open positions error: {e}")
+            return []
+    
+    def get_current_price(self, symbol: str) -> float:
+        """Get current price for symbol"""
+        try:
+            # This should be implemented to get current price
+            # For now, return a default price
+            return 50000.0  # Default BTC price
+        except Exception as e:
+            logger.error(f"❌ Get current price error: {e}")
+            return 50000.0
+    
+    def get_account_balance(self) -> float:
+        """Get current account balance"""
+        try:
+            # This should be implemented to get actual balance
+            # For now, return default balance
+            return self.portfolio_value
+        except Exception as e:
+            logger.error(f"❌ Get account balance error: {e}")
+            return 100000.0
+    
+    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> Optional[pd.DataFrame]:
+        """Get historical data for correlation calculation"""
+        try:
+            # This should be implemented to get historical data
+            # For now, return None to use default correlation
+            return None
+        except Exception as e:
+            logger.error(f"❌ Get historical data error: {e}")
+            return None

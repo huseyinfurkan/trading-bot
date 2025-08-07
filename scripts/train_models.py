@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AI Model Training Script
-ML modellerini eğitir ve kaydeder
+AI Model Training Script - CCXT Version
+ML modellerini CCXT ile eğitir ve kaydeder
 """
 
 import asyncio
@@ -22,13 +22,13 @@ from src.core.config_manager import ConfigManager
 
 
 class ModelTrainer:
-    """Model eğitim yöneticisi"""
+    """CCXT-based Model eğitim yöneticisi"""
     
     def __init__(self):
-        # Use CCXT-compatible symbols directly
+        # CCXT-compatible symbols
         self.symbols = [
-            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 
-            'SOLUSDT', 'DOTUSDT', 'MATICUSDT', 'LINKUSDT'
+            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 
+            'SOL/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT'
         ]
         
         # Initialize CCXT exchange manager
@@ -42,7 +42,7 @@ class ModelTrainer:
         self.data_dir.mkdir(parents=True, exist_ok=True)
     
     async def initialize(self):
-        """Initialize exchange manager and config"""
+        """Initialize CCXT exchange manager and config"""
         try:
             logger.info("🔧 Initializing CCXT exchange manager...")
             
@@ -51,11 +51,11 @@ class ModelTrainer:
             self.config_manager = ConfigManager(str(config_path))
             config = await self.config_manager.load_config()
             
-            # Initialize exchange manager
+            # Initialize exchange manager with CCXT
             exchanges_config = config.get('exchanges', {
                 'bybit': {
                     'enabled': True,
-                    'testnet': False,
+                    'testnet': True,  # Use testnet for training
                     'api_key': '',
                     'api_secret': '',
                     'params': {}
@@ -85,7 +85,7 @@ class ModelTrainer:
             else:
                 start_date = end_date - timedelta(days=180)  # Default 6 months
             
-            # Get historical data from exchange
+            # Get historical data from CCXT exchange
             data = await self.exchange_manager.get_historical_data(
                 symbol=symbol,
                 timeframe='1h',
@@ -97,9 +97,14 @@ class ModelTrainer:
                 logger.warning(f"⚠️ {symbol} için yeterli veri bulunamadı")
                 return pd.DataFrame()
             
-            # Data is already in correct format from CCXT
-            df = data.copy()
-            df.reset_index(inplace=True)
+            # Convert to DataFrame if needed
+            if isinstance(data, dict) and 'dataframe' in data:
+                df = data['dataframe']
+            elif isinstance(data, pd.DataFrame):
+                df = data.copy()
+            else:
+                logger.error(f"❌ Unexpected data format for {symbol}")
+                return pd.DataFrame()
             
             # Ensure required columns
             required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -192,7 +197,7 @@ class ModelTrainer:
                 return pd.DataFrame()
             
             # Save processed data
-            output_file = self.data_dir / f"{symbol.replace('-', '_')}_features.csv"
+            output_file = self.data_dir / f"{symbol.replace('/', '_')}_features.csv"
             features_df.to_csv(output_file, index=False)
             
             logger.info(f"✅ {symbol}: {len(features_df)} özellik hazırlandı")
@@ -284,16 +289,16 @@ class ModelTrainer:
             best_score = results[best_model_type]['f1_score']
             
             # Save models and scaler
-            crypto_symbol = self.crypto_mapping.get(symbol, symbol.replace('-', '/'))
+            symbol_clean = symbol.replace('/', '_')
             
-            model_file = self.model_dir / f"{crypto_symbol.replace('/', '_')}_model.pkl"
-            scaler_file = self.model_dir / f"{crypto_symbol.replace('/', '_')}_scaler.pkl"
+            model_file = self.model_dir / f"{symbol_clean}_model.pkl"
+            scaler_file = self.model_dir / f"{symbol_clean}_scaler.pkl"
             
             joblib.dump(best_model, model_file)
             joblib.dump(scaler, scaler_file)
             
             # Save feature columns
-            feature_file = self.model_dir / f"{crypto_symbol.replace('/', '_')}_features.txt"
+            feature_file = self.model_dir / f"{symbol_clean}_features.txt"
             with open(feature_file, 'w') as f:
                 f.write('\n'.join(feature_cols))
             
@@ -301,7 +306,6 @@ class ModelTrainer:
             
             return {
                 'symbol': symbol,
-                'crypto_symbol': crypto_symbol,
                 'best_model_type': best_model_type,
                 'best_f1_score': best_score,
                 'gradient_boosting': results['gradient_boosting'],
@@ -408,11 +412,11 @@ class ModelTrainer:
 
 async def main():
     """Ana eğitim fonksiyonu"""
-    logger.info("🤖 AI Model Training Script")
+    logger.info("🤖 AI Model Training Script - CCXT Version")
     logger.info("=" * 50)
     
     trainer = ModelTrainer()
-    await trainer.initialize() # Call the new initialize method
+    await trainer.initialize()
     results = await trainer.train_all_models()
     
     if 'error' not in results:

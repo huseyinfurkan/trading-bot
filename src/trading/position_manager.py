@@ -35,27 +35,67 @@ class PositionManager:
     
     async def open_position(self, symbol: str, action: Dict[str, Any], 
                           confidence: float, strategy: str) -> Optional[Dict[str, Any]]:
-        """Yeni pozisyon aç"""
+        """Enhanced position opening with trading costs and dynamic management"""
         try:
             async with self.position_update_lock:
                 logger.info(f"🔓 {symbol} pozisyon açılıyor: {action['action']} - Strateji: {strategy}")
                 
-                # Entry price
+                # Entry price validation
                 entry_price = action.get('entry_price')
-                if not entry_price:
+                if not entry_price or entry_price <= 0:
                     market_data = await self.exchange_manager.get_market_data(symbol)
                     if not market_data:
                         logger.error(f"❌ {symbol} market data alınamadı")
                         return None
                     entry_price = market_data.get('current_price', market_data.get('close', 0))
+                    if not entry_price or entry_price <= 0:
+                        logger.error(f"❌ {symbol} geçerli entry price bulunamadı")
+                        return None
                 
-                # Position size calculation
+                # Calculate trading costs
+                trading_costs = await self._calculate_trading_costs(symbol, entry_price, action)
+                
+                # Adjust entry price for slippage
+                slippage = trading_costs['slippage']
+                if action['action'] == 'BUY':
+                    adjusted_entry_price = entry_price * (1 + slippage)
+                else:  # SELL
+                    adjusted_entry_price = entry_price * (1 - slippage)
+                
+                # Stop loss validation
+                stop_loss = action.get('stop_loss')
+                if not stop_loss or stop_loss <= 0:
+                    # Calculate default stop loss based on strategy
+                    if action['action'] == 'BUY':
+                        stop_loss = adjusted_entry_price * 0.97  # 3% stop loss for long
+                    else:
+                        stop_loss = adjusted_entry_price * 1.03  # 3% stop loss for short
+                
+                # Validate stop loss direction
+                if action['action'] == 'BUY' and stop_loss >= adjusted_entry_price:
+                    logger.error(f"❌ {symbol} long pozisyon için stop loss entry price'dan yüksek olamaz")
+                    return None
+                elif action['action'] == 'SELL' and stop_loss <= adjusted_entry_price:
+                    logger.error(f"❌ {symbol} short pozisyon için stop loss entry price'dan düşük olamaz")
+                    return None
+                
+                # Get account balance for position sizing
+                try:
+                    balance = await self.exchange_manager.get_balance()
+                    account_balance = balance.get('USDT', 0) if balance else 10000  # Default fallback
+                except Exception as e:
+                    logger.warning(f"⚠️ Balance check failed: {e}, using default")
+                    account_balance = 10000
+                
+                # Position size calculation with proper validation
                 size_result = await self.risk_manager.calculate_position_size(
                     symbol=symbol,
-                    entry_price=entry_price,
-                    stop_loss=action.get('stop_loss', entry_price * 0.97),
+                    entry_price=adjusted_entry_price,
+                    stop_loss=stop_loss,
                     confidence=confidence,
-                    strategy=strategy
+                    strategy=strategy,
+                    current_price=adjusted_entry_price,
+                    account_balance=account_balance
                 )
                 
                 if not size_result.get('allowed', False):
@@ -64,62 +104,105 @@ class PositionManager:
                 
                 position_size = size_result['size']
                 
-                # Create order
+                # Adjust position size for trading costs
+                total_costs = trading_costs['total_cost_pct']
+                adjusted_position_size = position_size * (1 - total_costs)
+                
+                # Additional position size validation
+                if adjusted_position_size <= 0:
+                    logger.error(f"❌ {symbol} pozisyon boyutu sıfır veya negatif")
+                    return None
+                
+                # Calculate take profit
+                take_profit = action.get('take_profit')
+                if not take_profit or take_profit <= 0:
+                    # Calculate default take profit based on risk/reward ratio
+                    risk_amount = abs(adjusted_entry_price - stop_loss)
+                    if action['action'] == 'BUY':
+                        take_profit = adjusted_entry_price + (risk_amount * 2)  # 2:1 reward/risk
+                    else:
+                        take_profit = adjusted_entry_price - (risk_amount * 2)
+                
+                # Validate take profit direction
+                if action['action'] == 'BUY' and take_profit <= adjusted_entry_price:
+                    logger.error(f"❌ {symbol} long pozisyon için take profit entry price'dan düşük olamaz")
+                    return None
+                elif action['action'] == 'SELL' and take_profit >= adjusted_entry_price:
+                    logger.error(f"❌ {symbol} short pozisyon için take profit entry price'dan yüksek olamaz")
+                    return None
+                
+                # Place order with enhanced logging
                 order_result = await self._place_order(
                     symbol=symbol,
                     side=action['action'],
-                    size=position_size,
-                    price=entry_price,
+                    size=adjusted_position_size,
+                    price=adjusted_entry_price,
                     order_type='MARKET'
                 )
                 
                 if not order_result:
-                    logger.error(f"❌ {symbol} order verilemedi")
+                    logger.error(f"❌ {symbol} order placement failed")
                     return None
                 
-                # Create position record
+                # Create position record with trading costs
                 position_id = await self._create_position_record(
                     symbol=symbol,
                     side=action['action'],
-                    size=position_size,
-                    entry_price=entry_price,
-                    stop_loss=action.get('stop_loss'),
-                    take_profit=action.get('take_profit'),
+                    size=adjusted_position_size,
+                    entry_price=adjusted_entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
                     strategy=strategy,
                     confidence=confidence,
-                    order_id=order_result.get('order_id')
+                    order_id=order_result.get('id', 'unknown'),
+                    leverage=size_result.get('leverage_used', 1.0),
+                    margin_required=adjusted_position_size / size_result.get('leverage_used', 1.0),
+                    trading_costs=trading_costs
                 )
                 
-                if position_id:
-                    # Track position
-                    self.open_positions[position_id] = {
-                        'id': position_id,
-                        'symbol': symbol,
-                        'side': action['action'],
-                        'size': position_size,
-                        'entry_price': entry_price,
-                        'current_price': entry_price,
-                        'stop_loss': action.get('stop_loss'),
-                        'take_profit': action.get('take_profit'),
-                        'strategy': strategy,
-                        'confidence': confidence,
-                        'pnl': 0,
-                        'opened_at': datetime.now(),
-                        'status': 'OPEN'
-                    }
-                    
-                    logger.success(f"✅ {symbol} pozisyon açıldı: {position_id}")
-                    
-                    return {
-                        'id': position_id,
-                        'symbol': symbol,
-                        'side': action['action'],
-                        'size': position_size,
-                        'entry_price': entry_price,
-                        'status': 'OPEN'
-                    }
+                if not position_id:
+                    logger.error(f"❌ {symbol} position record creation failed")
+                    return None
                 
-                return None
+                # Initialize trailing stop if enabled
+                trailing_enabled = action.get('trailing_stop_enabled', False)
+                if trailing_enabled:
+                    trailing_distance = action.get('trailing_stop_distance', 0.02)
+                    await self.enable_trailing_stop(position_id, trailing_distance)
+                
+                # Store position in memory
+                self.open_positions[position_id] = {
+                    'symbol': symbol,
+                    'side': action['action'],
+                    'size': adjusted_position_size,
+                    'entry_price': adjusted_entry_price,
+                    'original_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'strategy': strategy,
+                    'confidence': confidence,
+                    'order_id': order_result.get('id'),
+                    'opened_at': datetime.now(),
+                    'trading_costs': trading_costs,
+                    'leverage': size_result.get('leverage_used', 1.0),
+                    'trailing_stop_enabled': trailing_enabled,
+                    'trailing_stop_distance': action.get('trailing_stop_distance', 0.02)
+                }
+                
+                logger.success(f"✅ {symbol} pozisyon açıldı: ID {position_id}, Boyut: {adjusted_position_size:.6f}, Fiyat: ${adjusted_entry_price:.4f}")
+                
+                return {
+                    'position_id': position_id,
+                    'symbol': symbol,
+                    'side': action['action'],
+                    'size': adjusted_position_size,
+                    'entry_price': adjusted_entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'order_id': order_result.get('id'),
+                    'trading_costs': trading_costs,
+                    'leverage': size_result.get('leverage_used', 1.0)
+                }
                 
         except Exception as e:
             logger.error(f"❌ {symbol} pozisyon açma hatası: {e}")
@@ -430,7 +513,9 @@ class PositionManager:
     async def _create_position_record(self, symbol: str, side: str, size: float,
                                     entry_price: float, stop_loss: Optional[float],
                                     take_profit: Optional[float], strategy: str,
-                                    confidence: float, order_id: str) -> Optional[int]:
+                                    confidence: float, order_id: str,
+                                    leverage: float = 1.0, margin_required: float = 0.0,
+                                    trading_costs: Optional[Dict] = None) -> Optional[int]:
         """Pozisyon kaydı oluştur"""
         try:
             position_data = {
@@ -443,7 +528,10 @@ class PositionManager:
                 'strategy': strategy,
                 'confidence': confidence,
                 'exchange': 'binance',  # Default
-                'order_id': order_id
+                'order_id': order_id,
+                'leverage': leverage,
+                'margin_required': margin_required,
+                'trading_costs': trading_costs
             }
             
             position_id = await self.db_manager.save_position(position_data)
@@ -472,3 +560,42 @@ class PositionManager:
             
         except Exception as e:
             logger.error(f"❌ Position Manager close error: {e}")
+    
+    async def _calculate_trading_costs(self, symbol: str, price: float, action: Dict) -> Dict[str, Any]:
+        """Calculate trading costs including fees, slippage, and funding"""
+        try:
+            # Base trading fee (0.1% for spot trading)
+            trading_fee = 0.001
+            
+            # Dynamic slippage based on market conditions
+            market_data = await self.exchange_manager.get_market_data(symbol)
+            volume = market_data.get('volume', 1000000) if market_data else 1000000
+            
+            # Slippage decreases with volume
+            base_slippage = 0.0005  # 0.05% base slippage
+            volume_multiplier = max(0.5, min(1.5, 1000000 / volume))
+            slippage = base_slippage * volume_multiplier
+            
+            # Funding fee (for perpetual futures)
+            funding_fee = 0.0001  # 0.01% per 8 hours (simplified)
+            
+            # Total costs
+            total_cost_pct = trading_fee + slippage + funding_fee
+            
+            return {
+                'trading_fee': trading_fee,
+                'slippage': slippage,
+                'funding_fee': funding_fee,
+                'total_cost_pct': total_cost_pct,
+                'volume_multiplier': volume_multiplier
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Trading costs calculation error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage': 0.0005,
+                'funding_fee': 0.0001,
+                'total_cost_pct': 0.0016,
+                'volume_multiplier': 1.0
+            }
