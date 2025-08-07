@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 from loguru import logger
 from src.core.risk_manager import RiskManager
 from pathlib import Path
+import asyncio
+from skopt import gp_minimize
+from skopt.space import Real, Integer
+from skopt.utils import use_named_args
 
 
 class AdaptiveStrategyEngine:
@@ -326,137 +330,149 @@ class AdaptiveStrategyEngine:
             logger.error(f"❌ Strategy parameters update error: {e}")
     
     async def optimize_parameters(self, strategy_name: str, historical_data: pd.DataFrame) -> Dict[str, Any]:
-        """Enhanced parameter optimization with comprehensive search"""
+        """Optimize strategy parameters using Bayesian optimization"""
         try:
-            logger.info(f"🔧 Starting comprehensive parameter optimization for {strategy_name}")
+            logger.info(f"🔧 Starting Bayesian parameter optimization for {strategy_name}")
             
-            # Get optimization ranges from config
             optimization_ranges = self.adaptive_params[strategy_name].get('optimization_ranges', {})
-            
             if not optimization_ranges:
                 logger.warning(f"⚠️ No optimization ranges defined for {strategy_name}")
                 return self.adaptive_params[strategy_name]
             
-            # Generate parameter combinations with smart sampling
-            param_combinations = self._generate_smart_combinations(optimization_ranges)
+            # Use Bayesian optimization instead of grid search
+            best_params = await self._bayesian_optimization(strategy_name, historical_data, optimization_ranges)
             
-            # Limit combinations for performance
+            if best_params:
+                logger.info(f"🏆 Best parameters found with Bayesian optimization")
+                logger.info(f"📋 Optimized parameters: {best_params}")
+                await self.update_strategy_parameters(strategy_name, best_params)
+                await self._save_optimization_results(strategy_name, best_params, {'method': 'bayesian_optimization'})
+            
+            return self.adaptive_params[strategy_name]
+            
+        except Exception as e:
+            logger.error(f"❌ Bayesian parameter optimization error for {strategy_name}: {e}")
+            return self.adaptive_params[strategy_name]
+    
+    async def _bayesian_optimization(self, strategy_name: str, historical_data: pd.DataFrame, 
+                                   optimization_ranges: Dict) -> Optional[Dict[str, Any]]:
+        """Perform Bayesian optimization for parameter tuning"""
+        try:
+            from skopt import gp_minimize
+            from skopt.space import Real, Integer
+            from skopt.utils import use_named_args
+            import numpy as np
+            
+            # Define optimization space
+            space = []
+            param_names = []
+            
+            for param_name, param_range in optimization_ranges.items():
+                if isinstance(param_range[0], int):
+                    # Integer parameter
+                    space.append(Integer(param_range[0], param_range[-1], name=param_name))
+                else:
+                    # Float parameter
+                    space.append(Real(param_range[0], param_range[-1], name=param_name))
+                param_names.append(param_name)
+            
+            # Define objective function
+            @use_named_args(space)
+            def objective(**params):
+                try:
+                    # Run backtest with these parameters
+                    result = asyncio.run(self._evaluate_parameters_comprehensive(
+                        strategy_name, historical_data, params
+                    ))
+                    
+                    if result and result.get('score', -np.inf) > -np.inf:
+                        # Return negative score (minimization problem)
+                        return -result['score']
+                    else:
+                        return 0.0  # Penalty for failed evaluation
+                        
+                except Exception as e:
+                    logger.debug(f"⚠️ Parameter evaluation failed: {e}")
+                    return 0.0  # Penalty for errors
+            
+            # Run Bayesian optimization
+            logger.info(f"🔍 Running Bayesian optimization with {len(space)} parameters")
+            
+            # Use more iterations for better optimization
+            n_calls = min(50, len(space) * 10)  # Adaptive number of calls
+            
+            result = gp_minimize(
+                func=objective,
+                dimensions=space,
+                n_calls=n_calls,
+                random_state=42,
+                acq_func='EI',  # Expected Improvement
+                n_initial_points=10
+            )
+            
+            # Extract best parameters
+            best_params = {}
+            for i, param_name in enumerate(param_names):
+                best_params[param_name] = result.x[i]
+            
+            logger.info(f"✅ Bayesian optimization completed in {result.nit} iterations")
+            logger.info(f"🏆 Best score: {-result.fun:.4f}")
+            
+            return best_params
+            
+        except ImportError:
+            logger.warning("⚠️ scikit-optimize not available, falling back to grid search")
+            return await self._fallback_grid_search(strategy_name, historical_data, optimization_ranges)
+        except Exception as e:
+            logger.error(f"❌ Bayesian optimization error: {e}")
+            return await self._fallback_grid_search(strategy_name, historical_data, optimization_ranges)
+    
+    async def _fallback_grid_search(self, strategy_name: str, historical_data: pd.DataFrame, 
+                                   optimization_ranges: Dict) -> Optional[Dict[str, Any]]:
+        """Fallback to grid search if Bayesian optimization fails"""
+        try:
+            logger.info(f"🔄 Using fallback grid search for {strategy_name}")
+            
+            param_combinations = self._generate_smart_combinations(optimization_ranges)
             max_combinations = self.config.get('parameter_optimization', {}).get('max_combinations', 50)
             param_combinations = param_combinations[:max_combinations]
             
-            logger.info(f"🔍 Testing {len(param_combinations)} parameter combinations for {strategy_name}")
+            logger.info(f"🔍 Testing {len(param_combinations)} parameter combinations")
             
             best_params = None
             best_score = -np.inf
             best_result = None
             
-            # Test each parameter combination
             for i, params in enumerate(param_combinations):
                 try:
-                    # Run comprehensive backtest
                     result = await self._evaluate_parameters_comprehensive(strategy_name, historical_data, params)
-                    
                     if result and result.get('score', -np.inf) > best_score:
                         best_score = result['score']
                         best_params = params
                         best_result = result
                     
-                    # Log progress
                     if (i + 1) % 10 == 0:
-                        logger.info(f"📊 Optimization progress: {i + 1}/{len(param_combinations)} combinations tested")
+                        logger.info(f"📊 Grid search progress: {i + 1}/{len(param_combinations)} combinations tested")
                         
                 except Exception as e:
                     logger.error(f"❌ Parameter evaluation error: {e}")
                     continue
             
-            if best_params:
-                logger.info(f"🏆 Best parameters found with score: {best_score:.4f}")
-                logger.info(f"📋 Optimized parameters: {best_params}")
-                
-                # Update parameters in config
-                await self.update_strategy_parameters(strategy_name, best_params)
-                
-                # Save optimization results
-                await self._save_optimization_results(strategy_name, best_params, best_result)
-            
-            return self.adaptive_params[strategy_name]
+            return best_params
             
         except Exception as e:
-            logger.error(f"❌ Parameter optimization error for {strategy_name}: {e}")
-            return self.adaptive_params[strategy_name]
-    
-    def _generate_smart_combinations(self, optimization_ranges: Dict) -> List[Dict]:
-        """Generate smart parameter combinations using Latin Hypercube Sampling"""
-        try:
-            import itertools
-            
-            # Generate all combinations
-            param_names = list(optimization_ranges.keys())
-            param_values = list(optimization_ranges.values())
-            
-            combinations = []
-            for values in itertools.product(*param_values):
-                combination = dict(zip(param_names, values))
-                combinations.append(combination)
-            
-            # Smart sampling: prioritize combinations with balanced parameters
-            scored_combinations = []
-            for combo in combinations:
-                score = self._score_parameter_combination(combo)
-                scored_combinations.append((score, combo))
-            
-            # Sort by score and return top combinations
-            scored_combinations.sort(key=lambda x: x[0], reverse=True)
-            return [combo for score, combo in scored_combinations]
-            
-        except Exception as e:
-            logger.error(f"❌ Smart combinations generation error: {e}")
-            return []
-    
-    def _score_parameter_combination(self, combination: Dict[str, Any]) -> float:
-        """Score parameter combination for smart sampling"""
-        try:
-            score = 0.0
-            
-            # Prefer balanced risk-reward ratios
-            if 'profit_target' in combination and 'stop_loss' in combination:
-                risk_reward = combination['profit_target'] / combination['stop_loss']
-                if 1.5 <= risk_reward <= 3.0:
-                    score += 1.0
-                elif 1.0 <= risk_reward <= 4.0:
-                    score += 0.5
-            
-            # Prefer reasonable risk per trade
-            if 'risk_per_trade' in combination:
-                risk = combination['risk_per_trade']
-                if 0.01 <= risk <= 0.03:
-                    score += 1.0
-                elif 0.005 <= risk <= 0.05:
-                    score += 0.5
-            
-            # Prefer reasonable trailing stop distances
-            if 'trailing_stop_distance' in combination:
-                trailing = combination['trailing_stop_distance']
-                if 0.01 <= trailing <= 0.02:
-                    score += 1.0
-                elif 0.005 <= trailing <= 0.03:
-                    score += 0.5
-            
-            return score
-            
-        except Exception as e:
-            logger.error(f"❌ Parameter combination scoring error: {e}")
-            return 0.0
+            logger.error(f"❌ Fallback grid search error: {e}")
+            return None
     
     async def _evaluate_parameters_comprehensive(self, strategy_name: str, historical_data: pd.DataFrame, 
                                                params: Dict) -> Optional[Dict[str, Any]]:
-        """Comprehensive parameter evaluation with multiple metrics"""
+        """Evaluate parameters with comprehensive scoring"""
         try:
-            # Create temporary strategy with new parameters
+            # Create temporary parameters
             temp_params = self.adaptive_params[strategy_name].copy()
             temp_params.update(params)
             
-            # Run comprehensive backtest
+            # Run backtest
             result = await self.backtest_strategy(
                 strategy_name=strategy_name,
                 symbol='BTC/USDT',
@@ -475,7 +491,8 @@ class AdaptiveStrategyEngine:
             return {
                 'params': params,
                 'result': result,
-                'score': score
+                'score': score,
+                'method': 'bayesian_optimization'
             }
             
         except Exception as e:
@@ -483,7 +500,7 @@ class AdaptiveStrategyEngine:
             return None
     
     def _calculate_comprehensive_score(self, result: Dict[str, Any]) -> float:
-        """Calculate comprehensive performance score"""
+        """Calculate comprehensive score for optimization"""
         try:
             # Extract metrics
             total_return = result.get('total_return', 0)
@@ -494,11 +511,11 @@ class AdaptiveStrategyEngine:
             calmar_ratio = result.get('calmar_ratio', 0)
             total_trades = result.get('total_trades', 0)
             
-            # Market condition adjustment
-            market_volatility = self._calculate_market_volatility(result.get('historical_data', pd.DataFrame()))
+            # Get market conditions for dynamic weighting
+            market_volatility = self._analyze_market_conditions(result)
             
             # Dynamic weights based on market conditions
-            if market_volatility > 0.8:  # High volatility
+            if market_volatility > 0.8:  # High volatility market
                 weights = {
                     'total_return': 0.15,
                     'sharpe_ratio': 0.35,
@@ -507,7 +524,7 @@ class AdaptiveStrategyEngine:
                     'calmar_ratio': 0.1,
                     'max_drawdown': 0.05
                 }
-            elif market_volatility < 0.3:  # Low volatility
+            elif market_volatility < 0.3:  # Low volatility market
                 weights = {
                     'total_return': 0.35,
                     'sharpe_ratio': 0.15,
@@ -516,7 +533,7 @@ class AdaptiveStrategyEngine:
                     'calmar_ratio': 0.05,
                     'max_drawdown': 0.05
                 }
-            else:  # Normal volatility
+            else:  # Normal market
                 weights = {
                     'total_return': 0.25,
                     'sharpe_ratio': 0.25,
@@ -536,36 +553,33 @@ class AdaptiveStrategyEngine:
                 max_drawdown * weights['max_drawdown']
             )
             
-            # Apply penalties and bonuses
+            # Apply adjustments
             adjusted_score = base_score
             
-            # Penalty for insufficient trades
+            # Trade count adjustments
             if total_trades < 20:
                 adjusted_score *= 0.6
             elif total_trades < 50:
                 adjusted_score *= 0.8
             
-            # Penalty for negative returns
+            # Performance penalties/bonuses
             if total_return < 0:
                 adjusted_score *= 0.3
             
-            # Penalty for high drawdown
             if max_drawdown > 0.25:
                 adjusted_score *= 0.5
             elif max_drawdown > 0.15:
                 adjusted_score *= 0.8
             
-            # Penalty for low win rate
             if win_rate < 0.35:
                 adjusted_score *= 0.7
             elif win_rate < 0.45:
                 adjusted_score *= 0.9
             
-            # Bonus for excellent performance
+            # Performance bonuses
             if total_return > 0.3 and sharpe_ratio > 1.5 and win_rate > 0.55:
                 adjusted_score *= 1.2
             
-            # Bonus for consistent performance
             if profit_factor > 1.5 and calmar_ratio > 0.5:
                 adjusted_score *= 1.1
             
@@ -574,6 +588,29 @@ class AdaptiveStrategyEngine:
         except Exception as e:
             logger.error(f"❌ Comprehensive score calculation error: {e}")
             return -np.inf
+    
+    def _analyze_market_conditions(self, result: Dict[str, Any]) -> float:
+        """Analyze market conditions from backtest result"""
+        try:
+            trades = result.get('trades', [])
+            if not trades:
+                return 0.5
+            
+            # Calculate volatility from trade returns
+            returns = []
+            for trade in trades:
+                if 'return_pct' in trade:
+                    returns.append(trade['return_pct'])
+            
+            if returns:
+                volatility = np.std(returns)
+                return min(volatility, 1.0)
+            
+            return 0.5
+            
+        except Exception as e:
+            logger.error(f"❌ Market condition analysis error: {e}")
+            return 0.5
     
     async def _save_optimization_results(self, strategy_name: str, best_params: Dict, best_result: Dict):
         """Save optimization results to file"""

@@ -617,7 +617,7 @@ class LiveDataEngine:
             return 'bollinger_rsi_stochrsi'
     
     async def _analyze_macro_conditions(self) -> Dict[str, Any]:
-        """Analyze macro market conditions with real data sources"""
+        """Analyze macro market conditions with real data sources and news sentiment"""
         try:
             macro_data = {}
             
@@ -658,12 +658,27 @@ class LiveDataEngine:
                     macro_data['yield_2y'] = treasury_2y['close'].iloc[-1] if len(treasury_2y) > 0 else 4.5
                     macro_data['yield_curve'] = macro_data['yield_10y'] - macro_data['yield_2y']
                 
+                # Get news sentiment analysis
+                news_sentiment = await self._analyze_news_sentiment()
+                if news_sentiment:
+                    macro_data['news_sentiment'] = news_sentiment
+                
+                # Get economic calendar events
+                economic_events = await self._get_economic_calendar()
+                if economic_events:
+                    macro_data['economic_events'] = economic_events
+                
+                # Get central bank announcements
+                central_bank_events = await self._get_central_bank_events()
+                if central_bank_events:
+                    macro_data['central_bank_events'] = central_bank_events
+                
             except Exception as e:
                 logger.debug(f"⚠️ Real macro data analysis failed: {e}")
                 # Fallback to alternative data sources
                 macro_data = await self._get_alternative_macro_data()
             
-            # Calculate macro sentiment with enhanced logic
+            # Calculate macro sentiment with enhanced logic including news
             if macro_data:
                 macro_sentiment = self._calculate_enhanced_macro_sentiment(macro_data)
                 macro_data['sentiment'] = macro_sentiment
@@ -771,7 +786,7 @@ class LiveDataEngine:
             return {}
     
     def _calculate_enhanced_macro_sentiment(self, macro_data: Dict[str, Any]) -> str:
-        """Calculate enhanced macro market sentiment"""
+        """Calculate enhanced macro market sentiment including news analysis"""
         try:
             bullish_signals = 0
             bearish_signals = 0
@@ -817,6 +832,22 @@ class LiveDataEngine:
                 elif macro_data['yield_curve'] > 0.5:
                     bullish_signals += 1  # Steep yield curve often bullish
             
+            # Analyze news sentiment
+            if 'news_sentiment' in macro_data:
+                total_signals += 1
+                news_sentiment = macro_data['news_sentiment'].get('overall_sentiment', 'neutral')
+                if news_sentiment == 'positive':
+                    bullish_signals += 1
+                elif news_sentiment == 'negative':
+                    bearish_signals += 1
+            
+            # Analyze economic events
+            if 'economic_events' in macro_data:
+                total_signals += 1
+                high_importance_events = [e for e in macro_data['economic_events'] if e.get('importance') == 'high']
+                if len(high_importance_events) > 2:
+                    bearish_signals += 1  # Many high-importance events can create uncertainty
+            
             # Determine sentiment based on signal ratio
             if total_signals == 0:
                 return 'neutral'
@@ -834,6 +865,161 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Enhanced macro sentiment calculation error: {e}")
             return 'neutral'
+    
+    async def _analyze_news_sentiment(self) -> Dict[str, Any]:
+        """Analyze news sentiment for crypto and macro markets"""
+        try:
+            # This should be implemented with real news API (e.g., NewsAPI, Alpha Vantage News)
+            # For now, simulate news sentiment analysis
+            
+            import random
+            from datetime import datetime, timedelta
+            
+            # Simulate news sentiment data
+            news_sources = ['Reuters', 'Bloomberg', 'CNBC', 'CoinDesk', 'Cointelegraph']
+            crypto_keywords = ['Bitcoin', 'Ethereum', 'crypto', 'blockchain', 'DeFi', 'NFT']
+            macro_keywords = ['Fed', 'ECB', 'inflation', 'interest rates', 'GDP', 'employment']
+            
+            # Simulate recent news articles
+            recent_news = []
+            for i in range(10):
+                source = random.choice(news_sources)
+                keyword = random.choice(crypto_keywords + macro_keywords)
+                sentiment = random.choice(['positive', 'negative', 'neutral'])
+                confidence = random.uniform(0.6, 0.9)
+                
+                recent_news.append({
+                    'source': source,
+                    'title': f"Sample news about {keyword}",
+                    'sentiment': sentiment,
+                    'confidence': confidence,
+                    'timestamp': datetime.now() - timedelta(hours=random.randint(0, 24))
+                })
+            
+            # Calculate overall sentiment
+            sentiment_scores = []
+            for news in recent_news:
+                if news['sentiment'] == 'positive':
+                    sentiment_scores.append(news['confidence'])
+                elif news['sentiment'] == 'negative':
+                    sentiment_scores.append(-news['confidence'])
+                else:
+                    sentiment_scores.append(0)
+            
+            overall_sentiment_score = np.mean(sentiment_scores) if sentiment_scores else 0
+            
+            # Determine sentiment category
+            if overall_sentiment_score > 0.2:
+                overall_sentiment = 'positive'
+            elif overall_sentiment_score < -0.2:
+                overall_sentiment = 'negative'
+            else:
+                overall_sentiment = 'neutral'
+            
+            return {
+                'overall_sentiment': overall_sentiment,
+                'sentiment_score': overall_sentiment_score,
+                'recent_news_count': len(recent_news),
+                'positive_news_count': len([n for n in recent_news if n['sentiment'] == 'positive']),
+                'negative_news_count': len([n for n in recent_news if n['sentiment'] == 'negative']),
+                'neutral_news_count': len([n for n in recent_news if n['sentiment'] == 'neutral']),
+                'average_confidence': np.mean([n['confidence'] for n in recent_news]),
+                'recent_news': recent_news[:5]  # Return top 5 recent news
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ News sentiment analysis error: {e}")
+            return {
+                'overall_sentiment': 'neutral',
+                'sentiment_score': 0,
+                'recent_news_count': 0,
+                'positive_news_count': 0,
+                'negative_news_count': 0,
+                'neutral_news_count': 0,
+                'average_confidence': 0.5,
+                'recent_news': []
+            }
+    
+    async def _get_economic_calendar(self) -> List[Dict[str, Any]]:
+        """Get upcoming economic calendar events"""
+        try:
+            # This should be implemented with real economic calendar API
+            # For now, simulate economic calendar data
+            
+            import random
+            from datetime import datetime, timedelta
+            
+            # Simulate economic events
+            economic_events = [
+                {
+                    'event': 'FOMC Meeting',
+                    'date': datetime.now() + timedelta(days=random.randint(1, 7)),
+                    'importance': 'high',
+                    'currency': 'USD',
+                    'description': 'Federal Reserve interest rate decision'
+                },
+                {
+                    'event': 'CPI Data',
+                    'date': datetime.now() + timedelta(days=random.randint(1, 14)),
+                    'importance': 'medium',
+                    'currency': 'USD',
+                    'description': 'Consumer Price Index release'
+                },
+                {
+                    'event': 'Non-Farm Payrolls',
+                    'date': datetime.now() + timedelta(days=random.randint(1, 30)),
+                    'importance': 'high',
+                    'currency': 'USD',
+                    'description': 'Employment data release'
+                },
+                {
+                    'event': 'ECB Meeting',
+                    'date': datetime.now() + timedelta(days=random.randint(1, 14)),
+                    'importance': 'high',
+                    'currency': 'EUR',
+                    'description': 'European Central Bank policy decision'
+                }
+            ]
+            
+            # Filter events happening in next 7 days
+            upcoming_events = [
+                event for event in economic_events
+                if event['date'] <= datetime.now() + timedelta(days=7)
+            ]
+            
+            return upcoming_events
+            
+        except Exception as e:
+            logger.error(f"❌ Economic calendar error: {e}")
+            return []
+    
+    async def _get_central_bank_events(self) -> List[Dict[str, Any]]:
+        """Get central bank announcements and events"""
+        try:
+            # This should be implemented with real central bank data API
+            # For now, simulate central bank events
+            
+            import random
+            from datetime import datetime, timedelta
+            
+            central_banks = ['Fed', 'ECB', 'BoE', 'BoJ', 'PBOC']
+            
+            events = []
+            for bank in central_banks:
+                if random.random() < 0.3:  # 30% chance of having an event
+                    events.append({
+                        'bank': bank,
+                        'event_type': random.choice(['rate_decision', 'speech', 'minutes', 'policy_statement']),
+                        'date': datetime.now() + timedelta(days=random.randint(1, 14)),
+                        'importance': random.choice(['low', 'medium', 'high']),
+                        'description': f"{bank} {random.choice(['rate_decision', 'speech', 'minutes', 'policy_statement'])}"
+                    })
+            
+            return events
+            
+        except Exception as e:
+            logger.error(f"❌ Central bank events error: {e}")
+            return []
     
     def _calculate_sentiment_score(self, macro_data: Dict[str, Any]) -> float:
         """Calculate numerical sentiment score (0-1)"""

@@ -1,439 +1,467 @@
 #!/usr/bin/env python3
 """
-AI Model Training Script - CCXT Version
-ML modellerini CCXT ile eğitir ve kaydeder
+Model Training Script
+Uses CCXT data for training ML models
 """
 
 import asyncio
-import sys
-from pathlib import Path
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from loguru import logger
+from pathlib import Path
+import sys
+import os
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai.signal_filter import AISignalFilter
+from src.core.config_manager import ConfigManager
 from src.core.database_manager import DatabaseManager
 from src.trading.exchange_manager import ExchangeManager
-from src.core.config_manager import ConfigManager
+from src.ai.signal_filter import AISignalFilter
+from loguru import logger
 
 
 class ModelTrainer:
-    """CCXT-based Model eğitim yöneticisi"""
+    """Model trainer using CCXT data"""
     
     def __init__(self):
-        # CCXT-compatible symbols
-        self.symbols = [
-            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 
-            'SOL/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT'
-        ]
+        """Initialize model trainer"""
+        self.config_manager = ConfigManager()
+        self.config = self.config_manager.get_config()
+        self.db_manager = DatabaseManager(self.config['database'])
+        self.exchange_manager = ExchangeManager(self.config['exchanges'])
+        self.ai_signal_filter = AISignalFilter(self.config['ai'], self.db_manager, self.exchange_manager)
         
-        # Initialize CCXT exchange manager
-        self.exchange_manager = None
-        self.config_manager = None
+        # Training parameters
+        self.symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT']
+        self.timeframes = ['1h', '4h', '1d']
+        self.lookback_days = 365  # 1 year of data
+        self.min_data_points = 1000
         
-        self.model_dir = Path('models')
-        self.model_dir.mkdir(exist_ok=True)
+        # Model parameters
+        self.test_size = 0.2
+        self.random_state = 42
         
-        self.data_dir = Path('data/training')
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("🤖 Model Trainer initialized with CCXT data")
     
     async def initialize(self):
-        """Initialize CCXT exchange manager and config"""
+        """Initialize components"""
         try:
-            logger.info("🔧 Initializing CCXT exchange manager...")
-            
-            # Load config
-            config_path = Path(__file__).parent.parent / 'config' / 'config.yaml'
-            self.config_manager = ConfigManager(str(config_path))
-            config = await self.config_manager.load_config()
-            
-            # Initialize exchange manager with CCXT
-            exchanges_config = config.get('exchanges', {
-                'bybit': {
-                    'enabled': True,
-                    'testnet': True,  # Use testnet for training
-                    'api_key': '',
-                    'api_secret': '',
-                    'params': {}
-                }
-            })
-            
-            self.exchange_manager = ExchangeManager(exchanges_config)
+            await self.db_manager.initialize()
             await self.exchange_manager.initialize()
-            
-            logger.success("✅ CCXT exchange manager ready for training")
-            
+            await self.ai_signal_filter.initialize()
+            logger.info("✅ Model Trainer components initialized")
         except Exception as e:
-            logger.error(f"❌ Exchange manager initialization failed: {e}")
+            logger.error(f"❌ Initialization error: {e}")
             raise
     
-    async def download_training_data(self, symbol: str, period: str = "2y") -> pd.DataFrame:
-        """Eğitim verilerini CCXT ile indir"""
+    async def train_all_models(self):
+        """Train models for all symbols"""
         try:
-            logger.info(f"📥 {symbol} için eğitim verisi indiriliyor (CCXT)...")
+            logger.info("🚀 Starting model training for all symbols")
             
-            # Calculate date range
+            for symbol in self.symbols:
+                logger.info(f"📊 Training models for {symbol}")
+                await self.train_symbol_models(symbol)
+            
+            logger.info("✅ All models trained successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Model training error: {e}")
+    
+    async def train_symbol_models(self, symbol: str):
+        """Train models for a specific symbol"""
+        try:
+            # Get historical data using CCXT
+            historical_data = await self._get_historical_data_ccxt(symbol)
+            
+            if historical_data is None or len(historical_data) < self.min_data_points:
+                logger.warning(f"⚠️ Insufficient data for {symbol}: {len(historical_data) if historical_data is not None else 0} points")
+                return
+            
+            logger.info(f"📈 Got {len(historical_data)} data points for {symbol}")
+            
+            # Prepare features and labels
+            features, labels = await self._prepare_training_data(historical_data, symbol)
+            
+            if features is None or labels is None:
+                logger.error(f"❌ Failed to prepare training data for {symbol}")
+                return
+            
+            logger.info(f"🔧 Prepared {len(features)} training samples for {symbol}")
+            
+            # Train models
+            await self._train_models_for_symbol(symbol, features, labels)
+            
+            logger.info(f"✅ Models trained successfully for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"❌ Symbol training error for {symbol}: {e}")
+    
+    async def _get_historical_data_ccxt(self, symbol: str) -> pd.DataFrame:
+        """Get historical data using CCXT"""
+        try:
+            # Calculate start date
             end_date = datetime.now()
-            if period == "2y":
-                start_date = end_date - timedelta(days=730)  # 2 years
-            elif period == "1y":
-                start_date = end_date - timedelta(days=365)  # 1 year
-            else:
-                start_date = end_date - timedelta(days=180)  # Default 6 months
+            start_date = end_date - timedelta(days=self.lookback_days)
             
-            # Get historical data from CCXT exchange
-            data = await self.exchange_manager.get_historical_data(
-                symbol=symbol,
-                timeframe='1h',
-                start_date=start_date,
-                end_date=end_date
-            )
+            logger.info(f"📊 Fetching CCXT data for {symbol} from {start_date} to {end_date}")
             
-            if data is None or len(data) < 100:
-                logger.warning(f"⚠️ {symbol} için yeterli veri bulunamadı")
-                return pd.DataFrame()
+            # Get data for multiple timeframes and combine
+            all_data = []
             
-            # Convert to DataFrame if needed
-            if isinstance(data, dict) and 'dataframe' in data:
-                df = data['dataframe']
-            elif isinstance(data, pd.DataFrame):
-                df = data.copy()
-            else:
-                logger.error(f"❌ Unexpected data format for {symbol}")
-                return pd.DataFrame()
+            for timeframe in self.timeframes:
+                try:
+                    # Calculate limit based on timeframe
+                    if timeframe == '1h':
+                        limit = min(1000, self.lookback_days * 24)
+                    elif timeframe == '4h':
+                        limit = min(1000, self.lookback_days * 6)
+                    elif timeframe == '1d':
+                        limit = min(1000, self.lookback_days)
+                    else:
+                        limit = 1000
+                    
+                    # Get data from exchange
+                    data = await self.exchange_manager.get_historical_data(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        limit=limit
+                    )
+                    
+                    if data is not None and len(data) > 0:
+                        # Add timeframe column
+                        data['timeframe'] = timeframe
+                        all_data.append(data)
+                        logger.info(f"✅ Got {len(data)} {timeframe} data points for {symbol}")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get {timeframe} data for {symbol}: {e}")
+                    continue
             
-            # Ensure required columns
-            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            if not all_data:
+                logger.error(f"❌ No data retrieved for {symbol}")
+                return None
+            
+            # Combine all timeframes
+            combined_data = pd.concat(all_data, ignore_index=True)
+            combined_data = combined_data.sort_values('timestamp').drop_duplicates(subset=['timestamp'])
+            
+            logger.info(f"📊 Combined {len(combined_data)} data points for {symbol}")
+            
+            return combined_data
+            
+        except Exception as e:
+            logger.error(f"❌ Historical data fetch error for {symbol}: {e}")
+            return None
+    
+    async def _prepare_training_data(self, data: pd.DataFrame, symbol: str) -> tuple:
+        """Prepare features and labels for training"""
+        try:
+            # Add technical indicators
+            data_with_indicators = await self._add_technical_indicators(data)
+            
+            if data_with_indicators is None or len(data_with_indicators) < 100:
+                logger.error(f"❌ Insufficient data after adding indicators for {symbol}")
+                return None, None
+            
+            # Create features
+            features = await self._create_features(data_with_indicators)
+            
+            if features is None or len(features) < 100:
+                logger.error(f"❌ Failed to create features for {symbol}")
+                return None, None
+            
+            # Create labels (future price movement)
+            labels = await self._create_labels(data_with_indicators)
+            
+            if labels is None or len(labels) < 100:
+                logger.error(f"❌ Failed to create labels for {symbol}")
+                return None, None
+            
+            # Align features and labels
+            min_length = min(len(features), len(labels))
+            features = features[:min_length]
+            labels = labels[:min_length]
+            
+            # Remove any rows with NaN values
+            valid_indices = ~(features.isna().any(axis=1) | labels.isna())
+            features = features[valid_indices]
+            labels = labels[valid_indices]
+            
+            logger.info(f"🔧 Prepared {len(features)} training samples for {symbol}")
+            
+            return features, labels
+            
+        except Exception as e:
+            logger.error(f"❌ Training data preparation error for {symbol}: {e}")
+            return None, None
+    
+    async def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Add technical indicators to the data"""
+        try:
+            df = data.copy()
+            
+            # Ensure we have required columns
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
             for col in required_columns:
                 if col not in df.columns:
-                    logger.error(f"❌ Missing column {col} in {symbol} data")
-                    return pd.DataFrame()
+                    logger.error(f"❌ Missing required column: {col}")
+                    return None
+            
+            # Calculate technical indicators
+            # RSI
+            df['rsi'] = self._calculate_rsi(df['close'], period=14)
+            
+            # MACD
+            df['macd'], df['macd_signal'], df['macd_hist'] = self._calculate_macd(df['close'])
+            
+            # Bollinger Bands
+            df['bb_upper'], df['bb_middle'], df['bb_lower'] = self._calculate_bollinger_bands(df['close'])
+            
+            # Moving Averages
+            df['sma_20'] = df['close'].rolling(window=20).mean()
+            df['sma_50'] = df['close'].rolling(window=50).mean()
+            df['ema_12'] = df['close'].ewm(span=12).mean()
+            df['ema_26'] = df['close'].ewm(span=26).mean()
+            
+            # Stochastic RSI
+            df['stoch_rsi'] = self._calculate_stochastic_rsi(df['close'])
+            
+            # Williams Alligator
+            df['alligator_jaw'] = self._calculate_williams_alligator(df['close'], 13, 8)
+            df['alligator_teeth'] = self._calculate_williams_alligator(df['close'], 8, 5)
+            df['alligator_lips'] = self._calculate_williams_alligator(df['close'], 5, 3)
+            
+            # ATR (Average True Range)
+            df['atr'] = self._calculate_atr(df, period=14)
+            
+            # Volume indicators
+            df['volume_sma'] = df['volume'].rolling(window=20).mean()
+            df['volume_ratio'] = df['volume'] / df['volume_sma']
+            
+            # Price-based features
+            df['price_change'] = df['close'].pct_change()
+            df['price_change_5'] = df['close'].pct_change(periods=5)
+            df['price_change_20'] = df['close'].pct_change(periods=20)
+            
+            # Volatility
+            df['volatility'] = df['price_change'].rolling(window=20).std()
             
             # Remove NaN values
             df = df.dropna()
             
-            logger.info(f"✅ {symbol}: {len(df)} candles loaded via CCXT")
-            
-            # Save raw data
-            output_file = self.data_dir / f"{symbol.replace('/', '_')}_raw.csv"
-            df.to_csv(output_file, index=False)
-            
-            logger.info(f"✅ {symbol}: {len(df)} kayıt indirildi ve kaydedildi")
             return df
             
         except Exception as e:
-            logger.error(f"❌ {symbol} veri indirme hatası: {e}")
-            return pd.DataFrame()
+            logger.error(f"❌ Technical indicators calculation error: {e}")
+            return None
     
-    async def prepare_features(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-        """Özellikleri hazırla"""
+    async def _create_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Create feature matrix for training"""
         try:
-            logger.info(f"🔧 {symbol} için özellik mühendisliği...")
-            
-            if len(df) < 200:
-                logger.warning(f"⚠️ {symbol} için yetersiz veri")
-                return pd.DataFrame()
-            
-            # Use a subset of features for faster training
-            features_df = df.copy()
-            
-            # Price-based features
-            features_df['returns'] = features_df['close'].pct_change()
-            features_df['log_returns'] = np.log(features_df['close'] / features_df['close'].shift(1))
-            
-            # Moving averages
-            for window in [5, 10, 20, 50]:
-                features_df[f'sma_{window}'] = features_df['close'].rolling(window).mean()
-                features_df[f'ema_{window}'] = features_df['close'].ewm(span=window).mean()
-            
-            # Volatility
-            features_df['volatility_10'] = features_df['returns'].rolling(10).std()
-            features_df['volatility_20'] = features_df['returns'].rolling(20).std()
-            
-            # Volume features
-            features_df['volume_sma_10'] = features_df['volume'].rolling(10).mean()
-            features_df['volume_ratio'] = features_df['volume'] / features_df['volume_sma_10']
-            
-            # Price position features  
-            features_df['price_position_20'] = (features_df['close'] - features_df['close'].rolling(20).min()) / (features_df['close'].rolling(20).max() - features_df['close'].rolling(20).min())
-            
-            # RSI approximation
-            delta = features_df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            features_df['rsi'] = 100 - (100 / (1 + rs))
-            
-            # Bollinger Bands
-            bb_period = 20
-            bb_std = features_df['close'].rolling(bb_period).std()
-            features_df['bb_upper'] = features_df[f'sma_{bb_period}'] + (2 * bb_std)
-            features_df['bb_lower'] = features_df[f'sma_{bb_period}'] - (2 * bb_std)
-            features_df['bb_position'] = (features_df['close'] - features_df['bb_lower']) / (features_df['bb_upper'] - features_df['bb_lower'])
-            
-            # Create labels (future price movement)
-            # Predict price movement 4 hours ahead
-            future_returns = features_df['close'].shift(-4).pct_change(4)
-            
-            # Convert to classification labels
-            # 0: SELL (< -1%), 1: HOLD (-1% to 1%), 2: BUY (> 1%)
-            conditions = [
-                future_returns < -0.01,
-                (future_returns >= -0.01) & (future_returns <= 0.01),
-                future_returns > 0.01
+            # Select feature columns
+            feature_columns = [
+                'rsi', 'macd', 'macd_signal', 'macd_hist',
+                'bb_upper', 'bb_middle', 'bb_lower',
+                'sma_20', 'sma_50', 'ema_12', 'ema_26',
+                'stoch_rsi', 'alligator_jaw', 'alligator_teeth', 'alligator_lips',
+                'atr', 'volume_ratio', 'price_change', 'price_change_5', 'price_change_20',
+                'volatility'
             ]
-            choices = [0, 1, 2]
-            features_df['target'] = np.select(conditions, choices, default=1)
             
-            # Remove NaN values
-            features_df = features_df.dropna()
+            # Check which columns exist
+            available_columns = [col for col in feature_columns if col in data.columns]
             
-            if len(features_df) < 1000:
-                logger.warning(f"⚠️ {symbol} için eğitim sonrası yetersiz veri: {len(features_df)}")
-                return pd.DataFrame()
+            if len(available_columns) < 10:
+                logger.error(f"❌ Insufficient feature columns: {available_columns}")
+                return None
             
-            # Save processed data
-            output_file = self.data_dir / f"{symbol.replace('/', '_')}_features.csv"
-            features_df.to_csv(output_file, index=False)
+            features = data[available_columns].copy()
             
-            logger.info(f"✅ {symbol}: {len(features_df)} özellik hazırlandı")
-            return features_df
+            # Normalize features
+            features = (features - features.mean()) / features.std()
+            
+            return features
             
         except Exception as e:
-            logger.error(f"❌ {symbol} özellik hazırlama hatası: {e}")
-            return pd.DataFrame()
+            logger.error(f"❌ Feature creation error: {e}")
+            return None
     
-    async def train_symbol_models(self, symbol: str, features_df: pd.DataFrame) -> Dict[str, Any]:
-        """Sembol için modelleri eğit"""
+    async def _create_labels(self, data: pd.DataFrame) -> pd.Series:
+        """Create labels for training (future price movement)"""
         try:
-            from sklearn.model_selection import train_test_split, GridSearchCV
+            # Calculate future price change (next 4 hours)
+            future_price_change = data['close'].shift(-4) / data['close'] - 1
+            
+            # Create 3-class labels
+            labels = pd.Series(index=data.index, dtype=int)
+            
+            # Define thresholds
+            buy_threshold = 0.01   # 1% increase
+            sell_threshold = -0.01  # 1% decrease
+            
+            # Assign labels
+            labels[future_price_change > buy_threshold] = 2    # BUY
+            labels[future_price_change < sell_threshold] = 1   # SELL
+            labels[(future_price_change >= sell_threshold) & (future_price_change <= buy_threshold)] = 0  # HOLD
+            
+            # Remove NaN values
+            labels = labels.dropna()
+            
+            return labels
+            
+        except Exception as e:
+            logger.error(f"❌ Label creation error: {e}")
+            return None
+    
+    async def _train_models_for_symbol(self, symbol: str, features: pd.DataFrame, labels: pd.Series):
+        """Train models for a specific symbol"""
+        try:
+            from sklearn.model_selection import train_test_split
             from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
             from sklearn.preprocessing import StandardScaler
-            from sklearn.metrics import classification_report, accuracy_score, f1_score
             import joblib
             
-            logger.info(f"🤖 {symbol} için model eğitimi başlıyor...")
-            
-            # Feature columns (exclude target and non-numeric)
-            exclude_cols = ['timestamp', 'target']
-            feature_cols = [col for col in features_df.columns if col not in exclude_cols]
-            
-            X = features_df[feature_cols]
-            y = features_df['target']
-            
-            # Train-test split
+            # Split data
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y
+                features, labels, test_size=self.test_size, random_state=self.random_state, stratify=labels
+            )
+            
+            # Create models directory
+            models_dir = Path(f'models/{symbol.replace("/", "_")}')
+            models_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Train Gradient Boosting
+            logger.info(f"🤖 Training Gradient Boosting for {symbol}")
+            gb_model = GradientBoostingClassifier(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=6,
+                random_state=self.random_state
             )
             
             # Scale features
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
+            scaler_gb = StandardScaler()
+            X_train_scaled = scaler_gb.fit_transform(X_train)
+            X_test_scaled = scaler_gb.transform(X_test)
             
-            results = {}
+            # Train model
+            gb_model.fit(X_train_scaled, y_train)
             
-            # Train Gradient Boosting
-            logger.info(f"📊 {symbol} GradientBoosting eğitiliyor...")
-            gb_params = {
-                'n_estimators': [50, 100],
-                'learning_rate': [0.1, 0.2],
-                'max_depth': [4, 6]
-            }
+            # Evaluate model
+            gb_score = gb_model.score(X_test_scaled, y_test)
+            logger.info(f"✅ Gradient Boosting accuracy for {symbol}: {gb_score:.4f}")
             
-            gb_model = GradientBoostingClassifier(random_state=42)
-            gb_grid = GridSearchCV(gb_model, gb_params, cv=3, scoring='f1_macro', n_jobs=-1)
-            gb_grid.fit(X_train_scaled, y_train)
-            
-            gb_predictions = gb_grid.predict(X_test_scaled)
-            gb_accuracy = accuracy_score(y_test, gb_predictions)
-            gb_f1 = f1_score(y_test, gb_predictions, average='macro')
-            
-            results['gradient_boosting'] = {
-                'model': gb_grid.best_estimator_,
-                'accuracy': gb_accuracy,
-                'f1_score': gb_f1,
-                'best_params': gb_grid.best_params_
-            }
+            # Save model
+            joblib.dump(gb_model, models_dir / 'gradient_boosting_model.pkl')
+            joblib.dump(scaler_gb, models_dir / 'gradient_boosting_scaler.pkl')
             
             # Train Random Forest
-            logger.info(f"🌲 {symbol} RandomForest eğitiliyor...")
-            rf_params = {
-                'n_estimators': [50, 100],
-                'max_depth': [None, 10, 20],
-                'min_samples_split': [2, 5]
-            }
+            logger.info(f"🤖 Training Random Forest for {symbol}")
+            rf_model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                random_state=self.random_state
+            )
             
-            rf_model = RandomForestClassifier(random_state=42)
-            rf_grid = GridSearchCV(rf_model, rf_params, cv=3, scoring='f1_macro', n_jobs=-1)
-            rf_grid.fit(X_train, y_train)  # RF doesn't need scaling
+            # Scale features
+            scaler_rf = StandardScaler()
+            X_train_scaled_rf = scaler_rf.fit_transform(X_train)
+            X_test_scaled_rf = scaler_rf.transform(X_test)
             
-            rf_predictions = rf_grid.predict(X_test)
-            rf_accuracy = accuracy_score(y_test, rf_predictions)
-            rf_f1 = f1_score(y_test, rf_predictions, average='macro')
+            # Train model
+            rf_model.fit(X_train_scaled_rf, y_train)
             
-            results['random_forest'] = {
-                'model': rf_grid.best_estimator_,
-                'accuracy': rf_accuracy,
-                'f1_score': rf_f1,
-                'best_params': rf_grid.best_params_
-            }
+            # Evaluate model
+            rf_score = rf_model.score(X_test_scaled_rf, y_test)
+            logger.info(f"✅ Random Forest accuracy for {symbol}: {rf_score:.4f}")
             
-            # Select best model
-            best_model_type = 'gradient_boosting' if gb_f1 > rf_f1 else 'random_forest'
-            best_model = results[best_model_type]['model']
-            best_score = results[best_model_type]['f1_score']
+            # Save model
+            joblib.dump(rf_model, models_dir / 'random_forest_model.pkl')
+            joblib.dump(scaler_rf, models_dir / 'random_forest_scaler.pkl')
             
-            # Save models and scaler
-            symbol_clean = symbol.replace('/', '_')
-            
-            model_file = self.model_dir / f"{symbol_clean}_model.pkl"
-            scaler_file = self.model_dir / f"{symbol_clean}_scaler.pkl"
-            
-            joblib.dump(best_model, model_file)
-            joblib.dump(scaler, scaler_file)
-            
-            # Save feature columns
-            feature_file = self.model_dir / f"{symbol_clean}_features.txt"
-            with open(feature_file, 'w') as f:
-                f.write('\n'.join(feature_cols))
-            
-            logger.info(f"✅ {symbol}: En iyi model ({best_model_type}) F1={best_score:.3f} kaydedildi")
-            
-            return {
+            # Save training metadata
+            metadata = {
                 'symbol': symbol,
-                'best_model_type': best_model_type,
-                'best_f1_score': best_score,
-                'gradient_boosting': results['gradient_boosting'],
-                'random_forest': results['random_forest'],
-                'feature_count': len(feature_cols),
-                'training_samples': len(X_train),
-                'test_samples': len(X_test)
+                'training_date': datetime.now().isoformat(),
+                'data_points': len(features),
+                'feature_columns': list(features.columns),
+                'test_size': self.test_size,
+                'random_state': self.random_state,
+                'gradient_boosting_accuracy': gb_score,
+                'random_forest_accuracy': rf_score,
+                'label_distribution': labels.value_counts().to_dict()
             }
             
-        except Exception as e:
-            logger.error(f"❌ {symbol} model eğitimi hatası: {e}")
-            return {'error': str(e)}
-    
-    async def train_all_models(self) -> Dict[str, Any]:
-        """Tüm semboller için modelleri eğit"""
-        try:
-            logger.info(f"🚀 {len(self.symbols)} sembol için toplu model eğitimi başlıyor...")
-            
-            results = {}
-            summary = {
-                'total_symbols': len(self.symbols),
-                'successful_trainings': 0,
-                'failed_trainings': 0,
-                'average_f1_score': 0,
-                'best_performing_symbol': None,
-                'best_f1_score': 0
-            }
-            
-            for symbol in self.symbols:
-                try:
-                    logger.info(f"📈 {symbol} işleniyor...")
-                    
-                    # Download data
-                    raw_data = await self.download_training_data(symbol)
-                    if raw_data.empty:
-                        continue
-                    
-                    # Prepare features
-                    features_data = await self.prepare_features(raw_data, symbol)
-                    if features_data.empty:
-                        continue
-                    
-                    # Train models
-                    training_result = await self.train_symbol_models(symbol, features_data)
-                    if 'error' not in training_result:
-                        results[symbol] = training_result
-                        summary['successful_trainings'] += 1
-                        
-                        # Track best performance
-                        f1_score = training_result['best_f1_score']
-                        if f1_score > summary['best_f1_score']:
-                            summary['best_f1_score'] = f1_score
-                            summary['best_performing_symbol'] = symbol
-                    else:
-                        logger.error(f"❌ {symbol} eğitimi başarısız: {training_result['error']}")
-                        summary['failed_trainings'] += 1
-                    
-                    # Small delay between symbols
-                    await asyncio.sleep(1)
-                    
-                except Exception as e:
-                    logger.error(f"❌ {symbol} genel hatası: {e}")
-                    summary['failed_trainings'] += 1
-                    continue
-            
-            # Calculate average F1 score
-            if results:
-                f1_scores = [r['best_f1_score'] for r in results.values()]
-                summary['average_f1_score'] = sum(f1_scores) / len(f1_scores)
-            
-            # Save training summary
-            summary_file = self.model_dir / 'training_summary.json'
             import json
-            with open(summary_file, 'w') as f:
-                json.dump({
-                    'summary': summary,
-                    'results': {k: {**v, 'model': None} for k, v in results.items()},  # Remove model objects for JSON
-                    'training_date': datetime.now().isoformat()
-                }, f, indent=2)
+            with open(models_dir / 'training_metadata.json', 'w') as f:
+                json.dump(metadata, f, indent=2)
             
-            logger.info(f"🎉 Model eğitimi tamamlandı!")
-            logger.info(f"✅ Başarılı: {summary['successful_trainings']}/{summary['total_symbols']}")
-            logger.info(f"📊 Ortalama F1 Score: {summary['average_f1_score']:.3f}")
-            logger.info(f"🏆 En iyi performans: {summary['best_performing_symbol']} (F1: {summary['best_f1_score']:.3f})")
-            
-            return {
-                'summary': summary,
-                'detailed_results': results
-            }
+            logger.info(f"💾 Models saved for {symbol}")
             
         except Exception as e:
-            logger.error(f"❌ Toplu eğitim hatası: {e}")
-            return {'error': str(e)}
-
-    async def cleanup(self):
-        """Cleanup resources"""
-        try:
-            if self.exchange_manager:
-                await self.exchange_manager.close()
-                logger.debug("✅ Exchange manager cleaned up")
-        except Exception as e:
-            logger.error(f"❌ Cleanup error: {e}")
+            logger.error(f"❌ Model training error for {symbol}: {e}")
+    
+    # Technical indicator calculation methods
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI"""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+        """Calculate MACD"""
+        ema_fast = prices.ewm(span=fast).mean()
+        ema_slow = prices.ewm(span=slow).mean()
+        macd = ema_fast - ema_slow
+        macd_signal = macd.ewm(span=signal).mean()
+        macd_hist = macd - macd_signal
+        return macd, macd_signal, macd_hist
+    
+    def _calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std_dev: float = 2):
+        """Calculate Bollinger Bands"""
+        sma = prices.rolling(window=period).mean()
+        std = prices.rolling(window=period).std()
+        upper = sma + (std * std_dev)
+        lower = sma - (std * std_dev)
+        return upper, sma, lower
+    
+    def _calculate_stochastic_rsi(self, prices: pd.Series, period: int = 14):
+        """Calculate Stochastic RSI"""
+        rsi = self._calculate_rsi(prices, period)
+        stoch_rsi = (rsi - rsi.rolling(window=period).min()) / (rsi.rolling(window=period).max() - rsi.rolling(window=period).min())
+        return stoch_rsi
+    
+    def _calculate_williams_alligator(self, prices: pd.Series, period: int, shift: int):
+        """Calculate Williams Alligator"""
+        sma = prices.rolling(window=period).mean()
+        return sma.shift(shift)
+    
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14):
+        """Calculate Average True Range"""
+        high_low = data['high'] - data['low']
+        high_close = np.abs(data['high'] - data['close'].shift())
+        low_close = np.abs(data['low'] - data['close'].shift())
+        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+        atr = true_range.rolling(window=period).mean()
+        return atr
 
 
 async def main():
-    """Ana eğitim fonksiyonu"""
-    logger.info("🤖 AI Model Training Script - CCXT Version")
-    logger.info("=" * 50)
-    
-    trainer = ModelTrainer()
-    await trainer.initialize()
-    results = await trainer.train_all_models()
-    
-    if 'error' not in results:
-        summary = results['summary']
-        logger.info("\n🎯 EĞİTİM ÖZET:")
-        logger.info(f"Toplam Sembol: {summary['total_symbols']}")
-        logger.info(f"Başarılı Eğitim: {summary['successful_trainings']}")
-        logger.info(f"Başarısız Eğitim: {summary['failed_trainings']}")
-        logger.info(f"Ortalama F1 Score: {summary['average_f1_score']:.3f}")
-        logger.info(f"En İyi Sembol: {summary['best_performing_symbol']} (F1: {summary['best_f1_score']:.3f})")
-        logger.info("\n✅ Modeller 'models/' klasörüne kaydedildi")
-        logger.info("🚀 Artık bot'u çalıştırabilirsiniz!")
-    else:
-        logger.error(f"❌ Eğitim başarısız: {results['error']}")
-    
-    # Cleanup
-    await trainer.cleanup()
+    """Main function"""
+    try:
+        trainer = ModelTrainer()
+        await trainer.initialize()
+        await trainer.train_all_models()
+        logger.info("🎉 Model training completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ Main error: {e}")
 
 
 if __name__ == "__main__":
