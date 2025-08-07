@@ -35,9 +35,9 @@ class NotificationManager:
         self.email_config = notification_config.get('email', {})
         self.email_enabled = self.email_config.get('enabled', False)
         
-        # Rate limiting
+        # Dynamic rate limiting based on notification frequency
         self.last_notification = {}
-        self.min_interval = 60  # seconds between same type notifications
+        self.min_interval = await self._get_dynamic_min_interval()
         
         logger.info("📱 Notification Manager initialized")
     
@@ -261,6 +261,29 @@ class NotificationManager:
         except Exception as e:
             logger.error(f"❌ Rate limit check error: {e}")
             return True
+    
+    async def _get_dynamic_min_interval(self) -> int:
+        """Get dynamic minimum interval based on notification frequency"""
+        try:
+            # Base minimum interval
+            base_interval = 60
+            
+            # Check recent notification frequency
+            recent_notifications = len([n for n in self.last_notification.values() 
+                                      if (datetime.now() - n).total_seconds() < 300])  # Last 5 minutes
+            
+            if recent_notifications > 10:
+                # High notification frequency - increase interval
+                return min(180, base_interval * 3)
+            elif recent_notifications < 2:
+                # Low notification frequency - decrease interval
+                return max(30, base_interval // 2)
+            else:
+                return base_interval
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic min interval: {e}")
+            return 60
     
     async def close(self) -> None:
         """Notification manager'ı kapat"""

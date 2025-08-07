@@ -92,12 +92,15 @@ class BotCoordinator:
                     # Regular maintenance
                     await self._perform_maintenance()
                     
-                    # Wait before next cycle
-                    await asyncio.sleep(30)
+                    # Dynamic wait based on system load and error frequency
+                    wait_time = await self._get_dynamic_wait_time()
+                    await asyncio.sleep(wait_time)
                     
                 except Exception as e:
                     logger.error(f"❌ Koordinasyon döngüsü hatası: {e}")
-                    await asyncio.sleep(5)
+                    # Dynamic error wait time
+                    error_wait_time = await self._get_dynamic_error_wait_time()
+                    await asyncio.sleep(error_wait_time)
                     continue
                     
         except Exception as e:
@@ -196,6 +199,58 @@ class BotCoordinator:
             
         except Exception as e:
             logger.error(f"❌ Bakım hatası: {e}")
+    
+    async def _get_dynamic_wait_time(self) -> int:
+        """Get dynamic wait time based on system load and performance"""
+        try:
+            import psutil
+            
+            # Base wait time
+            base_wait = 30
+            
+            # Get current system load
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            
+            # Adjust wait time based on system load
+            if cpu_percent > 80:
+                # High load - increase wait time to reduce overhead
+                return min(60, base_wait * 2)
+            elif cpu_percent < 30:
+                # Low load - decrease wait time for more frequent checks
+                return max(15, base_wait // 2)
+            elif memory.percent > 80:
+                # High memory usage - increase wait time
+                return min(45, base_wait + 15)
+            else:
+                return base_wait
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic wait time: {e}")
+            return 30
+    
+    async def _get_dynamic_error_wait_time(self) -> int:
+        """Get dynamic error wait time based on error frequency"""
+        try:
+            # Base error wait time
+            base_error_wait = 5
+            
+            # Check recent error frequency
+            recent_errors = len([e for e in self.performance_metrics.get('error_counts', {}) 
+                               if (datetime.now() - e.get('timestamp', datetime.now())).total_seconds() < 300])  # Last 5 minutes
+            
+            if recent_errors > 5:
+                # High error frequency - increase wait time
+                return min(15, base_error_wait * 3)
+            elif recent_errors < 2:
+                # Low error frequency - decrease wait time
+                return max(2, base_error_wait // 2)
+            else:
+                return base_error_wait
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic error wait time: {e}")
+            return 5
     
     async def run(self):
         """Bot koordinasyonunu çalıştır"""

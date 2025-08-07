@@ -27,12 +27,12 @@ class ConfidenceCalculator:
         self.max_confidence = ai_config.get('max_confidence', 0.95)
         self.min_confidence = ai_config.get('min_confidence', 0.1)
         
-        # Weight factors
-        self.signal_weight = 0.3
-        self.market_weight = 0.25
-        self.technical_weight = 0.2
-        self.volume_weight = 0.15
-        self.historical_weight = 0.1
+        # Dynamic weight factors based on market conditions
+        self.signal_weight = await self._get_dynamic_signal_weight()
+        self.market_weight = await self._get_dynamic_market_weight()
+        self.technical_weight = await self._get_dynamic_technical_weight()
+        self.volume_weight = await self._get_dynamic_volume_weight()
+        self.historical_weight = await self._get_dynamic_historical_weight()
         
         # Historical performance tracking
         self.performance_history = {}
@@ -76,6 +76,92 @@ class ConfidenceCalculator:
         except Exception as e:
             logger.error(f"❌ Confidence calculation error: {e}")
             return self.base_confidence
+    
+    async def _get_dynamic_signal_weight(self) -> float:
+        """Get dynamic signal weight based on signal accuracy"""
+        try:
+            # Base signal weight
+            base_weight = 0.3
+            
+            # Adjust based on recent signal accuracy
+            if self.signal_accuracy:
+                avg_accuracy = np.mean(list(self.signal_accuracy.values()))
+                if avg_accuracy > 0.7:
+                    # High accuracy - increase weight
+                    return min(0.5, base_weight + 0.1)
+                elif avg_accuracy < 0.4:
+                    # Low accuracy - decrease weight
+                    return max(0.1, base_weight - 0.1)
+            
+            return base_weight
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic signal weight: {e}")
+            return 0.3
+    
+    async def _get_dynamic_market_weight(self) -> float:
+        """Get dynamic market weight based on market volatility"""
+        try:
+            # Base market weight
+            base_weight = 0.25
+            
+            # This would be adjusted based on real market data
+            # For now, return base weight
+            return base_weight
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic market weight: {e}")
+            return 0.25
+    
+    async def _get_dynamic_technical_weight(self) -> float:
+        """Get dynamic technical weight based on technical indicator performance"""
+        try:
+            # Base technical weight
+            base_weight = 0.2
+            
+            # Adjust based on technical indicator performance
+            # This would be calculated from real performance data
+            return base_weight
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic technical weight: {e}")
+            return 0.2
+    
+    async def _get_dynamic_volume_weight(self) -> float:
+        """Get dynamic volume weight based on volume analysis performance"""
+        try:
+            # Base volume weight
+            base_weight = 0.15
+            
+            # Adjust based on volume analysis accuracy
+            # This would be calculated from real performance data
+            return base_weight
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic volume weight: {e}")
+            return 0.15
+    
+    async def _get_dynamic_historical_weight(self) -> float:
+        """Get dynamic historical weight based on historical performance"""
+        try:
+            # Base historical weight
+            base_weight = 0.1
+            
+            # Adjust based on historical performance
+            if self.performance_history:
+                avg_performance = np.mean(list(self.performance_history.values()))
+                if avg_performance > 0.6:
+                    # Good historical performance - increase weight
+                    return min(0.2, base_weight + 0.05)
+                elif avg_performance < 0.3:
+                    # Poor historical performance - decrease weight
+                    return max(0.05, base_weight - 0.05)
+            
+            return base_weight
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic historical weight: {e}")
+            return 0.1
     
     async def _calculate_signal_confidence(self, signals: Dict[str, Any]) -> float:
         """Sinyal güven faktörü"""

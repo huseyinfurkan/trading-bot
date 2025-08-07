@@ -16,11 +16,11 @@ def setup_logging(logging_config: Dict[str, Any]) -> None:
         # Mevcut logger'ları temizle
         logger.remove()
         
-        # Config parametreleri
-        level = logging_config.get('level', 'INFO')
-        file_path = logging_config.get('file_path', 'logs/trading_bot.log')
-        max_file_size = logging_config.get('max_file_size', '100MB')
-        backup_count = logging_config.get('backup_count', 5)
+        # Dynamic config parameters based on system resources
+        level = await _get_dynamic_log_level(logging_config)
+        file_path = await _get_dynamic_file_path(logging_config)
+        max_file_size = await _get_dynamic_max_file_size(logging_config)
+        backup_count = await _get_dynamic_backup_count(logging_config)
         console_output = logging_config.get('console_output', True)
         
         # Log directory oluştur
@@ -96,6 +96,94 @@ def setup_logger(name: str = None, file_path: str = None, level: str = 'INFO'):
     from loguru import logger
     return logger
 
+
+async def _get_dynamic_log_level(logging_config: Dict[str, Any]) -> str:
+    """Get dynamic log level based on system load"""
+    try:
+        import psutil
+        
+        base_level = logging_config.get('level', 'INFO')
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        # Adjust log level based on system load
+        if cpu_percent > 80:
+            # High load - reduce logging
+            return 'WARNING' if base_level == 'INFO' else base_level
+        elif cpu_percent < 30:
+            # Low load - increase logging
+            return 'DEBUG' if base_level == 'INFO' else base_level
+        else:
+            return base_level
+            
+    except Exception as e:
+        print(f"⚠️ Could not calculate dynamic log level: {e}")
+        return logging_config.get('level', 'INFO')
+
+async def _get_dynamic_file_path(logging_config: Dict[str, Any]) -> str:
+    """Get dynamic file path based on disk space"""
+    try:
+        import psutil
+        
+        base_path = logging_config.get('file_path', 'logs/trading_bot.log')
+        disk = psutil.disk_usage('/')
+        usage_percent = (disk.used / disk.total) * 100
+        
+        # Adjust path based on disk usage
+        if usage_percent > 90:
+            # High disk usage - use smaller path
+            return 'logs/minimal.log'
+        else:
+            return base_path
+            
+    except Exception as e:
+        print(f"⚠️ Could not calculate dynamic file path: {e}")
+        return logging_config.get('file_path', 'logs/trading_bot.log')
+
+async def _get_dynamic_max_file_size(logging_config: Dict[str, Any]) -> str:
+    """Get dynamic max file size based on disk space"""
+    try:
+        import psutil
+        
+        base_size = logging_config.get('max_file_size', '100MB')
+        disk = psutil.disk_usage('/')
+        usage_percent = (disk.used / disk.total) * 100
+        
+        # Adjust size based on disk usage
+        if usage_percent > 85:
+            # High disk usage - reduce file size
+            return '50MB'
+        elif usage_percent < 50:
+            # Low disk usage - increase file size
+            return '200MB'
+        else:
+            return base_size
+            
+    except Exception as e:
+        print(f"⚠️ Could not calculate dynamic max file size: {e}")
+        return logging_config.get('max_file_size', '100MB')
+
+async def _get_dynamic_backup_count(logging_config: Dict[str, Any]) -> int:
+    """Get dynamic backup count based on disk space"""
+    try:
+        import psutil
+        
+        base_count = logging_config.get('backup_count', 5)
+        disk = psutil.disk_usage('/')
+        usage_percent = (disk.used / disk.total) * 100
+        
+        # Adjust count based on disk usage
+        if usage_percent > 80:
+            # High disk usage - reduce backup count
+            return max(2, base_count // 2)
+        elif usage_percent < 40:
+            # Low disk usage - increase backup count
+            return min(10, base_count * 2)
+        else:
+            return base_count
+            
+    except Exception as e:
+        print(f"⚠️ Could not calculate dynamic backup count: {e}")
+        return logging_config.get('backup_count', 5)
 
 def get_performance_logger():
     """Performance logging için özel logger"""

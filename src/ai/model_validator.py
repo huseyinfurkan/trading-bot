@@ -20,11 +20,7 @@ class ModelValidator:
         """Initialize model validator"""
         self.models_dir = models_dir
         self.performance_history = {}
-        self.confidence_thresholds = {
-            'high': 0.75,      # High confidence threshold
-            'medium': 0.60,    # Medium confidence threshold
-            'low': 0.45        # Low confidence threshold
-        }
+        self.confidence_thresholds = await self._get_dynamic_confidence_thresholds()
         
     def validate_model_performance(self, model, X_test: np.ndarray, y_test: np.ndarray, 
                                  model_name: str = "unknown") -> Dict[str, Any]:
@@ -305,6 +301,44 @@ class ModelValidator:
         """Determine if model should be used based on confidence"""
         confidence = self.get_model_confidence(model_name)
         return confidence >= min_confidence
+    
+    async def _get_dynamic_confidence_thresholds(self) -> Dict[str, float]:
+        """Get dynamic confidence thresholds based on model performance"""
+        try:
+            # Base thresholds
+            base_thresholds = {
+                'high': 0.75,
+                'medium': 0.60,
+                'low': 0.45
+            }
+            
+            # Adjust thresholds based on overall model performance
+            if self.performance_history:
+                avg_confidence = np.mean([m.get('confidence_score', 0) for m in self.performance_history.values()])
+                
+                if avg_confidence > 0.8:
+                    # High performing models - increase thresholds
+                    base_thresholds['high'] = min(0.85, base_thresholds['high'] + 0.05)
+                    base_thresholds['medium'] = min(0.70, base_thresholds['medium'] + 0.05)
+                    base_thresholds['low'] = min(0.55, base_thresholds['low'] + 0.05)
+                elif avg_confidence < 0.5:
+                    # Low performing models - decrease thresholds
+                    base_thresholds['high'] = max(0.65, base_thresholds['high'] - 0.05)
+                    base_thresholds['medium'] = max(0.50, base_thresholds['medium'] - 0.05)
+                    base_thresholds['low'] = max(0.35, base_thresholds['low'] - 0.05)
+            
+            logger.info(f"📊 Dynamic confidence thresholds - High: {base_thresholds['high']:.2f}, "
+                       f"Medium: {base_thresholds['medium']:.2f}, Low: {base_thresholds['low']:.2f}")
+            
+            return base_thresholds
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not calculate dynamic confidence thresholds: {e}")
+            return {
+                'high': 0.75,
+                'medium': 0.60,
+                'low': 0.45
+            }
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get summary of all model performances"""
