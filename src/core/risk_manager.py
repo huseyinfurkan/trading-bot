@@ -10,75 +10,159 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
 import math
+import os # Added for os.getenv
 
 
 class RiskManager:
     """Risk yöneticisi"""
     
-    def __init__(self, risk_config: Dict[str, Any], db_manager):
-        """
-        Args:
-            risk_config: Risk konfigürasyonu
-            db_manager: Veritabanı yöneticisi
-        """
-        self.db_manager = db_manager
+    def __init__(self, config: Dict[str, Any], exchange_manager=None):
+        """Initialize RiskManager with config"""
+        self.config = config
+        self.exchange_manager = exchange_manager
         
-        # Risk parametreleri - config'den yükleniyor
+        # Load risk parameters from config
+        risk_config = config.get('trading', {}).get('risk_management', {})
+        
+        # Core risk parameters
         self.max_portfolio_risk = risk_config.get('max_portfolio_risk', 0.02)
         self.max_position_risk = risk_config.get('max_position_risk', 0.01)
         self.max_daily_loss = risk_config.get('max_daily_loss', 0.05)
-        self.max_open_positions = risk_config.get('max_open_positions', 5)
+        self.max_open_positions = risk_config.get('max_open_positions', 10)
         self.correlation_threshold = risk_config.get('correlation_threshold', 0.7)
-        self.position_sizing_method = risk_config.get('position_sizing_method', 'kelly')
-        
-        # Dinamik korelasyon eşiği - piyasa koşullarına göre ayarlanıyor
-        self.dynamic_correlation_threshold = self.correlation_threshold
         self.correlation_adjustment_factor = risk_config.get('correlation_adjustment_factor', 0.1)
+        self.min_position_size = risk_config.get('min_position_size', 10)
+        self.max_position_size = risk_config.get('max_position_size', 10000)
         
-        # Borsa bazlı trading costs - config'den yükleniyor
-        self.exchange_fees = risk_config.get('exchange_fees', {
-            'binance': {'maker': 0.001, 'taker': 0.001},
-            'bybit': {'maker': 0.001, 'taker': 0.001},
-            'okx': {'maker': 0.001, 'taker': 0.001}
-        })
+        # Position sizing configuration
+        position_sizing_config = risk_config.get('position_sizing', {})
+        self.position_sizing_method = position_sizing_config.get('method', 'kelly')
+        self.kelly_fraction = position_sizing_config.get('kelly_fraction', 0.25)
+        self.fixed_amount = position_sizing_config.get('fixed_amount', 100)
+        self.percentage_amount = position_sizing_config.get('percentage', 0.02)
         
-        self.slippage_config = risk_config.get('slippage_config', {
-            'base_slippage': 0.0005,
-            'volatility_multiplier': 2.0,
-            'volume_multiplier': 1.0
-        })
+        # Stop loss and take profit configuration
+        stop_loss_config = risk_config.get('stop_loss', {})
+        self.default_stop_loss = stop_loss_config.get('default_percentage', 0.02)
+        self.trailing_stop_enabled = stop_loss_config.get('trailing_enabled', True)
+        self.trailing_stop_distance = stop_loss_config.get('trailing_distance', 0.01)
         
-        self.funding_fee_config = risk_config.get('funding_fee_config', {
-            'base_rate': 0.0001,
-            'max_rate': 0.001,
-            'adjustment_period': 8  # hours
-        })
+        take_profit_config = risk_config.get('take_profit', {})
+        self.default_take_profit = take_profit_config.get('default_percentage', 0.04)
+        self.trailing_take_profit_enabled = take_profit_config.get('trailing_enabled', True)
+        self.trailing_take_profit_distance = take_profit_config.get('trailing_distance', 0.005)
         
-        # Position sizing parametreleri
-        self.default_risk_per_trade = risk_config.get('default_risk_per_trade', 0.01)  # %1
-        self.min_position_size = risk_config.get('min_position_size', 10)  # $10
-        self.max_position_size = risk_config.get('max_position_size', 1000)  # $1000
-        
-        # Kelly criterion parametreleri
-        self.kelly_fraction = risk_config.get('kelly_fraction', 0.25)  # Maksimum Kelly'nin %25'i
-        self.win_rate = risk_config.get('historical_win_rate', 0.55)  # %55 kazanma oranı
-        self.avg_win_loss_ratio = risk_config.get('avg_win_loss_ratio', 1.5)  # 1.5:1 oran
-        
-        # Portfolio tracking
-        self.portfolio_value = risk_config.get('initial_portfolio_value', 10000)
-        self.daily_pnl = 0
-        self.open_positions_count = 0
-        
-        # Performance tracking
-        self.risk_metrics = {
-            'total_trades': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'max_drawdown': 0,
-            'sharpe_ratio': 0
+        # Exchange-specific trading costs
+        exchange_fees_config = risk_config.get('exchange_fees', {})
+        self.exchange_fees = {
+            'binance': exchange_fees_config.get('binance', {'maker': 0.001, 'taker': 0.001}),
+            'bybit': exchange_fees_config.get('bybit', {'maker': 0.001, 'taker': 0.001}),
+            'okx': exchange_fees_config.get('okx', {'maker': 0.0008, 'taker': 0.001})
         }
         
-        logger.info("🛡️ Risk Manager initialized with dynamic configuration")
+        # Slippage configuration
+        slippage_config = risk_config.get('slippage_config', {})
+        self.base_slippage = slippage_config.get('base_slippage', 0.0005)
+        self.volatility_multiplier = slippage_config.get('volatility_multiplier', 2.0)
+        self.volume_multiplier = slippage_config.get('volume_multiplier', 1.0)
+        
+        # Funding fee configuration
+        funding_config = risk_config.get('funding_fee_config', {})
+        self.base_funding_rate = funding_config.get('base_rate', 0.0001)
+        self.max_funding_rate = funding_config.get('max_rate', 0.001)
+        self.funding_adjustment_period = funding_config.get('adjustment_period', 8)
+        
+        # Dynamic correlation threshold
+        self.dynamic_correlation_threshold = self.correlation_threshold
+        
+        # Account balance (will be updated)
+        self.account_balance = 10000  # Default
+        
+        # Performance tracking
+        self.daily_pnl = 0
+        self.total_trades = 0
+        self.winning_trades = 0
+        
+        logger.info("🔒 RiskManager initialized with config parameters")
+        logger.info(f"📊 Risk settings: Portfolio={self.max_portfolio_risk:.1%}, Position={self.max_position_risk:.1%}, Daily Loss={self.max_daily_loss:.1%}")
+    
+    async def update_config_parameters(self, new_config: Dict[str, Any]):
+        """Update risk parameters from new config"""
+        try:
+            risk_config = new_config.get('trading', {}).get('risk_management', {})
+            
+            # Update core risk parameters
+            self.max_portfolio_risk = risk_config.get('max_portfolio_risk', self.max_portfolio_risk)
+            self.max_position_risk = risk_config.get('max_position_risk', self.max_position_risk)
+            self.max_daily_loss = risk_config.get('max_daily_loss', self.max_daily_loss)
+            self.max_open_positions = risk_config.get('max_open_positions', self.max_open_positions)
+            self.correlation_threshold = risk_config.get('correlation_threshold', self.correlation_threshold)
+            self.correlation_adjustment_factor = risk_config.get('correlation_adjustment_factor', self.correlation_adjustment_factor)
+            self.min_position_size = risk_config.get('min_position_size', self.min_position_size)
+            self.max_position_size = risk_config.get('max_position_size', self.max_position_size)
+            
+            # Update position sizing
+            position_sizing_config = risk_config.get('position_sizing', {})
+            self.position_sizing_method = position_sizing_config.get('method', self.position_sizing_method)
+            self.kelly_fraction = position_sizing_config.get('kelly_fraction', self.kelly_fraction)
+            self.fixed_amount = position_sizing_config.get('fixed_amount', self.fixed_amount)
+            self.percentage_amount = position_sizing_config.get('percentage', self.percentage_amount)
+            
+            # Update stop loss and take profit
+            stop_loss_config = risk_config.get('stop_loss', {})
+            self.default_stop_loss = stop_loss_config.get('default_percentage', self.default_stop_loss)
+            self.trailing_stop_enabled = stop_loss_config.get('trailing_enabled', self.trailing_stop_enabled)
+            self.trailing_stop_distance = stop_loss_config.get('trailing_distance', self.trailing_stop_distance)
+            
+            take_profit_config = risk_config.get('take_profit', {})
+            self.default_take_profit = take_profit_config.get('default_percentage', self.default_take_profit)
+            self.trailing_take_profit_enabled = take_profit_config.get('trailing_enabled', self.trailing_take_profit_enabled)
+            self.trailing_take_profit_distance = take_profit_config.get('trailing_distance', self.trailing_take_profit_distance)
+            
+            # Update exchange fees
+            exchange_fees_config = risk_config.get('exchange_fees', {})
+            for exchange in ['binance', 'bybit', 'okx']:
+                if exchange in exchange_fees_config:
+                    self.exchange_fees[exchange].update(exchange_fees_config[exchange])
+            
+            # Update slippage and funding config
+            slippage_config = risk_config.get('slippage_config', {})
+            self.base_slippage = slippage_config.get('base_slippage', self.base_slippage)
+            self.volatility_multiplier = slippage_config.get('volatility_multiplier', self.volatility_multiplier)
+            self.volume_multiplier = slippage_config.get('volume_multiplier', self.volume_multiplier)
+            
+            funding_config = risk_config.get('funding_fee_config', {})
+            self.base_funding_rate = funding_config.get('base_rate', self.base_funding_rate)
+            self.max_funding_rate = funding_config.get('max_rate', self.max_funding_rate)
+            self.funding_adjustment_period = funding_config.get('adjustment_period', self.funding_adjustment_period)
+            
+            logger.info("🔄 RiskManager config parameters updated")
+            logger.info(f"📊 Updated risk settings: Portfolio={self.max_portfolio_risk:.1%}, Position={self.max_position_risk:.1%}")
+            
+        except Exception as e:
+            logger.error(f"❌ Config update error: {e}")
+    
+    def get_current_risk_settings(self) -> Dict[str, Any]:
+        """Get current risk settings for monitoring"""
+        return {
+            'max_portfolio_risk': self.max_portfolio_risk,
+            'max_position_risk': self.max_position_risk,
+            'max_daily_loss': self.max_daily_loss,
+            'max_open_positions': self.max_open_positions,
+            'correlation_threshold': self.correlation_threshold,
+            'dynamic_correlation_threshold': self.dynamic_correlation_threshold,
+            'min_position_size': self.min_position_size,
+            'max_position_size': self.max_position_size,
+            'position_sizing_method': self.position_sizing_method,
+            'default_stop_loss': self.default_stop_loss,
+            'default_take_profit': self.default_take_profit,
+            'trailing_stop_enabled': self.trailing_stop_enabled,
+            'trailing_take_profit_enabled': self.trailing_take_profit_enabled,
+            'account_balance': self.account_balance,
+            'daily_pnl': self.daily_pnl,
+            'total_trades': self.total_trades,
+            'winning_trades': self.winning_trades
+        }
     
     async def update_dynamic_correlation_threshold(self, market_volatility: float, market_trend: float):
         """Update correlation threshold based on market conditions"""
@@ -116,14 +200,14 @@ class RiskManager:
             volatility = market_data.get('volatility', 0.5)
             
             # Calculate dynamic slippage
-            base_slippage = self.slippage_config['base_slippage']
-            volatility_mult = self.slippage_config['volatility_multiplier']
-            volume_mult = self.slippage_config['volume_multiplier']
+            base_slippage = self.base_slippage
+            volatility_mult = self.volatility_multiplier
+            volume_mult = self.volume_multiplier
             
             slippage = base_slippage * (1 + volatility * volatility_mult) * (volume_mult / max(volume / 1000000, 0.1))
             
             # Calculate funding fee (for perpetual futures)
-            funding_fee = self.funding_fee_config['base_rate']
+            funding_fee = self.base_funding_rate
             if market_data.get('funding_rate'):
                 funding_fee = market_data['funding_rate']
             
@@ -267,8 +351,8 @@ class RiskManager:
             strategy = action.get('strategy_used', 'unknown')
             
             # Update portfolio value for calculation
-            old_portfolio_value = self.portfolio_value
-            self.portfolio_value = account_balance
+            old_portfolio_value = self.account_balance # Changed from self.portfolio_value
+            self.account_balance = account_balance # Changed from self.portfolio_value
             
             # Call the existing calculate_position_size method
             result = await self.calculate_position_size(
@@ -280,7 +364,7 @@ class RiskManager:
             )
             
             # Restore original portfolio value
-            self.portfolio_value = old_portfolio_value
+            self.account_balance = old_portfolio_value # Changed from self.portfolio_value
             
             return result
             
@@ -363,32 +447,142 @@ class RiskManager:
             return {'allowed': True, 'reason': f'Correlation check error: {str(e)}'}
     
     async def _calculate_symbol_correlation(self, symbol1: str, symbol2: str) -> float:
-        """Calculate correlation between two symbols using historical data"""
+        """Calculate high-frequency correlation between two symbols"""
         try:
-            # Get historical data for both symbols
-            data1 = await self.get_historical_data(symbol1, '1h', limit=100)
-            data2 = await self.get_historical_data(symbol2, '1h', limit=100)
+            # Get high-frequency data (1-minute intervals for better correlation)
+            data1 = await self._get_high_frequency_data(symbol1, limit=100)
+            data2 = await self._get_high_frequency_data(symbol2, limit=100)
             
-            if not data1 or not data2:
-                return 0.5  # Default correlation if no data
+            if data1 is None or data2 is None or len(data1) < 50 or len(data2) < 50:
+                logger.warning(f"⚠️ Insufficient data for correlation: {symbol1} vs {symbol2}")
+                return 0.0
+            
+            # Align timestamps
+            aligned_data = self._align_time_series(data1, data2)
+            
+            if len(aligned_data) < 30:
+                logger.warning(f"⚠️ Insufficient aligned data for correlation: {symbol1} vs {symbol2}")
+                return 0.0
             
             # Calculate returns
-            returns1 = data1['close'].pct_change().dropna()
-            returns2 = data2['close'].pct_change().dropna()
-            
-            # Align data
-            min_length = min(len(returns1), len(returns2))
-            returns1 = returns1.tail(min_length)
-            returns2 = returns2.tail(min_length)
+            returns1 = aligned_data[f'{symbol1}_returns']
+            returns2 = aligned_data[f'{symbol2}_returns']
             
             # Calculate correlation
             correlation = returns1.corr(returns2)
             
-            return abs(correlation) if not np.isnan(correlation) else 0.5
+            # Handle NaN values
+            if pd.isna(correlation):
+                return 0.0
+            
+            return abs(correlation)  # Return absolute correlation
             
         except Exception as e:
-            logger.error(f"❌ Correlation calculation error: {e}")
-            return 0.5  # Default correlation
+            logger.error(f"❌ Symbol correlation calculation error: {e}")
+            return 0.0
+    
+    async def _get_high_frequency_data(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
+        """Get high-frequency price data for correlation calculation"""
+        try:
+            # Try to get 1-minute data for high-frequency correlation
+            if self.exchange_manager:
+                # Get 1-minute OHLCV data
+                data = await self.exchange_manager.get_historical_data(
+                    symbol=symbol,
+                    timeframe='1m',
+                    limit=limit
+                )
+                
+                if data is not None and len(data) > 0:
+                    # Calculate returns
+                    data['returns'] = data['close'].pct_change().dropna()
+                    return data
+            
+            # Fallback to 5-minute data if 1-minute not available
+            if self.exchange_manager:
+                data = await self.exchange_manager.get_historical_data(
+                    symbol=symbol,
+                    timeframe='5m',
+                    limit=limit
+                )
+                
+                if data is not None and len(data) > 0:
+                    data['returns'] = data['close'].pct_change().dropna()
+                    return data
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ High-frequency data fetch error for {symbol}: {e}")
+            return None
+    
+    def _align_time_series(self, data1: pd.DataFrame, data2: pd.DataFrame) -> pd.DataFrame:
+        """Align two time series for correlation calculation"""
+        try:
+            # Create a combined dataframe with aligned timestamps
+            df1 = data1[['timestamp', 'returns']].copy()
+            df2 = data2[['timestamp', 'returns']].copy()
+            
+            # Rename columns to avoid conflicts
+            df1.columns = ['timestamp', 'returns_1']
+            df2.columns = ['timestamp', 'returns_2']
+            
+            # Merge on timestamp with inner join
+            aligned = pd.merge(df1, df2, on='timestamp', how='inner')
+            
+            # Remove rows with NaN values
+            aligned = aligned.dropna()
+            
+            return aligned
+            
+        except Exception as e:
+            logger.error(f"❌ Time series alignment error: {e}")
+            return pd.DataFrame()
+    
+    async def _calculate_real_time_correlation(self, symbol: str, existing_positions: List[Dict]) -> Dict[str, Any]:
+        """Calculate real-time correlation with existing positions"""
+        try:
+            correlations = []
+            max_correlation = 0.0
+            most_correlated_symbol = None
+            
+            for position in existing_positions:
+                position_symbol = position.get('symbol', '')
+                if position_symbol and position_symbol != symbol:
+                    correlation = await self._calculate_symbol_correlation(symbol, position_symbol)
+                    correlations.append(correlation)
+                    
+                    if correlation > max_correlation:
+                        max_correlation = correlation
+                        most_correlated_symbol = position_symbol
+            
+            # Calculate average correlation
+            avg_correlation = np.mean(correlations) if correlations else 0.0
+            
+            # Calculate correlation-weighted exposure
+            total_correlated_exposure = 0.0
+            for i, position in enumerate(existing_positions):
+                if i < len(correlations):
+                    position_value = position.get('size', 0) * position.get('entry_price', 0)
+                    total_correlated_exposure += position_value * correlations[i]
+            
+            return {
+                'max_correlation': max_correlation,
+                'avg_correlation': avg_correlation,
+                'correlated_symbol': most_correlated_symbol,
+                'total_correlated_exposure': total_correlated_exposure,
+                'correlation_count': len(correlations)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Real-time correlation calculation error: {e}")
+            return {
+                'max_correlation': 0.0,
+                'avg_correlation': 0.0,
+                'correlated_symbol': None,
+                'total_correlated_exposure': 0.0,
+                'correlation_count': 0
+            }
     
     async def _calculate_trading_costs(self, symbol: str, position_size: float, price: float) -> Dict[str, Any]:
         """Calculate trading costs including fees, slippage, and funding"""
@@ -439,7 +633,7 @@ class RiskManager:
             account_balance = self.get_account_balance()
             
             # Check minimum position size
-            min_position_value = self.config.get('min_position_size', 10)
+            min_position_value = self.min_position_size
             if position_value < min_position_value:
                 return {
                     'allowed': False,
@@ -447,7 +641,7 @@ class RiskManager:
                 }
             
             # Check maximum position size
-            max_position_value = self.config.get('max_position_size', 10000)
+            max_position_value = self.max_position_size
             if position_value > max_position_value:
                 return {
                     'allowed': True,
@@ -457,7 +651,7 @@ class RiskManager:
             
             # Check portfolio percentage
             portfolio_pct = position_value / account_balance
-            max_portfolio_pct = self.config.get('max_position_risk', 0.01)
+            max_portfolio_pct = self.max_position_risk
             if portfolio_pct > max_portfolio_pct:
                 max_allowed_value = account_balance * max_portfolio_pct
                 return {
@@ -500,7 +694,7 @@ class RiskManager:
             # Real correlation calculation
             correlation_check = await self._calculate_price_correlation(symbol, current_positions)
             
-            if correlation_check['max_correlation'] > self.correlation_limit:
+            if correlation_check['max_correlation'] > self.correlation_threshold: # Changed from self.correlation_limit
                 return {
                     'allowed': False,
                     'reason': f"High correlation detected: {correlation_check['max_correlation']:.3f} with {correlation_check['correlated_symbol']}"
@@ -618,7 +812,7 @@ class RiskManager:
                 daily_pnl = 0
             
             # Calculate daily loss percentage
-            daily_loss_pct = abs(daily_pnl) / self.portfolio_value if daily_pnl < 0 else 0
+            daily_loss_pct = abs(daily_pnl) / self.account_balance if daily_pnl < 0 else 0 # Changed from self.portfolio_value
             
             if daily_loss_pct >= self.max_daily_loss:
                 return {
@@ -639,7 +833,7 @@ class RiskManager:
         """Risk miktarını hesapla"""
         try:
             # Base risk amount
-            base_risk = self.portfolio_value * self.default_risk_per_trade
+            base_risk = self.account_balance * self.percentage_amount # Changed from self.portfolio_value
             
             # Adjust based on confidence
             confidence_multiplier = min(2.0, max(0.5, confidence * 1.5))
@@ -656,13 +850,13 @@ class RiskManager:
             
             # Kelly Criterion adjustment
             kelly_optimal = self._calculate_kelly_criterion()
-            kelly_multiplier = min(1.0, kelly_optimal / self.default_risk_per_trade)
+            kelly_multiplier = min(1.0, kelly_optimal / self.percentage_amount) # Changed from self.default_risk_per_trade
             
             # Final risk amount
             risk_amount = base_risk * confidence_multiplier * strategy_multiplier * kelly_multiplier
             
             # Apply limits
-            max_risk = self.portfolio_value * self.max_portfolio_risk
+            max_risk = self.account_balance * self.max_portfolio_risk
             risk_amount = min(risk_amount, max_risk)
             
             return max(self.min_position_size, risk_amount)
@@ -695,13 +889,13 @@ class RiskManager:
             
         except Exception as e:
             logger.error(f"❌ Kelly criterion calculation error: {e}")
-            return self.default_risk_per_trade
+            return self.percentage_amount # Changed from self.default_risk_per_trade
     
     async def update_portfolio_value(self, new_value: float) -> None:
         """Portfolio değerini güncelle"""
         try:
-            self.portfolio_value = max(1000, new_value)  # Minimum $1000
-            logger.debug(f"💰 Portfolio value updated: ${self.portfolio_value:,.2f}")
+            self.account_balance = max(1000, new_value)  # Minimum $1000 # Changed from self.portfolio_value
+            logger.debug(f"💰 Portfolio value updated: ${self.account_balance:,.2f}") # Changed from self.portfolio_value
             
         except Exception as e:
             logger.error(f"❌ Portfolio value update error: {e}")
@@ -709,8 +903,10 @@ class RiskManager:
     async def update_position_count(self, count: int) -> None:
         """Açık pozisyon sayısını güncelle"""
         try:
-            self.open_positions_count = max(0, count)
-            logger.debug(f"📊 Open positions count: {self.open_positions_count}")
+            # This method is not directly related to position_size calculation,
+            # but keeping it for consistency if it's used elsewhere.
+            # self.open_positions_count = max(0, count) # This line was removed from __init__
+            logger.debug(f"📊 Open positions count: {count}") # This line was removed from __init__
             
         except Exception as e:
             logger.error(f"❌ Position count update error: {e}")
@@ -751,16 +947,16 @@ class RiskManager:
         """Risk metriklerini döndür"""
         try:
             return {
-                'portfolio_value': self.portfolio_value,
+                'portfolio_value': self.account_balance, # Changed from self.portfolio_value
                 'max_portfolio_risk': self.max_portfolio_risk,
                 'max_daily_loss': self.max_daily_loss,
                 'max_open_positions': self.max_open_positions,
-                'current_open_positions': self.open_positions_count,
+                'current_open_positions': 0, # This line was removed from __init__
                 'correlation_limit': self.correlation_threshold, # Use correlation_threshold from config
                 'kelly_fraction': self.kelly_fraction,
                 'win_rate': self.win_rate,
                 'avg_win_loss_ratio': self.avg_win_loss_ratio,
-                'default_risk_per_trade': self.default_risk_per_trade
+                'default_risk_per_trade': self.percentage_amount # Changed from self.default_risk_per_trade
             }
             
         except Exception as e:
@@ -793,7 +989,7 @@ class RiskManager:
             
         except Exception as e:
             logger.error(f"❌ Enhanced Kelly calculation error: {e}")
-            return self.default_risk_per_trade * 0.5
+            return self.percentage_amount * 0.5 # Changed from self.default_risk_per_trade
     
     async def _get_volatility_adjustment(self, symbol: str) -> float:
         """Calculate volatility-based position size adjustment"""
@@ -921,7 +1117,7 @@ class RiskManager:
         try:
             # This should be implemented to get actual balance
             # For now, return default balance
-            return self.portfolio_value
+            return self.account_balance
         except Exception as e:
             logger.error(f"❌ Get account balance error: {e}")
             return 100000.0
@@ -993,12 +1189,12 @@ class RiskManager:
             market_data = await self._get_real_time_market_data(symbol, exchange)
             volume = market_data.get('volume', 1000000)
             volatility = market_data.get('volatility', 0.5)
-            funding_rate = market_data.get('funding_rate', self.funding_fee_config['base_rate'])
+            funding_rate = market_data.get('funding_rate', self.base_funding_rate)
             
             # Calculate dynamic slippage based on market conditions
-            base_slippage = self.slippage_config['base_slippage']
-            volatility_mult = self.slippage_config['volatility_multiplier']
-            volume_mult = self.slippage_config['volume_multiplier']
+            base_slippage = self.base_slippage
+            volatility_mult = self.volatility_multiplier
+            volume_mult = self.volume_multiplier
             
             # Adjust slippage based on volatility and volume
             slippage = base_slippage * (1 + volatility * volatility_mult)
@@ -1066,16 +1262,254 @@ class RiskManager:
             return await self._calculate_fallback_market_data(symbol, exchange)
     
     async def _fetch_real_time_exchange_data(self, symbol: str, exchange: str) -> Optional[Dict[str, Any]]:
-        """Fetch real-time data from exchange APIs"""
+        """Fetch real-time data from exchange APIs with actual order book and funding data"""
         try:
-            # This should be implemented with actual exchange API calls
-            # For now, simulate real-time data fetching
+            # Get real exchange instance
+            exchange_instance = await self._get_exchange_instance(exchange)
+            if not exchange_instance:
+                return await self._get_simulated_real_time_data(symbol, exchange)
             
-            # Simulate exchange API response
+            # Fetch real-time order book
+            order_book = await self._fetch_real_order_book(exchange_instance, symbol)
+            
+            # Fetch real-time funding rate
+            funding_rate = await self._fetch_real_funding_rate(exchange_instance, symbol)
+            
+            # Fetch real-time ticker data
+            ticker = await self._fetch_real_ticker(exchange_instance, symbol)
+            
+            # Calculate real-time slippage from order book
+            slippage = await self._calculate_real_slippage(order_book, ticker)
+            
+            # Calculate real-time volatility
+            volatility = await self._calculate_real_volatility(exchange_instance, symbol)
+            
+            return {
+                'volume': ticker.get('quoteVolume', 1000000),
+                'volatility': volatility,
+                'funding_rate': funding_rate,
+                'bid_ask_spread': slippage['bid_ask_spread'],
+                'order_book_depth': order_book,
+                'last_price': ticker.get('last', 50000),
+                'timestamp': datetime.now(),
+                'real_data': True,
+                'slippage_estimate': slippage['slippage_estimate']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Real-time exchange data fetch error: {e}")
+            return await self._get_simulated_real_time_data(symbol, exchange)
+    
+    async def _get_exchange_instance(self, exchange_name: str):
+        """Get CCXT exchange instance"""
+        try:
+            import ccxt
+            
+            # Exchange configuration
+            exchange_configs = {
+                'binance': {
+                    'apiKey': os.getenv('BINANCE_API_KEY', ''),
+                    'secret': os.getenv('BINANCE_SECRET', ''),
+                    'sandbox': True,
+                    'enableRateLimit': True
+                },
+                'bybit': {
+                    'apiKey': os.getenv('BYBIT_API_KEY', ''),
+                    'secret': os.getenv('BYBIT_SECRET', ''),
+                    'sandbox': True,
+                    'enableRateLimit': True
+                },
+                'okx': {
+                    'apiKey': os.getenv('OKX_API_KEY', ''),
+                    'secret': os.getenv('OKX_SECRET', ''),
+                    'password': os.getenv('OKX_PASSPHRASE', ''),
+                    'sandbox': True,
+                    'enableRateLimit': True
+                }
+            }
+            
+            config = exchange_configs.get(exchange_name, {})
+            exchange_class = getattr(ccxt, exchange_name)
+            exchange = exchange_class(config)
+            
+            # Test connection
+            await exchange.load_markets()
+            return exchange
+            
+        except Exception as e:
+            logger.error(f"❌ Exchange instance creation error: {e}")
+            return None
+    
+    async def _fetch_real_order_book(self, exchange, symbol: str) -> Dict[str, Any]:
+        """Fetch real order book data"""
+        try:
+            order_book = await exchange.fetch_order_book(symbol, limit=20)
+            
+            return {
+                'bids': order_book['bids'][:10],  # Top 10 bids
+                'asks': order_book['asks'][:10],  # Top 10 asks
+                'bid_volume': sum(bid[1] for bid in order_book['bids'][:10]),
+                'ask_volume': sum(ask[1] for ask in order_book['asks'][:10]),
+                'spread': order_book['asks'][0][0] - order_book['bids'][0][0] if order_book['asks'] and order_book['bids'] else 0,
+                'timestamp': order_book.get('timestamp', datetime.now().timestamp())
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Order book fetch error: {e}")
+            return {
+                'bids': [],
+                'asks': [],
+                'bid_volume': 0,
+                'ask_volume': 0,
+                'spread': 0,
+                'timestamp': datetime.now().timestamp()
+            }
+    
+    async def _fetch_real_funding_rate(self, exchange, symbol: str) -> float:
+        """Fetch real funding rate"""
+        try:
+            # Try to get funding rate for perpetual futures
+            if hasattr(exchange, 'fetch_funding_rate'):
+                funding_info = await exchange.fetch_funding_rate(symbol)
+                return funding_info.get('fundingRate', 0.0001)
+            else:
+                # For spot exchanges, return default
+                return 0.0001
+                
+        except Exception as e:
+            logger.error(f"❌ Funding rate fetch error: {e}")
+            return 0.0001
+    
+    async def _fetch_real_ticker(self, exchange, symbol: str) -> Dict[str, Any]:
+        """Fetch real ticker data"""
+        try:
+            ticker = await exchange.fetch_ticker(symbol)
+            
+            return {
+                'last': ticker.get('last', 0),
+                'bid': ticker.get('bid', 0),
+                'ask': ticker.get('ask', 0),
+                'volume': ticker.get('baseVolume', 0),
+                'quoteVolume': ticker.get('quoteVolume', 0),
+                'change': ticker.get('change', 0),
+                'percentage': ticker.get('percentage', 0)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Ticker fetch error: {e}")
+            return {
+                'last': 50000,
+                'bid': 49900,
+                'ask': 50100,
+                'volume': 1000000,
+                'quoteVolume': 1000000,
+                'change': 0,
+                'percentage': 0
+            }
+    
+    async def _calculate_real_slippage(self, order_book: Dict[str, Any], ticker: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate real slippage from order book"""
+        try:
+            if not order_book['bids'] or not order_book['asks']:
+                return {'bid_ask_spread': 0.0005, 'slippage_estimate': 0.0005}
+            
+            # Calculate bid-ask spread
+            best_bid = order_book['bids'][0][0]
+            best_ask = order_book['asks'][0][0]
+            mid_price = (best_bid + best_ask) / 2
+            bid_ask_spread = (best_ask - best_bid) / mid_price
+            
+            # Calculate slippage for different order sizes
+            slippage_estimates = {}
+            
+            # Small order (0.1% of total volume)
+            small_order_size = min(order_book['bid_volume'], order_book['ask_volume']) * 0.001
+            small_slippage = self._calculate_slippage_for_size(order_book, small_order_size, mid_price)
+            slippage_estimates['small'] = small_slippage
+            
+            # Medium order (1% of total volume)
+            medium_order_size = min(order_book['bid_volume'], order_book['ask_volume']) * 0.01
+            medium_slippage = self._calculate_slippage_for_size(order_book, medium_order_size, mid_price)
+            slippage_estimates['medium'] = medium_slippage
+            
+            # Large order (5% of total volume)
+            large_order_size = min(order_book['bid_volume'], order_book['ask_volume']) * 0.05
+            large_slippage = self._calculate_slippage_for_size(order_book, large_order_size, mid_price)
+            slippage_estimates['large'] = large_slippage
+            
+            return {
+                'bid_ask_spread': bid_ask_spread,
+                'slippage_estimate': slippage_estimates['medium'],  # Default to medium
+                'slippage_by_size': slippage_estimates
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Real slippage calculation error: {e}")
+            return {'bid_ask_spread': 0.0005, 'slippage_estimate': 0.0005}
+    
+    def _calculate_slippage_for_size(self, order_book: Dict[str, Any], order_size: float, mid_price: float) -> float:
+        """Calculate slippage for specific order size"""
+        try:
+            if order_size <= 0 or mid_price <= 0:
+                return 0.0005
+            
+            # Calculate weighted average price for buy order
+            total_cost = 0
+            remaining_size = order_size
+            
+            for ask_price, ask_size in order_book['asks']:
+                if remaining_size <= 0:
+                    break
+                fill_size = min(remaining_size, ask_size)
+                total_cost += fill_size * ask_price
+                remaining_size -= fill_size
+            
+            if remaining_size > 0:
+                # Not enough liquidity, estimate higher slippage
+                return 0.01  # 1% slippage
+            
+            weighted_avg_price = total_cost / order_size
+            slippage = (weighted_avg_price - mid_price) / mid_price
+            
+            return max(slippage, 0.0001)  # Minimum 0.01% slippage
+            
+        except Exception as e:
+            logger.error(f"❌ Slippage calculation error: {e}")
+            return 0.0005
+    
+    async def _calculate_real_volatility(self, exchange, symbol: str) -> float:
+        """Calculate real volatility from recent price data"""
+        try:
+            # Fetch recent OHLCV data
+            ohlcv = await exchange.fetch_ohlcv(symbol, '1h', limit=24)
+            
+            if not ohlcv or len(ohlcv) < 12:
+                return 0.5
+            
+            # Calculate returns
+            closes = [candle[4] for candle in ohlcv]
+            returns = []
+            for i in range(1, len(closes)):
+                if closes[i-1] > 0:
+                    returns.append((closes[i] - closes[i-1]) / closes[i-1])
+            
+            if not returns:
+                return 0.5
+            
+            # Calculate volatility (annualized)
+            volatility = np.std(returns) * np.sqrt(24 * 365)
+            return min(volatility, 1.0)
+            
+        except Exception as e:
+            logger.error(f"❌ Real volatility calculation error: {e}")
+            return 0.5
+    
+    async def _get_simulated_real_time_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get simulated real-time data when API is not available"""
+        try:
             import random
             import time
             
-            # Get current timestamp
             current_time = datetime.now()
             
             # Simulate real-time funding rate (varies by exchange and time)
@@ -1099,7 +1533,11 @@ class RiskManager:
             # Simulate order book depth
             order_book_depth = {
                 'bids': [(random.uniform(0.99, 1.0), random.uniform(100, 1000)) for _ in range(10)],
-                'asks': [(random.uniform(1.0, 1.01), random.uniform(100, 1000)) for _ in range(10)]
+                'asks': [(random.uniform(1.0, 1.01), random.uniform(100, 1000)) for _ in range(10)],
+                'bid_volume': random.uniform(5000, 15000),
+                'ask_volume': random.uniform(5000, 15000),
+                'spread': spread,
+                'timestamp': current_time.timestamp()
             }
             
             return {
@@ -1108,55 +1546,14 @@ class RiskManager:
                 'funding_rate': funding_rate,
                 'bid_ask_spread': spread,
                 'order_book_depth': order_book_depth,
-                'last_price': random.uniform(50000, 60000),  # Simulate BTC price
-                'timestamp': current_time
+                'last_price': random.uniform(50000, 60000),
+                'timestamp': current_time,
+                'real_data': False,
+                'slippage_estimate': spread * 2
             }
             
         except Exception as e:
-            logger.error(f"❌ Real-time exchange data fetch error: {e}")
-            return None
-    
-    async def _calculate_fallback_market_data(self, symbol: str, exchange: str) -> Dict[str, Any]:
-        """Calculate fallback market data when real-time data is unavailable"""
-        try:
-            # Get historical data for fallback calculation
-            historical_data = await self.get_historical_data(symbol, '1h', limit=24)
-            
-            if historical_data is not None and len(historical_data) > 0:
-                # Calculate volatility from historical data
-                returns = historical_data['close'].pct_change().dropna()
-                volatility = returns.std() * np.sqrt(24) if len(returns) > 0 else 0.5
-                
-                # Get volume from historical data
-                volume = historical_data['volume'].iloc[-1] if 'volume' in historical_data.columns else 1000000
-                
-                # Calculate bid-ask spread estimate
-                high_low_spread = (historical_data['high'].iloc[-1] - historical_data['low'].iloc[-1]) / historical_data['close'].iloc[-1]
-                bid_ask_spread = high_low_spread * 0.1  # Estimate 10% of high-low range
-                
-                return {
-                    'volume': volume,
-                    'volatility': min(volatility, 1.0),
-                    'funding_rate': 0.0001,  # Default funding rate
-                    'bid_ask_spread': max(bid_ask_spread, 0.0001),
-                    'order_book_depth': {},
-                    'last_price': historical_data['close'].iloc[-1],
-                    'timestamp': datetime.now()
-                }
-            else:
-                # Ultimate fallback
-                return {
-                    'volume': 1000000,
-                    'volatility': 0.5,
-                    'funding_rate': 0.0001,
-                    'bid_ask_spread': 0.0005,
-                    'order_book_depth': {},
-                    'last_price': 50000,
-                    'timestamp': datetime.now()
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Fallback market data calculation error: {e}")
+            logger.error(f"❌ Simulated data generation error: {e}")
             return {
                 'volume': 1000000,
                 'volatility': 0.5,
@@ -1164,5 +1561,7 @@ class RiskManager:
                 'bid_ask_spread': 0.0005,
                 'order_book_depth': {},
                 'last_price': 50000,
-                'timestamp': datetime.now()
+                'timestamp': datetime.now(),
+                'real_data': False,
+                'slippage_estimate': 0.001
             }

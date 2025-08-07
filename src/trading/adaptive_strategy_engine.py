@@ -616,32 +616,248 @@ class AdaptiveStrategyEngine:
             return 0.5
     
     async def _save_optimization_results(self, strategy_name: str, best_params: Dict, best_result: Dict):
-        """Save optimization results to file"""
+        """Save optimization results to config file and database"""
         try:
-            results_dir = Path('optimization_results')
-            results_dir.mkdir(exist_ok=True)
+            # Save to config file
+            await self._save_to_config_file(strategy_name, best_params)
             
-            results_file = results_dir / f'{strategy_name}_optimization_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+            # Save to database
+            await self._save_to_database(strategy_name, best_params, best_result)
             
-            import json
-            with open(results_file, 'w') as f:
-                json.dump({
-                    'strategy_name': strategy_name,
-                    'best_params': best_params,
-                    'best_score': best_result.get('score', 0),
-                    'optimization_date': datetime.now().isoformat(),
-                    'result_summary': {
-                        'total_return': best_result.get('result', {}).get('total_return', 0),
-                        'sharpe_ratio': best_result.get('result', {}).get('sharpe_ratio', 0),
-                        'max_drawdown': best_result.get('result', {}).get('max_drawdown', 0),
-                        'win_rate': best_result.get('result', {}).get('win_rate', 0)
-                    }
-                }, f, indent=2)
+            # Save detailed results to JSON file
+            await self._save_detailed_results(strategy_name, best_params, best_result)
             
-            logger.info(f"💾 Optimization results saved to {results_file}")
+            logger.info(f"💾 Optimization results saved for {strategy_name}")
             
         except Exception as e:
             logger.error(f"❌ Optimization results save error: {e}")
+    
+    async def _save_to_config_file(self, strategy_name: str, best_params: Dict):
+        """Save optimized parameters to config file"""
+        try:
+            import yaml
+            from pathlib import Path
+            
+            config_path = Path('config/config.yaml')
+            
+            # Load current config
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config_data = yaml.safe_load(f)
+            else:
+                config_data = {}
+            
+            # Ensure strategy_parameters section exists
+            if 'strategy_parameters' not in config_data:
+                config_data['strategy_parameters'] = {}
+            
+            # Update strategy parameters
+            if strategy_name not in config_data['strategy_parameters']:
+                config_data['strategy_parameters'][strategy_name] = {}
+            
+            # Update with optimized parameters
+            config_data['strategy_parameters'][strategy_name].update(best_params)
+            
+            # Add optimization metadata
+            if 'optimization_metadata' not in config_data:
+                config_data['optimization_metadata'] = {}
+            
+            config_data['optimization_metadata'][strategy_name] = {
+                'last_optimization': datetime.now().isoformat(),
+                'optimized_parameters': list(best_params.keys()),
+                'optimization_method': 'bayesian_optimization'
+            }
+            
+            # Save updated config
+            with open(config_path, 'w') as f:
+                yaml.dump(config_data, f, default_flow_style=False, indent=2)
+            
+            logger.info(f"📝 Config file updated with optimized parameters for {strategy_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Config file save error: {e}")
+    
+    async def _save_to_database(self, strategy_name: str, best_params: Dict, best_result: Dict):
+        """Save optimization results to database"""
+        try:
+            # This would require database manager integration
+            # For now, save to a JSON file as database backup
+            optimization_data = {
+                'strategy_name': strategy_name,
+                'optimized_parameters': best_params,
+                'optimization_result': best_result,
+                'timestamp': datetime.now().isoformat(),
+                'optimization_method': 'bayesian_optimization'
+            }
+            
+            # Save to optimization history file
+            import json
+            from pathlib import Path
+            
+            history_file = Path('data/optimization_history.json')
+            history_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Load existing history
+            if history_file.exists():
+                with open(history_file, 'r') as f:
+                    history = json.load(f)
+            else:
+                history = []
+            
+            # Add new optimization result
+            history.append(optimization_data)
+            
+            # Keep only last 100 optimizations
+            if len(history) > 100:
+                history = history[-100:]
+            
+            # Save updated history
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=2)
+            
+            logger.info(f"💾 Optimization history saved to database backup for {strategy_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Database save error: {e}")
+    
+    async def _save_detailed_results(self, strategy_name: str, best_params: Dict, best_result: Dict):
+        """Save detailed optimization results to JSON file"""
+        try:
+            import json
+            from pathlib import Path
+            
+            # Create results directory
+            results_dir = Path('data/optimization_results')
+            results_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create detailed results file
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{strategy_name}_optimization_{timestamp}.json"
+            filepath = results_dir / filename
+            
+            detailed_results = {
+                'strategy_name': strategy_name,
+                'optimization_timestamp': datetime.now().isoformat(),
+                'optimization_method': 'bayesian_optimization',
+                'best_parameters': best_params,
+                'optimization_result': best_result,
+                'performance_metrics': {
+                    'total_return': best_result.get('total_return', 0),
+                    'sharpe_ratio': best_result.get('sharpe_ratio', 0),
+                    'max_drawdown': best_result.get('max_drawdown', 0),
+                    'win_rate': best_result.get('win_rate', 0),
+                    'profit_factor': best_result.get('profit_factor', 0),
+                    'calmar_ratio': best_result.get('calmar_ratio', 0)
+                },
+                'parameter_analysis': await self._analyze_parameter_impact(strategy_name, best_params),
+                'market_conditions': best_result.get('market_conditions', {}),
+                'trading_costs': best_result.get('trading_costs', {})
+            }
+            
+            # Save to file
+            with open(filepath, 'w') as f:
+                json.dump(detailed_results, f, indent=2)
+            
+            logger.info(f"📊 Detailed optimization results saved: {filename}")
+            
+        except Exception as e:
+            logger.error(f"❌ Detailed results save error: {e}")
+    
+    async def _analyze_parameter_impact(self, strategy_name: str, best_params: Dict) -> Dict[str, Any]:
+        """Analyze the impact of optimized parameters"""
+        try:
+            # Get original parameters
+            original_params = self.adaptive_params[strategy_name].copy()
+            
+            # Calculate parameter changes
+            parameter_changes = {}
+            for param_name, optimized_value in best_params.items():
+                if param_name in original_params:
+                    original_value = original_params[param_name]
+                    if isinstance(original_value, (int, float)) and isinstance(optimized_value, (int, float)):
+                        change_pct = ((optimized_value - original_value) / original_value) * 100
+                        parameter_changes[param_name] = {
+                            'original': original_value,
+                            'optimized': optimized_value,
+                            'change_pct': change_pct,
+                            'change_type': 'increase' if change_pct > 0 else 'decrease'
+                        }
+            
+            # Categorize parameters
+            risk_params = ['stop_loss', 'risk_per_trade', 'max_hold_bars']
+            profit_params = ['profit_target', 'trailing_stop_distance']
+            technical_params = ['rsi_period', 'bb_period', 'fast_sma', 'slow_sma']
+            
+            analysis = {
+                'parameter_changes': parameter_changes,
+                'risk_parameter_changes': {k: v for k, v in parameter_changes.items() if k in risk_params},
+                'profit_parameter_changes': {k: v for k, v in parameter_changes.items() if k in profit_params},
+                'technical_parameter_changes': {k: v for k, v in parameter_changes.items() if k in technical_params},
+                'total_parameters_optimized': len(parameter_changes),
+                'average_change_pct': np.mean([abs(v['change_pct']) for v in parameter_changes.values()]) if parameter_changes else 0
+            }
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"❌ Parameter impact analysis error: {e}")
+            return {}
+    
+    async def load_optimized_parameters(self, strategy_name: str) -> Dict[str, Any]:
+        """Load optimized parameters from config"""
+        try:
+            import yaml
+            from pathlib import Path
+            
+            config_path = Path('config/config.yaml')
+            
+            if not config_path.exists():
+                logger.warning(f"⚠️ Config file not found, using default parameters for {strategy_name}")
+                return self.adaptive_params.get(strategy_name, {})
+            
+            # Load config
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            # Get strategy parameters
+            strategy_params = config_data.get('strategy_parameters', {}).get(strategy_name, {})
+            
+            if strategy_params:
+                logger.info(f"📋 Loaded optimized parameters for {strategy_name}")
+                return strategy_params
+            else:
+                logger.warning(f"⚠️ No optimized parameters found for {strategy_name}, using defaults")
+                return self.adaptive_params.get(strategy_name, {})
+                
+        except Exception as e:
+            logger.error(f"❌ Load optimized parameters error: {e}")
+            return self.adaptive_params.get(strategy_name, {})
+    
+    async def get_optimization_history(self, strategy_name: str = None, limit: int = 10) -> List[Dict]:
+        """Get optimization history"""
+        try:
+            import json
+            from pathlib import Path
+            
+            history_file = Path('data/optimization_history.json')
+            
+            if not history_file.exists():
+                return []
+            
+            # Load history
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+            
+            # Filter by strategy if specified
+            if strategy_name:
+                history = [h for h in history if h.get('strategy_name') == strategy_name]
+            
+            # Return recent history
+            return history[-limit:] if limit else history
+            
+        except Exception as e:
+            logger.error(f"❌ Get optimization history error: {e}")
+            return []
     
     async def update_strategy_performance(self, strategy_name: str, trade_result: Dict):
         """Update strategy performance tracking"""

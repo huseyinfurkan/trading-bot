@@ -1204,201 +1204,312 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Enhanced decision engine fatal error: {e}")
     
-    async def _make_enhanced_trading_decision(self, symbol: str, analysis: Dict) -> Optional[Dict]:
-        """Enhanced trading decision with multiple criteria, risk management, and trading costs"""
+    async def _calculate_trading_costs(self, symbol: str, position_size: float, price: float, 
+                                     exchange: str = 'binance') -> Dict[str, Any]:
+        """Calculate real-time trading costs based on current market conditions"""
         try:
-            # Extract analysis components
-            market_condition = analysis.get('market_condition', {})
-            ai_signals = analysis.get('ai_signals', {})
-            risk_assessment = analysis.get('risk_assessment', {})
-            technical_analysis = analysis.get('technical_analysis', {})
+            # Get real-time market data from RiskManager
+            market_data = await self.risk_manager._get_real_time_market_data(symbol, exchange)
             
-            # Decision criteria with dynamic thresholds
-            min_ai_confidence = 0.6
-            min_signal_quality = 0.7
-            max_risk_level = 'MEDIUM'
+            # Extract real-time values
+            real_volume = market_data.get('volume', 1000000)
+            real_volatility = market_data.get('volatility', 0.5)
+            real_funding_rate = market_data.get('funding_rate', 0.0001)
+            real_bid_ask_spread = market_data.get('bid_ask_spread', 0.0005)
+            real_slippage_estimate = market_data.get('slippage_estimate', 0.0005)
+            order_book_depth = market_data.get('order_book_depth', {})
             
-            # Check AI confidence
-            ai_confidence = ai_signals.get('confidence', 0)
-            if ai_confidence < min_ai_confidence:
-                return {'action': 'HOLD', 'reason': f'Low AI confidence: {ai_confidence:.2f}'}
+            # Get exchange-specific fees
+            exchange_fees = self.risk_manager.exchange_fees.get(exchange, {'maker': 0.001, 'taker': 0.001})
+            trading_fee = exchange_fees['taker']  # Use taker fee for market orders
             
-            # Check signal quality
-            signal_quality = ai_signals.get('signal_quality', 0.5)
-            if signal_quality < min_signal_quality:
-                return {'action': 'HOLD', 'reason': f'Low signal quality: {signal_quality:.2f}'}
+            # Calculate dynamic slippage based on real market conditions
+            base_slippage = self.risk_manager.base_slippage
+            volatility_mult = self.risk_manager.volatility_multiplier
+            volume_mult = self.risk_manager.volume_multiplier
             
-            # Check risk level
-            risk_level = risk_assessment.get('risk_level', 'UNKNOWN')
-            if risk_level == 'HIGH':
-                return {'action': 'HOLD', 'reason': 'High risk level detected'}
+            # Adjust slippage based on real market data
+            slippage = base_slippage * (1 + real_volatility * volatility_mult)
+            slippage *= max(0.5, min(2.0, volume_mult / max(real_volume / 1000000, 0.1)))
             
-            # Check market conditions
-            market_regime = market_condition.get('regime', 'unknown')
-            if market_regime == 'volatile_market':
-                # Be more conservative in volatile markets
-                min_ai_confidence = 0.7
-                if ai_confidence < min_ai_confidence:
-                    return {'action': 'HOLD', 'reason': f'Volatile market requires higher confidence: {ai_confidence:.2f}'}
+            # Use real slippage estimate if available
+            if real_slippage_estimate > 0:
+                slippage = real_slippage_estimate
             
-            # Get AI action
-            ai_action = ai_signals.get('action', 'HOLD')
-            if ai_action == 'HOLD':
-                return {'action': 'HOLD', 'reason': 'AI suggests HOLD'}
+            # Calculate position-specific slippage
+            position_value = position_size * price
+            position_slippage = self._calculate_position_specific_slippage(
+                position_value, order_book_depth, real_bid_ask_spread
+            )
             
-            # Calculate entry price and stop loss
-            current_price = technical_analysis.get('current_price', 0)
-            if current_price <= 0:
-                return {'action': 'HOLD', 'reason': 'Invalid current price'}
+            # Use the higher of calculated and position-specific slippage
+            final_slippage = max(slippage, position_slippage)
             
-            # Calculate trading costs
-            trading_costs = await self._calculate_trading_costs(symbol, current_price, market_condition)
+            # Calculate funding fee based on real rate
+            funding_fee = real_funding_rate
             
-            # Adjust entry price for slippage
-            slippage = trading_costs['slippage']
-            if ai_action == 'BUY':
-                adjusted_entry_price = current_price * (1 + slippage)
-            else:  # SELL
-                adjusted_entry_price = current_price * (1 - slippage)
+            # Calculate additional costs
+            additional_costs = await self._calculate_additional_trading_costs(symbol, position_value, exchange)
             
-            # Dynamic stop loss based on volatility
-            volatility = market_condition.get('volatility', 0.5)
-            stop_loss_pct = 0.02 + (volatility * 0.03)  # 2-5% based on volatility
+            # Total cost calculation
+            total_cost_pct = trading_fee + final_slippage + funding_fee + additional_costs.get('total', 0)
+            total_cost_usd = position_value * total_cost_pct
             
-            if ai_action == 'BUY':
-                stop_loss = adjusted_entry_price * (1 - stop_loss_pct)
-                take_profit = adjusted_entry_price * (1 + stop_loss_pct * 2)  # 2:1 reward/risk
-            else:  # SELL
-                stop_loss = adjusted_entry_price * (1 + stop_loss_pct)
-                take_profit = adjusted_entry_price * (1 - stop_loss_pct * 2)
-            
-            # Calculate position size using risk manager
-            try:
-                size_result = await self.risk_manager.calculate_position_size(
-                    symbol=symbol,
-                    entry_price=adjusted_entry_price,
-                    stop_loss=stop_loss,
-                    confidence=ai_confidence,
-                    strategy=analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi'),
-                    current_price=adjusted_entry_price,
-                    account_balance=risk_assessment.get('account_balance', 10000)
-                )
-                
-                if not size_result.get('allowed', False):
-                    return {'action': 'HOLD', 'reason': f'Risk check failed: {size_result.get("reason", "Unknown")}'}
-                
-                position_size = size_result['size']
-                
-                # Adjust position size for trading costs
-                total_costs = trading_costs['total_cost_pct']
-                adjusted_position_size = position_size * (1 - total_costs)
-                
-            except Exception as e:
-                logger.error(f"❌ Position size calculation error: {e}")
-                return {'action': 'HOLD', 'reason': 'Position size calculation failed'}
-            
-            # Check if adjusted position size is still viable
-            min_position_value = 10  # $10 minimum
-            position_value = adjusted_position_size * adjusted_entry_price
-            if position_value < min_position_value:
-                return {'action': 'HOLD', 'reason': f'Position too small after costs: ${position_value:.2f}'}
-            
-            # Final decision with trading costs included
-            decision = {
-                'action': ai_action,
-                'entry_price': adjusted_entry_price,
-                'original_price': current_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'confidence': ai_confidence,
-                'signal_quality': signal_quality,
-                'strategy': analysis.get('recommended_strategy', 'bollinger_rsi_stochrsi'),
-                'reason': f"Strong {ai_action} signal with {ai_confidence:.2f} confidence",
-                'risk_amount': size_result.get('risk_amount', 0),
-                'position_size': adjusted_position_size,
-                'original_position_size': position_size,
-                'market_regime': market_regime,
-                'volatility': volatility,
-                'leverage': size_result.get('leverage_used', 1.0),
-                'trading_costs': trading_costs,
-                'slippage': slippage,
-                'funding_fee': trading_costs['funding_fee'],
-                'total_costs_pct': trading_costs['total_cost_pct']
+            return {
+                'trading_fee': trading_fee,
+                'slippage': final_slippage,
+                'funding_fee': funding_fee,
+                'additional_costs': additional_costs,
+                'total_cost_pct': total_cost_pct,
+                'total_cost_usd': total_cost_usd,
+                'exchange': exchange,
+                'real_data': market_data.get('real_data', False),
+                'market_conditions': {
+                    'volume': real_volume,
+                    'volatility': real_volatility,
+                    'bid_ask_spread': real_bid_ask_spread,
+                    'order_book_depth': order_book_depth
+                }
             }
             
-            return decision
+        except Exception as e:
+            logger.error(f"❌ Real-time trading costs calculation error: {e}")
+            return {
+                'trading_fee': 0.001,
+                'slippage': 0.0005,
+                'funding_fee': 0.0001,
+                'additional_costs': {'total': 0},
+                'total_cost_pct': 0.0016,
+                'total_cost_usd': position_size * price * 0.0016,
+                'exchange': exchange,
+                'real_data': False,
+                'market_conditions': {}
+            }
+    
+    def _calculate_position_specific_slippage(self, position_value: float, order_book: Dict, 
+                                            base_spread: float) -> float:
+        """Calculate slippage based on position size and order book depth"""
+        try:
+            if not order_book or 'bids' not in order_book or 'asks' not in order_book:
+                return base_spread * 2  # Default to 2x base spread
+            
+            # Calculate available liquidity
+            bid_volume = order_book.get('bid_volume', 0)
+            ask_volume = order_book.get('ask_volume', 0)
+            
+            if bid_volume <= 0 or ask_volume <= 0:
+                return base_spread * 3  # High slippage if no liquidity
+            
+            # Calculate position size relative to available liquidity
+            position_volume_ratio = position_value / min(bid_volume, ask_volume)
+            
+            # Adjust slippage based on position size
+            if position_volume_ratio < 0.01:  # Small position
+                return base_spread * 1.2
+            elif position_volume_ratio < 0.1:  # Medium position
+                return base_spread * 1.5
+            elif position_volume_ratio < 0.5:  # Large position
+                return base_spread * 2.0
+            else:  # Very large position
+                return base_spread * 3.0
+                
+        except Exception as e:
+            logger.error(f"❌ Position-specific slippage calculation error: {e}")
+            return base_spread * 2
+    
+    async def _calculate_additional_trading_costs(self, symbol: str, position_value: float, 
+                                                exchange: str) -> Dict[str, float]:
+        """Calculate additional trading costs"""
+        try:
+            additional_costs = {}
+            
+            # Network fees (for blockchain transactions)
+            network_fee = 0.0001  # 0.01%
+            additional_costs['network_fee'] = network_fee
+            
+            # Regulatory fees (if applicable)
+            regulatory_fee = 0.00005  # 0.005%
+            additional_costs['regulatory_fee'] = regulatory_fee
+            
+            # Platform fees (if using third-party platform)
+            platform_fee = 0.00005  # 0.005%
+            additional_costs['platform_fee'] = platform_fee
+            
+            # Exchange-specific additional fees
+            exchange_additional_fees = {
+                'binance': 0.00002,  # 0.002%
+                'bybit': 0.00003,    # 0.003%
+                'okx': 0.00002       # 0.002%
+            }
+            exchange_fee = exchange_additional_fees.get(exchange, 0.00002)
+            additional_costs['exchange_fee'] = exchange_fee
+            
+            # Total additional costs
+            total_additional = sum(additional_costs.values())
+            additional_costs['total'] = total_additional
+            
+            return additional_costs
             
         except Exception as e:
-            logger.error(f"❌ Enhanced trading decision error for {symbol}: {e}")
-            return None
+            logger.error(f"❌ Additional trading costs calculation error: {e}")
+            return {'total': 0}
     
-    async def _execute_enhanced_trading_decision(self, symbol: str, decision: Dict) -> Optional[Dict]:
-        """Execute trading decision with enhanced logging and error handling"""
+    async def _make_enhanced_trading_decision(self, symbol: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Make enhanced trading decision with real-time cost analysis"""
         try:
-            action = decision['action']
+            # Get current market data
+            current_price = analysis_result.get('current_price', 0)
+            if current_price <= 0:
+                return {'action': 'HOLD', 'reason': 'Invalid price data'}
             
-            if action in ['BUY', 'SELL']:
-                logger.info(f"🚀 {symbol} {action} decision executing...")
-                logger.info(f"   💰 Price: ${decision['entry_price']:.4f}")
-                logger.info(f"   🎯 Strategy: {decision['strategy']}")
-                logger.info(f"   📊 Confidence: {decision['confidence']:.2f}")
-                logger.info(f"   💼 Position Size: {decision['position_size']:.6f}")
-                logger.info(f"   🛡️ Stop Loss: ${decision['stop_loss']:.4f}")
-                logger.info(f"   🎯 Take Profit: ${decision['take_profit']:.4f}")
-                logger.info(f"   📈 Market Regime: {decision['market_regime']}")
-                logger.info(f"   📊 Volatility: {decision['volatility']:.2f}")
-                
-                # Execute through position manager
-                position_result = await self.position_manager.open_position(
-                    symbol=symbol,
-                    action={
-                        'action': action,
-                        'entry_price': decision['entry_price'],
-                        'stop_loss': decision['stop_loss'],
-                        'take_profit': decision['take_profit'],
-                        'size': decision['position_size']
-                    },
-                    confidence=decision['confidence'],
-                    strategy=decision['strategy']
-                )
-                
-                if position_result:
-                    logger.success(f"✅ {symbol} position opened: {position_result.get('position_id', 'N/A')}")
-                    
-                    # Update strategy performance
-                    await self.strategy_engine.update_strategy_performance(
-                        decision['strategy'],
-                        {
-                            'pnl': 0,  # Will be updated when position closes
-                            'entry_price': decision['entry_price'],
-                            'exit_price': decision['entry_price'],
-                            'duration': 0
-                        }
-                    )
-                    
+            # Get AI signals
+            ai_signals = analysis_result.get('ai_signals', {})
+            confidence = ai_signals.get('confidence', 0.5)
+            signal_strength = ai_signals.get('signal_strength', 0.5)
+            action = ai_signals.get('action', 'HOLD')
+            
+            # Get market conditions
+            market_conditions = analysis_result.get('market_conditions', {})
+            volatility = market_conditions.get('volatility', 0.5)
+            
+            # Get risk assessment
+            risk_assessment = analysis_result.get('risk_assessment', {})
+            risk_level = risk_assessment.get('risk_level', 'medium')
+            
+            # Calculate position size
+            position_size = await self.risk_manager.calculate_position_size(
+                symbol=symbol,
+                price=current_price,
+                confidence=confidence,
+                strategy='enhanced_live_engine'
+            )
+            
+            # Calculate real-time trading costs
+            trading_costs = await self._calculate_trading_costs(
+                symbol=symbol,
+                position_size=position_size,
+                price=current_price,
+                exchange='binance'  # Default exchange
+            )
+            
+            # Adjust entry price based on real-time costs
+            adjusted_entry_price = current_price
+            if action == 'BUY':
+                adjusted_entry_price = current_price * (1 + trading_costs['slippage'])
+            elif action == 'SELL':
+                adjusted_entry_price = current_price * (1 - trading_costs['slippage'])
+            
+            # Calculate stop loss and take profit with real-time adjustments
+            stop_loss = self._calculate_dynamic_stop_loss(
+                adjusted_entry_price, action, volatility, trading_costs
+            )
+            take_profit = self._calculate_dynamic_take_profit(
+                adjusted_entry_price, action, volatility, trading_costs
+            )
+            
+            # Final decision logic with cost considerations
+            if action == 'BUY' and confidence > 0.6 and signal_strength > 0.5:
+                # Check if costs are reasonable
+                if trading_costs['total_cost_pct'] < 0.005:  # Less than 0.5% total cost
                     return {
-                        'success': True,
-                        'position_id': position_result.get('position_id'),
-                        'execution_time': datetime.now(),
-                        'details': position_result
+                        'action': 'BUY',
+                        'symbol': symbol,
+                        'entry_price': adjusted_entry_price,
+                        'position_size': position_size,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'confidence': confidence,
+                        'trading_costs': trading_costs,
+                        'reason': f"Strong buy signal with reasonable costs ({trading_costs['total_cost_pct']:.3%})"
                     }
                 else:
-                    logger.warning(f"⚠️ {symbol} position opening failed")
                     return {
-                        'success': False,
-                        'reason': 'Position opening failed',
-                        'execution_time': datetime.now()
+                        'action': 'HOLD',
+                        'reason': f"High trading costs: {trading_costs['total_cost_pct']:.3%}"
                     }
             
-            return None
+            elif action == 'SELL' and confidence > 0.6 and signal_strength > 0.5:
+                # Check if costs are reasonable
+                if trading_costs['total_cost_pct'] < 0.005:  # Less than 0.5% total cost
+                    return {
+                        'action': 'SELL',
+                        'symbol': symbol,
+                        'entry_price': adjusted_entry_price,
+                        'position_size': position_size,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'confidence': confidence,
+                        'trading_costs': trading_costs,
+                        'reason': f"Strong sell signal with reasonable costs ({trading_costs['total_cost_pct']:.3%})"
+                    }
+                else:
+                    return {
+                        'action': 'HOLD',
+                        'reason': f"High trading costs: {trading_costs['total_cost_pct']:.3%}"
+                    }
+            
+            return {
+                'action': 'HOLD',
+                'reason': f"Insufficient signal strength: confidence={confidence:.2f}, strength={signal_strength:.2f}"
+            }
             
         except Exception as e:
-            logger.error(f"❌ {symbol} decision execution error: {e}")
-            return {
-                'success': False,
-                'reason': f'Execution error: {str(e)}',
-                'execution_time': datetime.now()
-            }
+            logger.error(f"❌ Enhanced trading decision error: {e}")
+            return {'action': 'HOLD', 'reason': f'Decision error: {str(e)}'}
+    
+    def _calculate_dynamic_stop_loss(self, entry_price: float, action: str, volatility: float, 
+                                   trading_costs: Dict) -> float:
+        """Calculate dynamic stop loss with real-time adjustments"""
+        try:
+            # Base stop loss from config
+            base_stop_loss = self.risk_manager.default_stop_loss
+            
+            # Adjust based on volatility
+            volatility_adjustment = 1 + (volatility * 0.5)
+            adjusted_stop_loss = base_stop_loss * volatility_adjustment
+            
+            # Adjust based on trading costs
+            cost_adjustment = 1 + (trading_costs['total_cost_pct'] * 10)  # Increase stop loss for high costs
+            adjusted_stop_loss *= cost_adjustment
+            
+            # Calculate stop loss price
+            if action == 'BUY':
+                stop_loss_price = entry_price * (1 - adjusted_stop_loss)
+            else:  # SELL
+                stop_loss_price = entry_price * (1 + adjusted_stop_loss)
+            
+            return stop_loss_price
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic stop loss calculation error: {e}")
+            return entry_price * 0.98 if action == 'BUY' else entry_price * 1.02
+    
+    def _calculate_dynamic_take_profit(self, entry_price: float, action: str, volatility: float, 
+                                     trading_costs: Dict) -> float:
+        """Calculate dynamic take profit with real-time adjustments"""
+        try:
+            # Base take profit from config
+            base_take_profit = self.risk_manager.default_take_profit
+            
+            # Adjust based on volatility
+            volatility_adjustment = 1 + (volatility * 0.3)
+            adjusted_take_profit = base_take_profit * volatility_adjustment
+            
+            # Adjust based on trading costs (need higher profit to cover costs)
+            cost_adjustment = 1 + (trading_costs['total_cost_pct'] * 5)
+            adjusted_take_profit *= cost_adjustment
+            
+            # Calculate take profit price
+            if action == 'BUY':
+                take_profit_price = entry_price * (1 + adjusted_take_profit)
+            else:  # SELL
+                take_profit_price = entry_price * (1 - adjusted_take_profit)
+            
+            return take_profit_price
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic take profit calculation error: {e}")
+            return entry_price * 1.04 if action == 'BUY' else entry_price * 0.96
     
     async def _websocket_monitor(self):
         """Monitor WebSocket connections and handle reconnections"""
@@ -1572,46 +1683,3 @@ class LiveDataEngine:
         except Exception as e:
             logger.error(f"❌ Enhanced live status error: {e}")
             return {'status': 'ERROR', 'error': str(e)}
-    
-    async def _calculate_trading_costs(self, symbol: str, price: float, market_condition: Dict) -> Dict[str, Any]:
-        """Calculate trading costs including fees, slippage, and funding"""
-        try:
-            # Base trading fee (0.1% for spot trading)
-            trading_fee = 0.001
-            
-            # Dynamic slippage based on market conditions
-            volatility = market_condition.get('volatility', 0.5)
-            volume = market_condition.get('volume', 1000000)  # Default volume
-            
-            # Slippage increases with volatility and decreases with volume
-            base_slippage = 0.0005  # 0.05% base slippage
-            volatility_multiplier = 1 + (volatility * 2)  # 1x to 3x based on volatility
-            volume_multiplier = max(0.5, min(1.5, 1000000 / volume))  # 0.5x to 1.5x based on volume
-            
-            slippage = base_slippage * volatility_multiplier * volume_multiplier
-            
-            # Funding fee (for perpetual futures)
-            funding_fee = 0.0001  # 0.01% per 8 hours (simplified)
-            
-            # Total costs
-            total_cost_pct = trading_fee + slippage + funding_fee
-            
-            return {
-                'trading_fee': trading_fee,
-                'slippage': slippage,
-                'funding_fee': funding_fee,
-                'total_cost_pct': total_cost_pct,
-                'volatility_multiplier': volatility_multiplier,
-                'volume_multiplier': volume_multiplier
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Trading costs calculation error: {e}")
-            return {
-                'trading_fee': 0.001,
-                'slippage': 0.0005,
-                'funding_fee': 0.0001,
-                'total_cost_pct': 0.0016,
-                'volatility_multiplier': 1.0,
-                'volume_multiplier': 1.0
-            }
